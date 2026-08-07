@@ -1,0 +1,16 @@
+[case]
+name = "varb-lommel-2up-svc"
+domain = "svc"
+variant = "VARB"
+loadcase = "2UP"
+
+[inputs]
+# Paths are resolved relative to this configuration file unless absolute.
+simulation_hdf5 = "../artifacts/varb-lommel-2up-svc/result.h5"
+
+[outputs]
+directory = "../artifacts/varb-lommel-2up-svc/validation"
+
+[tools]
+res_converter = "adams-res"
+adm_generator = "../../adams-scripts/knc"
