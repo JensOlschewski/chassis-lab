@@ -7,6 +7,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from knc_validation.acd import AcdError, AcdFile, inspect_acd
+from knc_validation.config import CaseConfig, ConfigError, load_config
+from knc_validation.converter import ConversionError, convert_res
 from knc_validation.hdf5 import (
     AdamsHdf5,
     Hdf5FormatError,
@@ -64,6 +66,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="write JSON output"
     )
     list_acd_parser.set_defaults(handler=_list_acd_signals)
+
+    validate_parser = subparsers.add_parser(
+        "validate-config",
+        help="load and validate a TOML case configuration",
+    )
+    validate_parser.add_argument("path", type=Path, help="TOML config file")
+    validate_parser.add_argument(
+        "--json", action="store_true", help="write JSON output"
+    )
+    validate_parser.set_defaults(handler=_validate_config)
+
+    convert_parser = subparsers.add_parser(
+        "convert-res",
+        help="convert an Adams/Car .res result file to HDF5",
+    )
+    convert_parser.add_argument("input", type=Path, help="Adams/Car .res file")
+    convert_parser.add_argument(
+        "-o", "--output", type=Path, help="HDF5 output path"
+    )
+    convert_parser.add_argument(
+        "--binary",
+        default="adams-res",
+        help="converter binary path or name (default: adams-res)",
+    )
+    convert_parser.add_argument(
+        "-f", "--force", action="store_true", help="replace existing output"
+    )
+    convert_parser.set_defaults(handler=_convert_res)
     return parser
 
 
@@ -74,6 +104,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         FileNotFoundError,
         AcdError,
+        ConfigError,
+        ConversionError,
         Hdf5FormatError,
         SignalLookupError,
         OSError,
@@ -137,6 +169,78 @@ def _list_acd_signals(args: argparse.Namespace) -> int:
                 f"{signal.name}\t{signal.unit}\t{signal.offset}\t"
                 f"{signal.description}"
             )
+    return 0
+
+
+def _validate_config(args: argparse.Namespace) -> int:
+    config = load_config(args.path)
+
+    if args.json:
+        print(json.dumps(_config_as_dict(config), indent=2))
+    else:
+        print(f"Config: {config.path}")
+        print(f"Case: {config.name} ({config.domain}, {config.variant})")
+        print(f"Loadcase: {config.loadcase}")
+        print(f"Simulation: {config.simulation_hdf5}")
+        print(f"Gravity: {config.gravity}")
+        print(f"Signals: {len(config.signals)}")
+        _check_signals(config)
+    return 0
+
+
+def _config_as_dict(config: CaseConfig) -> dict[str, object]:
+    return {
+        "name": config.name,
+        "domain": config.domain,
+        "variant": config.variant,
+        "loadcase": config.loadcase,
+        "simulation_hdf5": str(config.simulation_hdf5),
+        "gravity": config.gravity,
+        "signals": [
+            {
+                "entity": ref.entity,
+                "component": ref.component,
+                "unit": ref.unit,
+            }
+            for ref in config.signals
+        ],
+    }
+
+
+def _check_signals(config: CaseConfig) -> None:
+    if not config.simulation_hdf5.is_file():
+        print(
+            "Note: simulation_hdf5 not present; skipped signal cross-check "
+            f"({config.simulation_hdf5})"
+        )
+        return
+    with AdamsHdf5(config.simulation_hdf5) as result:
+        for ref in config.signals:
+            try:
+                info = result.resolve_signal(ref.entity, ref.component)
+            except SignalLookupError as error:
+                print(f"  - {ref.entity}/{ref.component}: MISSING ({error})")
+                continue
+            if ref.unit and info.unit and ref.unit != info.unit:
+                print(
+                    f"  - {ref.entity}/{ref.component}: unit '{info.unit}' "
+                    f"!= configured '{ref.unit}'"
+                )
+            else:
+                print(
+                    f"  - {ref.entity}/{ref.component}: OK "
+                    f"[{info.unit or 'no unit'}]"
+                )
+
+
+def _convert_res(args: argparse.Namespace) -> int:
+    result = convert_res(
+        args.input,
+        output=args.output,
+        binary=args.binary,
+        force=args.force,
+    )
+    print(result.h5_path)
     return 0
 
 

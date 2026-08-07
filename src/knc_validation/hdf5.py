@@ -191,6 +191,11 @@ class AdamsHdf5:
         )
         return Signal(info=info, values=values)
 
+    def resolve_signal(self, entity: str, component: str) -> SignalInfo:
+        """Resolve an entity/component pair without loading its values."""
+        self._require_open()
+        return self._resolve_signal(entity, component)
+
     def _resolve_signal(self, entity: str, component: str) -> SignalInfo:
         component_matches = [
             info for info in self._signals if info.component == component
