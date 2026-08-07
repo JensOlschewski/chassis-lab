@@ -34,7 +34,29 @@ Inspect a converted Adams result:
 ```shell
 .venv/bin/knc inspect-h5 /path/to/result.h5
 .venv/bin/knc inspect-h5 /path/to/result.h5 --json
+.venv/bin/knc list-h5-signals /path/to/result.h5 --match svc_output
 ```
+
+Read only a required component column:
+
+```python
+from knc_validation.hdf5 import AdamsHdf5
+
+with AdamsHdf5("result.h5") as result:
+    wheel_load = result.read_signal(
+        "til_wheel_tire_forces",
+        "normal_front",
+        expected_unit="newton",
+    )
+
+print(wheel_load.values)
+```
+
+The reader indexes signal metadata when the file is opened, but numerical
+values are loaded only for requested entity/component pairs. A physical HDF5
+path such as `/results/til_wheel_tire_forces_2` can explicitly disambiguate
+duplicate Adams entity aliases when needed; mapping configuration should use
+the stable Adams entity name instead.
 
 Run development checks:
 
