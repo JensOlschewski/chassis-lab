@@ -1,7 +1,7 @@
 [case]
 name = "varb-lommel-2up-svc"
 domain = "svc"
-variant = "VARC"
+variant = "VARB"
 loadcase = "2UP"
 
 [inputs]
