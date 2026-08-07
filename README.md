@@ -77,6 +77,45 @@ The ACD reader detects the metadata boundary, encoding, channel order, units,
 and offsets. It preserves `NaN` and `Inf`; domain evaluators decide whether
 non-finite values are valid for channels they use.
 
+## Configuration
+
+Convert a `.res` result file to HDF5 and validate a case configuration:
+
+```shell
+.venv/bin/knc convert-res /path/to/result.res -o artifacts/svc/result.h5 \
+    --binary /path/to/adams-res
+.venv/bin/knc validate-config configs/varb-lommel-2up-svc.toml
+```
+
+A case TOML declares the case metadata, the simulation input, the gravitational
+constant, and a `[signals]` table mapping canonical names to HDF5 entities and
+components:
+
+```toml
+[case]
+name = "varb-lommel-2up-svc"
+domain = "svc"
+variant = "VARB"
+loadcase = "2UP"
+
+[inputs]
+simulation_hdf5 = "../artifacts/varb-lommel-2up-svc/result.h5"
+
+[physics]
+gravity = 9.80665 # m/s^2
+
+[signals.front_left_wheel_load]
+entity = "til_wheel_tire_forces"
+component = "normal_front"
+unit = "newton"
+```
+
+Paths in `[inputs]` are resolved relative to the configuration file, so runs
+never depend on the current working directory. Signals whose entity shares a
+source path with another axis (such as the rear wheel-tire forces) must be
+pinned to their explicit `/results/<group>` path in `[signals]`.
+`validate-config` re-checks every mapping against the HDF5 file when present.
+
 Run development checks:
 
 ```shell

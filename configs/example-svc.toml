@@ -1,16 +1,35 @@
 [case]
-name = "varb-lommel-2up-svc"
+name = "varb-lommel-2up-svc-example"
 domain = "svc"
 variant = "VARB"
 loadcase = "2UP"
 
 [inputs]
-# Paths are resolved relative to this configuration file unless absolute.
-simulation_hdf5 = "../artifacts/varb-lommel-2up-svc/result.h5"
+# Relative paths are resolved against this file; absolute paths are used as-is.
+simulation_hdf5 = "../artifacts/example/result.h5"
 
-[outputs]
-directory = "../artifacts/varb-lommel-2up-svc/validation"
+[physics]
+gravity = 9.80665 # m/s^2
 
-[tools]
-res_converter = "adams-res"
-adm_generator = "../../adams-scripts/knc"
+[signals]
+# Every canonical signal maps to an HDF5 entity and component. Signals sharing
+# an entity's source path on different axes must pin the explicit /results/group.
+front_left_wheel_load = { entity = "til_wheel_tire_forces", component = "normal_front", unit = "newton" }
+front_right_wheel_load = { entity = "tir_wheel_tire_forces", component = "normal_front", unit = "newton" }
+rear_left_wheel_load = { entity = "/results/til_wheel_tire_forces_2", component = "normal_rear", unit = "newton" }
+rear_right_wheel_load = { entity = "/results/tir_wheel_tire_forces_2", component = "normal_rear", unit = "newton" }
+
+front_left_ride_height = { entity = "ride_heights", component = "ride_height_front_left", unit = "mm" }
+front_right_ride_height = { entity = "ride_heights", component = "ride_height_front_right", unit = "mm" }
+rear_left_ride_height = { entity = "ride_heights", component = "ride_height_rear_left", unit = "mm" }
+rear_right_ride_height = { entity = "ride_heights", component = "ride_height_rear_right", unit = "mm" }
+
+wheelbase = { entity = "svc_output", component = "Wheelbase", unit = "mm" }
+front_track = { entity = "svc_output", component = "front_track", unit = "mm" }
+rear_track = { entity = "svc_output", component = "rear_track", unit = "mm" }
+cg_height = { entity = "svc_output", component = "CG_height", unit = "mm" }
+inertia_xx = { entity = "svc_output", component = "IXX", unit = "kg*mm^2" }
+inertia_yy = { entity = "svc_output", component = "IYY", unit = "kg*mm^2" }
+inertia_zz = { entity = "svc_output", component = "IZZ", unit = "kg*mm^2" }
+
+gyro_x = { entity = "testrig.ges_gyro", component = "X", unit = "mm" }
