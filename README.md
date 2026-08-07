@@ -58,6 +58,25 @@ path such as `/results/til_wheel_tire_forces_2` can explicitly disambiguate
 duplicate Adams entity aliases when needed; mapping configuration should use
 the stable Adams entity name instead.
 
+Inspect and query a Lommel ACD measurement:
+
+```shell
+.venv/bin/knc inspect-acd /path/to/measurement.acd
+.venv/bin/knc list-acd-signals /path/to/measurement.acd --match lfwcz
+```
+
+```python
+from knc_validation.acd import AcdFile
+
+measurement = AcdFile("measurement.acd")
+signals = measurement.read_signals(("time", "lfwcz"))
+wheel_travel = signals["lfwcz"]
+```
+
+The ACD reader detects the metadata boundary, encoding, channel order, units,
+and offsets. It preserves `NaN` and `Inf`; domain evaluators decide whether
+non-finite values are valid for channels they use.
+
 Run development checks:
 
 ```shell
