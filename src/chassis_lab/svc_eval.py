@@ -31,6 +31,7 @@ class SvcLoadResult:
     total_mass_kg: float
     distribution_percent: dict[str, float]
     signals: tuple[TransformedSignal, ...]
+    sample_index: int
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -39,11 +40,42 @@ class SvcLoadResult:
             "total_mass_kg": self.total_mass_kg,
             "distribution_percent": self.distribution_percent,
             "signals": [signal.as_dict() for signal in self.signals],
+            "sample_index": self.sample_index,
         }
 
 
-def evaluate_svc_loads(config: CaseConfig | Path | str) -> SvcLoadResult:
-    """Calculate SVC wheel loads, axle loads, mass, and distribution."""
+@dataclass(frozen=True)
+class SvcGeometryResult:
+    """SVC static geometry, center of gravity, and inertia values."""
+
+    loads: SvcLoadResult
+    ride_heights_mm: dict[str, float]
+    wheelbase_mm: float
+    tracks_mm: dict[str, float]
+    cg_coordinates_mm: dict[str, float]
+    inertias_kg_mm2: dict[str, float]
+    signals: tuple[TransformedSignal, ...]
+    sample_index: int
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "loads": self.loads.as_dict(),
+            "ride_heights_mm": self.ride_heights_mm,
+            "wheelbase_mm": self.wheelbase_mm,
+            "tracks_mm": self.tracks_mm,
+            "cg_coordinates_mm": self.cg_coordinates_mm,
+            "inertias_kg_mm2": self.inertias_kg_mm2,
+            "signals": [signal.as_dict() for signal in self.signals],
+            "sample_index": self.sample_index,
+        }
+
+
+def evaluate_svc_loads(
+    config: CaseConfig | Path | str,
+    *,
+    sample_index: int = -1,
+) -> SvcLoadResult:
+    """Calculate SVC values; ``-1`` means static final sample."""
     case = load_config(config) if not isinstance(config, CaseConfig) else config
     if case.domain != "svc":
         raise SvcEvaluationError(
@@ -60,11 +92,12 @@ def evaluate_svc_loads(config: CaseConfig | Path | str) -> SvcLoadResult:
                 raise SvcEvaluationError(
                     f"missing SVC wheel-load mapping: {name}"
                 ) from error
-            signal = result.read_signal(
-                reference.entity,
-                reference.component,
-                expected_unit=reference.unit,
-            )
+            signal = result.read_signal(reference.entity, reference.component)
+            if signal.unit and signal.unit != reference.unit:
+                raise SvcEvaluationError(
+                    f"{name}: source unit '{signal.unit}' "
+                    f"!= configured '{reference.unit}'"
+                )
             transformed.append(
                 apply_convention(
                     signal.values,
@@ -75,7 +108,10 @@ def evaluate_svc_loads(config: CaseConfig | Path | str) -> SvcLoadResult:
                 )
             )
 
-    wheel_loads = {signal.name: _final_value(signal) for signal in transformed}
+    wheel_loads = {
+        signal.name: _sample_value(signal, sample_index)
+        for signal in transformed
+    }
     axle_loads = {
         "front": wheel_loads["front_left_wheel_load"]
         + wheel_loads["front_right_wheel_load"],
@@ -97,17 +133,112 @@ def evaluate_svc_loads(config: CaseConfig | Path | str) -> SvcLoadResult:
         total_mass_kg=total_mass,
         distribution_percent=distribution,
         signals=tuple(transformed),
+        sample_index=sample_index,
     )
 
 
-def _final_value(signal: TransformedSignal) -> float:
+def evaluate_svc_geometry(
+    config: CaseConfig | Path | str,
+    *,
+    sample_index: int = -1,
+) -> SvcGeometryResult:
+    """Calculate SVC static geometry and inertia at selected sample."""
+    case = load_config(config) if not isinstance(config, CaseConfig) else config
+    if case.domain != "svc":
+        raise SvcEvaluationError(
+            f"SVC evaluator requires domain 'svc', found '{case.domain}'"
+        )
+    loads = evaluate_svc_loads(case, sample_index=sample_index)
+    transformed: list[TransformedSignal] = []
+    names = (
+        "front_left_ride_height",
+        "front_right_ride_height",
+        "rear_left_ride_height",
+        "rear_right_ride_height",
+        "wheelbase",
+        "front_track",
+        "rear_track",
+        "cg_height",
+        "inertia_xx",
+        "inertia_yy",
+        "inertia_zz",
+        "front_left_wheel_center_x",
+    )
+    with AdamsHdf5(case.simulation_hdf5) as result:
+        for name in names:
+            try:
+                reference = case.signal(name)
+                convention = SVC_SIGNAL_CONVENTIONS[name]
+            except KeyError as error:
+                raise SvcEvaluationError(
+                    f"missing SVC geometry mapping: {name}"
+                ) from error
+            signal = result.read_signal(reference.entity, reference.component)
+            if signal.unit and signal.unit != reference.unit:
+                raise SvcEvaluationError(
+                    f"{name}: source unit '{signal.unit}' "
+                    f"!= configured '{reference.unit}'"
+                )
+            transformed.append(
+                apply_convention(
+                    signal.values,
+                    name=name,
+                    source=f"{case.simulation_hdf5}:{signal.entity}/{signal.component}",
+                    convention=convention,
+                    gravity=case.gravity,
+                )
+            )
+
+    values = {
+        signal.name: _sample_value(signal, sample_index)
+        for signal in transformed
+    }
+    ride_heights = {
+        name.removesuffix("_ride_height"): values[name] for name in names[:4]
+    }
+    wheelbase = values["wheelbase"]
+    if wheelbase <= 0:
+        raise SvcEvaluationError(
+            f"wheelbase must be positive, found {wheelbase}"
+        )
+    cg_x = (
+        values["front_left_wheel_center_x"]
+        + loads.distribution_percent["rear"] / 100.0 * wheelbase
+    )
+    return SvcGeometryResult(
+        loads=loads,
+        ride_heights_mm=ride_heights,
+        wheelbase_mm=wheelbase,
+        tracks_mm={
+            "front": values["front_track"],
+            "rear": values["rear_track"],
+        },
+        cg_coordinates_mm={"x": cg_x, "z": values["cg_height"]},
+        inertias_kg_mm2={
+            "xx": values["inertia_xx"],
+            "yy": values["inertia_yy"],
+            "zz": values["inertia_zz"],
+        },
+        signals=tuple(transformed),
+        sample_index=sample_index,
+    )
+
+
+def _sample_value(signal: TransformedSignal, sample_index: int) -> float:
     if signal.values.size == 0:
         raise SvcEvaluationError(
             f"SVC signal '{signal.name}' contains no values"
         )
-    value = float(signal.values[-1])
+    try:
+        value = float(signal.values[sample_index])
+    except IndexError as error:
+        raise SvcEvaluationError(
+            f"sample index {sample_index} is outside signal "
+            f"'{signal.name}' with {signal.values.size} samples"
+        ) from error
     if not np.isfinite(value):
         raise SvcEvaluationError(
-            f"final SVC signal '{signal.name}' must be finite, found {value}"
+            f"SVC signal '{signal.name}' at sample {sample_index} must be "
+            f"finite, found {value}"
         )
     return value

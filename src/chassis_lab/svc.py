@@ -48,6 +48,10 @@ SVC_SIGNAL_MAPPING: tuple[tuple[str, SignalRef], ...] = (
     ("inertia_yy", SignalRef("svc_output", "IYY", "kg*mm^2")),
     ("inertia_zz", SignalRef("svc_output", "IZZ", "kg*mm^2")),
     ("gyro_x", SignalRef("testrig.ges_gyro", "X", "mm")),
+    (
+        "front_left_wheel_center_x",
+        SignalRef("B479_FDJ3_16z_front_whl.whl_wheel", "X", "mm"),
+    ),
 )
 
 
@@ -128,6 +132,9 @@ SVC_SIGNAL_CONVENTIONS: dict[str, SignalConvention] = {
         baseline=BaselinePolicy.STATIC_SIMULATION,
     ),
     "gyro_x": SignalConvention(
+        unit="mm", source_unit="mm", baseline=BaselinePolicy.STATIC_SIMULATION
+    ),
+    "front_left_wheel_center_x": SignalConvention(
         unit="mm", source_unit="mm", baseline=BaselinePolicy.STATIC_SIMULATION
     ),
 }

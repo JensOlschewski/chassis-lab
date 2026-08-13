@@ -93,6 +93,11 @@ The `create-run` command currently creates the run directory and `run.json`.
 Metrics, reports, and figures are added by domain evaluators later; manifest
 creation does not imply that those outputs exist yet.
 
+SVC static evaluators use final HDF5 sample by default because Adams static
+equilibrium is expected at the end of the event. The SVC longitudinal
+coordinate uses front-left wheel-center X as origin; CG-X is that origin plus
+rear axle mass fraction times wheelbase. Values remain unrounded internally.
+
 ## External-tool integration
 
 The tools are configured by executable path, with command discovery through
