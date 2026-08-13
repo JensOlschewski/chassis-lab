@@ -3,14 +3,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from knc_validation.acd import (
+from chassis_lab.acd import (
     AcdFile,
     AcdFormatError,
     AcdSignalNotFoundError,
     AcdSignalUnitError,
     inspect_acd,
 )
-from knc_validation.cli import main
+from chassis_lab.cli import main
 
 
 def write_acd(

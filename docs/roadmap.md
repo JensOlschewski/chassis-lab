@@ -1,4 +1,4 @@
-# KnC Validation Roadmap
+# ChassisLab Roadmap
 
 The rewrite is incremental. Existing MATLAB output remains the historical
 reference until a domain reaches reviewed Python parity. Known MATLAB corner

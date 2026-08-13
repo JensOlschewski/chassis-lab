@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from knc_validation.conventions import (
+from chassis_lab.conventions import (
     BaselinePolicy,
     ConventionError,
     Corner,
@@ -9,7 +9,7 @@ from knc_validation.conventions import (
     apply_convention,
     convert_values,
 )
-from knc_validation.svc import SVC_SIGNAL_CONVENTIONS, SVC_SIGNAL_MAPPING
+from chassis_lab.svc import SVC_SIGNAL_CONVENTIONS, SVC_SIGNAL_MAPPING
 
 
 def test_svc_mapping_has_one_convention_per_signal() -> None:

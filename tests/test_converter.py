@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from knc_validation.converter import ConversionError, convert_res
+from chassis_lab.converter import ConversionError, convert_res
 
 
 def make_fake_converter(path: Path, exit_code: int = 0) -> Path:

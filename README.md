@@ -1,7 +1,7 @@
-# KnC Validation
+# ChassisLab
 
-Python tooling for comparing Adams/Car KnC simulations with physical KnC
-measurements. This repository contains analysis code only. Model data,
+Python tooling for analyzing vehicle multibody simulations and comparing them
+with physical measurements. This repository contains analysis code only. Model data,
 measurements, and generated solver results remain outside this repository.
 
 ## Pipeline
@@ -32,15 +32,15 @@ python3 -m venv .venv
 Inspect a converted Adams result:
 
 ```shell
-.venv/bin/knc inspect-h5 /path/to/result.h5
-.venv/bin/knc inspect-h5 /path/to/result.h5 --json
-.venv/bin/knc list-h5-signals /path/to/result.h5 --match svc_output
+.venv/bin/clab inspect-h5 /path/to/result.h5
+.venv/bin/clab inspect-h5 /path/to/result.h5 --json
+.venv/bin/clab list-h5-signals /path/to/result.h5 --match svc_output
 ```
 
 Read only a required component column:
 
 ```python
-from knc_validation.hdf5 import AdamsHdf5
+from chassis_lab.hdf5 import AdamsHdf5
 
 with AdamsHdf5("result.h5") as result:
     wheel_load = result.read_signal(
@@ -61,12 +61,12 @@ the stable Adams entity name instead.
 Inspect and query a Lommel ACD measurement:
 
 ```shell
-.venv/bin/knc inspect-acd /path/to/measurement.acd
-.venv/bin/knc list-acd-signals /path/to/measurement.acd --match lfwcz
+.venv/bin/clab inspect-acd /path/to/measurement.acd
+.venv/bin/clab list-acd-signals /path/to/measurement.acd --match lfwcz
 ```
 
 ```python
-from knc_validation.acd import AcdFile
+from chassis_lab.acd import AcdFile
 
 measurement = AcdFile("measurement.acd")
 signals = measurement.read_signals(("time", "lfwcz"))
@@ -82,14 +82,14 @@ non-finite values are valid for channels they use.
 Convert a `.res` result file to HDF5 and validate a case configuration:
 
 ```shell
-.venv/bin/knc convert-res /path/to/result.res -o artifacts/svc/result.h5 \
+.venv/bin/clab convert-res /path/to/result.res -o artifacts/svc/result.h5 \
     --binary /path/to/adams-res
-.venv/bin/knc validate-config configs/varb-lommel-2up-svc.toml
+.venv/bin/clab validate-config configs/varb-lommel-2up-svc.toml
 ```
 
 A case TOML declares the case metadata, simulation input, and gravitational
 constant. SVC cases inherit one shared canonical signal mapping from
-`knc_validation.svc`, so VARB/VARC and loadcase files do not duplicate mappings:
+`chassis_lab.svc`, so VARB/VARC and loadcase files do not duplicate mappings:
 
 ```toml
 [case]
@@ -118,7 +118,7 @@ metadata.
 
 ## Conventions
 
-`knc_validation.conventions` is shared by domain evaluators. It defines
+`chassis_lab.conventions` is shared by domain evaluators. It defines
 canonical corners, baseline policies, explicit scale/sign rules, and supported
 unit conversions. `apply_convention` returns values together with source,
 original unit, target unit, corner, baseline, scale, and sign provenance.
@@ -139,7 +139,7 @@ Run development checks:
 
 - `adams-res-cli` owns `.res` parsing and the HDF5 format.
 - `adams-scripts` owns generation of event-specific Adams input/control files.
-- `knc-validation` owns measurement import, signal conventions, calculations,
+- `chassis-lab` owns measurement import, signal conventions, calculations,
   comparisons, plots, reports, and acceptance criteria.
 - Source data is read-only. Generated files are written below `artifacts/` and
   are not committed.

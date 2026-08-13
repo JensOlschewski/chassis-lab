@@ -1,4 +1,4 @@
-"""Load and validate TOML case configuration for KnC validation."""
+"""Load and validate TOML case configuration for ChassisLab."""
 
 import tomllib
 from dataclasses import dataclass
@@ -103,7 +103,7 @@ def load_config(path: Path | str) -> CaseConfig:
     if signals is None:
         if domain != "svc":
             raise ConfigError("[signals] is required outside the svc domain")
-        from knc_validation.svc import SVC_SIGNAL_MAPPING
+        from chassis_lab.svc import SVC_SIGNAL_MAPPING
 
         refs = SVC_SIGNAL_MAPPING
     else:

@@ -1,4 +1,4 @@
-"""Command-line interface for KnC validation."""
+"""Command-line interface for ChassisLab."""
 
 import argparse
 import json
@@ -6,10 +6,10 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from knc_validation.acd import AcdError, AcdFile, inspect_acd
-from knc_validation.config import CaseConfig, ConfigError, load_config
-from knc_validation.converter import ConversionError, convert_res
-from knc_validation.hdf5 import (
+from chassis_lab.acd import AcdError, AcdFile, inspect_acd
+from chassis_lab.config import CaseConfig, ConfigError, load_config
+from chassis_lab.converter import ConversionError, convert_res
+from chassis_lab.hdf5 import (
     AdamsHdf5,
     Hdf5FormatError,
     SignalLookupError,
@@ -19,9 +19,9 @@ from knc_validation.hdf5 import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="knc",
+        prog="clab",
         description=(
-            "Validate Adams/Car KnC results against physical measurements"
+            "Analyze and validate vehicle multibody simulation results"
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

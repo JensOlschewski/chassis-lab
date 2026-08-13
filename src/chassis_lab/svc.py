@@ -1,7 +1,7 @@
 """Canonical SVC simulation signal mapping."""
 
-from knc_validation.config import SignalRef
-from knc_validation.conventions import (
+from chassis_lab.config import SignalRef
+from chassis_lab.conventions import (
     BaselinePolicy,
     Corner,
     SignalConvention,

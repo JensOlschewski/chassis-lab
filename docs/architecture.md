@@ -8,7 +8,7 @@ The KnC workflow consists of independently testable stages:
    exported model.
 2. Adams 2019.2 executes the event and creates a text `.res` file.
 3. `adams-res-cli` converts `.res` to HDF5.
-4. `knc-validation` imports HDF5 and physical `.acd` measurements, applies
+4. `chassis-lab` imports HDF5 and physical `.acd` measurements, applies
    documented conventions, and creates validation outputs.
 
 This project does not parse `.res`, edit Adams model databases, or own the
@@ -66,7 +66,7 @@ Conversions and sign changes belong in configuration/convention code, not in
 plotting functions. This prevents repetition of the current MATLAB right-side
 toe inversions and mixed radian/degree or Nm/Nmm conversions.
 
-`knc_validation.conventions` owns these transformations. It rejects missing
+`chassis_lab.conventions` owns these transformations. It rejects missing
 source units, applies only declared conversions, and returns transformed values
 with source, original unit, target unit, corner, baseline, scale, and sign
 provenance. Empty units in legacy HDF5 metadata are therefore unverified, not

@@ -4,8 +4,8 @@ import h5py
 import numpy as np
 import pytest
 
-from knc_validation.cli import main
-from knc_validation.hdf5 import (
+from chassis_lab.cli import main
+from chassis_lab.hdf5 import (
     AdamsHdf5,
     AmbiguousSignalError,
     Hdf5FormatError,

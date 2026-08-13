@@ -11,4 +11,4 @@ simulation_hdf5 = "../artifacts/example/result.h5"
 [physics]
 gravity = 9.80665 # m/s^2
 
-# SVC uses shared canonical signal mapping from knc_validation.svc.
+# SVC uses shared canonical signal mapping from chassis_lab.svc.
