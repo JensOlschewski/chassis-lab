@@ -223,6 +223,42 @@ def test_cli_validates_config_cross_checks_signals(tmp_path: Path) -> None:
     assert main(["validate-config", str(path)]) == 0
 
 
+def test_cli_marks_missing_source_unit_unverified(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    h5 = tmp_path / "sub" / "result.h5"
+    write_hdf5_with_entity(
+        h5,
+        "til_wheel_tire_forces",
+        source_path="til_wheel_tire_forces",
+        component="normal_front",
+        unit="",
+    )
+    content = VALID_TOML.split("[signals.rear", 1)[0]
+    path = write_config(tmp_path, content)
+
+    assert main(["validate-config", str(path)]) == 0
+    assert "UNVERIFIED [newton]" in capsys.readouterr().out
+
+
+def test_cli_strict_units_rejects_missing_source_unit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    h5 = tmp_path / "sub" / "result.h5"
+    write_hdf5_with_entity(
+        h5,
+        "til_wheel_tire_forces",
+        source_path="til_wheel_tire_forces",
+        component="normal_front",
+        unit="",
+    )
+    content = VALID_TOML.split("[signals.rear", 1)[0]
+    path = write_config(tmp_path, content)
+
+    assert main(["validate-config", str(path), "--strict-units"]) == 2
+    assert "source unit missing" in capsys.readouterr().err
+
+
 def test_cli_rejects_duplicate_resolved_cells(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

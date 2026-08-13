@@ -110,7 +110,11 @@ never depend on the current working directory. Signals whose entity shares a
 source path with another axis (such as the rear wheel-tire forces) must be
 pinned to their explicit `/results/<group>` path in `[signals]`.
 `validate-config` re-checks every shared mapping against the HDF5 file when
-present, including source units and duplicate-cell detection.
+present, including source units and duplicate-cell detection. It reports
+`VERIFIED` for matching source metadata, `UNVERIFIED` when legacy HDF5 omits a
+source unit but the configured physical unit is known, and `ERROR` for missing
+signals or mismatched units. Add `--strict-units` to reject missing source
+metadata.
 
 Run development checks:
 
