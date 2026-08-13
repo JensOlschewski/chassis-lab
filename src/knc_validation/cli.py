@@ -75,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument(
         "--json", action="store_true", help="write JSON output"
     )
+    validate_parser.add_argument(
+        "--strict-units",
+        action="store_true",
+        help="fail when source unit metadata is missing",
+    )
     validate_parser.set_defaults(handler=_validate_config)
 
     convert_parser = subparsers.add_parser(
@@ -176,6 +181,7 @@ def _validate_config(args: argparse.Namespace) -> int:
     config = load_config(args.path)
 
     if args.json:
+        _check_signals(config, quiet=True, strict_units=args.strict_units)
         print(json.dumps(_config_as_dict(config), indent=2))
     else:
         print(f"Config: {config.path}")
@@ -184,7 +190,7 @@ def _validate_config(args: argparse.Namespace) -> int:
         print(f"Simulation: {config.simulation_hdf5}")
         print(f"Gravity: {config.gravity}")
         print(f"Signals: {len(config.signals)}")
-        _check_signals(config)
+        _check_signals(config, strict_units=args.strict_units)
     return 0
 
 
@@ -198,39 +204,70 @@ def _config_as_dict(config: CaseConfig) -> dict[str, object]:
         "gravity": config.gravity,
         "signals": [
             {
+                "canonical": canonical,
                 "entity": ref.entity,
                 "component": ref.component,
                 "unit": ref.unit,
             }
-            for ref in config.signals
+            for canonical, ref in config.signals
         ],
     }
 
 
-def _check_signals(config: CaseConfig) -> None:
+def _check_signals(
+    config: CaseConfig,
+    *,
+    quiet: bool = False,
+    strict_units: bool = False,
+) -> None:
     if not config.simulation_hdf5.is_file():
-        print(
-            "Note: simulation_hdf5 not present; skipped signal cross-check "
-            f"({config.simulation_hdf5})"
-        )
+        if not quiet:
+            print(
+                "Note: simulation_hdf5 not present; skipped signal "
+                f"cross-check ({config.simulation_hdf5})"
+            )
         return
     with AdamsHdf5(config.simulation_hdf5) as result:
-        for ref in config.signals:
+        errors: list[str] = []
+        resolved: set[tuple[str, int]] = set()
+        for canonical, ref in config.signals:
             try:
                 info = result.resolve_signal(ref.entity, ref.component)
             except SignalLookupError as error:
-                print(f"  - {ref.entity}/{ref.component}: MISSING ({error})")
+                errors.append(f"{canonical}: {error}")
+                if not quiet:
+                    print(f"  - {canonical}: ERROR ({error})")
                 continue
-            if ref.unit and info.unit and ref.unit != info.unit:
-                print(
-                    f"  - {ref.entity}/{ref.component}: unit '{info.unit}' "
+            if info.unit and info.unit != ref.unit:
+                errors.append(
+                    f"{canonical}: source unit '{info.unit}' "
                     f"!= configured '{ref.unit}'"
                 )
-            else:
-                print(
-                    f"  - {ref.entity}/{ref.component}: OK "
-                    f"[{info.unit or 'no unit'}]"
+                if not quiet:
+                    print(
+                        f"  - {canonical}: ERROR, source unit '{info.unit}' "
+                        f"!= configured '{ref.unit}'"
+                    )
+            elif not info.unit:
+                message = (
+                    f"{canonical}: source unit missing; expected '{ref.unit}'"
                 )
+                if strict_units:
+                    errors.append(message)
+                    status = "ERROR"
+                else:
+                    status = "UNVERIFIED"
+                if not quiet:
+                    print(f"  - {canonical}: {status} [{ref.unit}]")
+            else:
+                if not quiet:
+                    print(f"  - {canonical}: VERIFIED [{info.unit}]")
+            cell = (info.group_name, info.column)
+            if cell in resolved:
+                errors.append(f"{canonical}: duplicate HDF5 cell {cell}")
+            resolved.add(cell)
+        if errors:
+            raise ConfigError("signal mapping invalid: " + "; ".join(errors))
 
 
 def _convert_res(args: argparse.Namespace) -> int:
