@@ -15,6 +15,7 @@ from chassis_lab.hdf5 import (
     SignalLookupError,
     inspect_hdf5,
 )
+from chassis_lab.runs import RunError, create_run
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,6 +100,17 @@ def build_parser() -> argparse.ArgumentParser:
         "-f", "--force", action="store_true", help="replace existing output"
     )
     convert_parser.set_defaults(handler=_convert_res)
+
+    run_parser = subparsers.add_parser(
+        "create-run",
+        help="create an isolated run directory and provenance manifest",
+    )
+    run_parser.add_argument("path", type=Path, help="TOML config file")
+    run_parser.add_argument(
+        "--artifacts-root", type=Path, help="root directory for run artifacts"
+    )
+    run_parser.add_argument("--run-id", help="explicit run ID")
+    run_parser.set_defaults(handler=_create_run)
     return parser
 
 
@@ -113,6 +125,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ConversionError,
         Hdf5FormatError,
         SignalLookupError,
+        RunError,
         OSError,
     ) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -278,6 +291,16 @@ def _convert_res(args: argparse.Namespace) -> int:
         force=args.force,
     )
     print(result.h5_path)
+    return 0
+
+
+def _create_run(args: argparse.Namespace) -> int:
+    run_dir = create_run(
+        args.path,
+        artifacts_root=args.artifacts_root,
+        run_id=args.run_id,
+    )
+    print(run_dir)
     return 0
 
 

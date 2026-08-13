@@ -89,6 +89,10 @@ artifacts/<case>/<run-id>/
 configuration, HDF5 format version, converter version when available, and KnC
 validation version. Inputs are never overwritten.
 
+The `create-run` command currently creates the run directory and `run.json`.
+Metrics, reports, and figures are added by domain evaluators later; manifest
+creation does not imply that those outputs exist yet.
+
 ## External-tool integration
 
 The tools are configured by executable path, with command discovery through

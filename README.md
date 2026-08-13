@@ -87,6 +87,17 @@ Convert a `.res` result file to HDF5 and validate a case configuration:
 .venv/bin/clab validate-config configs/varb-lommel-2up-svc.toml
 ```
 
+Create an isolated, auditable run manifest:
+
+```shell
+.venv/bin/clab create-run configs/varb-lommel-2up-svc.toml
+```
+
+This validates the configured HDF5 input and writes `run.json` below
+`artifacts/<case>/<run-id>/`. The manifest records resolved inputs, SHA-256
+checksums, configuration, HDF5 metadata, software versions, and Git revision.
+Run creation never overwrites source inputs or existing run directories.
+
 A case TOML declares the case metadata, simulation input, and gravitational
 constant. SVC cases inherit one shared canonical signal mapping from
 `chassis_lab.svc`, so VARB/VARC and loadcase files do not duplicate mappings:
