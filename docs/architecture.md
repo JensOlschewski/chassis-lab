@@ -66,6 +66,12 @@ Conversions and sign changes belong in configuration/convention code, not in
 plotting functions. This prevents repetition of the current MATLAB right-side
 toe inversions and mixed radian/degree or Nm/Nmm conversions.
 
+`knc_validation.conventions` owns these transformations. It rejects missing
+source units, applies only declared conversions, and returns transformed values
+with source, original unit, target unit, corner, baseline, scale, and sign
+provenance. Empty units in legacy HDF5 metadata are therefore unverified, not
+implicitly converted.
+
 ## Outputs
 
 Every run writes to a new directory under `artifacts/`:
