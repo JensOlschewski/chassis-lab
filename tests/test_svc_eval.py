@@ -5,7 +5,11 @@ import numpy as np
 import pytest
 
 from chassis_lab.config import load_config
-from chassis_lab.svc_eval import SvcEvaluationError, evaluate_svc_loads
+from chassis_lab.svc_eval import (
+    SvcEvaluationError,
+    evaluate_svc_geometry,
+    evaluate_svc_loads,
+)
 
 CONFIG = """\
 [case]
@@ -70,6 +74,105 @@ def write_fixture(tmp_path: Path, values: np.ndarray) -> Path:
     return config_path
 
 
+def write_geometry_fixture(tmp_path: Path) -> Path:
+    config_path = write_fixture(
+        tmp_path, np.asarray([[100.0] * 4, [100.0] * 4])
+    )
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+[signals.front_left_ride_height]
+entity = "ride_heights"
+component = "front_left"
+unit = "mm"
+[signals.front_right_ride_height]
+entity = "ride_heights"
+component = "front_right"
+unit = "mm"
+[signals.rear_left_ride_height]
+entity = "ride_heights"
+component = "rear_left"
+unit = "mm"
+[signals.rear_right_ride_height]
+entity = "ride_heights"
+component = "rear_right"
+unit = "mm"
+[signals.wheelbase]
+entity = "svc_output"
+component = "wheelbase"
+unit = "mm"
+[signals.front_track]
+entity = "svc_output"
+component = "front_track"
+unit = "mm"
+[signals.rear_track]
+entity = "svc_output"
+component = "rear_track"
+unit = "mm"
+[signals.cg_height]
+entity = "svc_output"
+component = "cg_height"
+unit = "mm"
+[signals.inertia_xx]
+entity = "svc_output"
+component = "ixx"
+unit = "kg*mm^2"
+[signals.inertia_yy]
+entity = "svc_output"
+component = "iyy"
+unit = "kg*mm^2"
+[signals.inertia_zz]
+entity = "svc_output"
+component = "izz"
+unit = "kg*mm^2"
+[signals.front_left_wheel_center_x]
+entity = "front_wheel"
+component = "x"
+unit = "mm"
+""",
+        encoding="utf-8",
+    )
+    with h5py.File(tmp_path / "result.h5", "a") as h5:
+        results = h5["results"]
+        string_dtype = h5py.string_dtype(encoding="utf-8")
+        metadata = {
+            "ride_heights": (
+                ["front_left", "front_right", "rear_left", "rear_right"],
+                [10.0, 11.0, 12.0, 13.0],
+                ["mm"] * 4,
+            ),
+            "svc_output": (
+                [
+                    "wheelbase",
+                    "front_track",
+                    "rear_track",
+                    "cg_height",
+                    "ixx",
+                    "iyy",
+                    "izz",
+                ],
+                [2800.0, 1600.0, 1580.0, 700.0, 1.0, 2.0, 3.0],
+                ["mm"] * 4 + ["kg*mm^2"] * 3,
+            ),
+            "front_wheel": (["x"], [1000.0], ["mm"]),
+        }
+        h5.attrs["signal_count"] = 16
+        for group_name, (components, row, units) in metadata.items():
+            group = results.create_group(group_name)
+            group.create_dataset("values", data=np.asarray([row, row]))
+            group.create_dataset(
+                "component_names",
+                data=np.asarray(components, dtype=string_dtype),
+            )
+            group.create_dataset(
+                "units", data=np.asarray(units, dtype=string_dtype)
+            )
+            group.create_dataset(
+                "adams_ids", data=np.arange(len(components), dtype=np.uint64)
+            )
+    return config_path
+
+
 def test_evaluates_final_wheel_loads_and_distribution(tmp_path: Path) -> None:
     config_path = write_fixture(
         tmp_path,
@@ -87,6 +190,24 @@ def test_evaluates_final_wheel_loads_and_distribution(tmp_path: Path) -> None:
     assert result.axle_loads_kg == {"front": 30.0, "rear": 70.0}
     assert result.total_mass_kg == 100.0
     assert result.distribution_percent == {"front": 30.0, "rear": 70.0}
+
+
+def test_evaluates_static_geometry_from_final_sample(tmp_path: Path) -> None:
+    config_path = write_geometry_fixture(tmp_path)
+
+    result = evaluate_svc_geometry(config_path)
+
+    assert result.sample_index == -1
+    assert result.ride_heights_mm == {
+        "front_left": 10.0,
+        "front_right": 11.0,
+        "rear_left": 12.0,
+        "rear_right": 13.0,
+    }
+    assert result.wheelbase_mm == 2800.0
+    assert result.tracks_mm == {"front": 1600.0, "rear": 1580.0}
+    assert result.cg_coordinates_mm == {"x": 2400.0, "z": 700.0}
+    assert result.inertias_kg_mm2 == {"xx": 1.0, "yy": 2.0, "zz": 3.0}
 
 
 def test_preserves_signal_provenance_and_accepts_loaded_config(

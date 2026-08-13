@@ -91,7 +91,7 @@ def test_svc_uses_shared_mapping_when_signals_are_omitted(
     content = VALID_TOML.split("[signals]", 1)[0]
     config = load_config(write_config(tmp_path, content))
 
-    assert len(config.signals) == 16
+    assert len(config.signals) == 17
     assert config.signal("rear_left_wheel_load").entity == (
         "/results/til_wheel_tire_forces_2"
     )
