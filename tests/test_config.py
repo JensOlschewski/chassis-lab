@@ -54,15 +54,21 @@ def test_loads_config_and_resolves_relative_path(tmp_path: Path) -> None:
     assert config.gravity == 9.80665
     assert config.simulation_hdf5 == (tmp_path / "sub/result.h5").resolve()
     assert config.signals == (
-        SignalRef(
-            entity="til_wheel_tire_forces",
-            component="normal_front",
-            unit="newton",
+        (
+            "front_left_wheel_load",
+            SignalRef(
+                entity="til_wheel_tire_forces",
+                component="normal_front",
+                unit="newton",
+            ),
         ),
-        SignalRef(
-            entity="/results/til_wheel_tire_forces_2",
-            component="normal_rear",
-            unit="newton",
+        (
+            "rear_left_wheel_load",
+            SignalRef(
+                entity="/results/til_wheel_tire_forces_2",
+                component="normal_rear",
+                unit="newton",
+            ),
         ),
     )
 
@@ -79,6 +85,18 @@ def test_preserves_absolute_simulation_path(tmp_path: Path) -> None:
     assert config.simulation_hdf5 == absolute.resolve()
 
 
+def test_svc_uses_shared_mapping_when_signals_are_omitted(
+    tmp_path: Path,
+) -> None:
+    content = VALID_TOML.split("[signals]", 1)[0]
+    config = load_config(write_config(tmp_path, content))
+
+    assert len(config.signals) == 16
+    assert config.signal("rear_left_wheel_load").entity == (
+        "/results/til_wheel_tire_forces_2"
+    )
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -93,8 +111,11 @@ def test_rejects_non_positive_gravity(tmp_path: Path, mutation: str) -> None:
 
 
 def test_rejects_missing_required_tables(tmp_path: Path) -> None:
-    without_signals = VALID_TOML.split("[signals]", 1)[0]
-    with pytest.raises(ConfigError, match=r"missing required \[signals\]"):
+    without_signals = VALID_TOML.replace(
+        'domain = "svc"', 'domain = "vertical"'
+    )
+    without_signals = without_signals.split("[signals]", 1)[0]
+    with pytest.raises(ConfigError, match=r"\[signals\] is required"):
         load_config(write_config(tmp_path, without_signals))
 
 
@@ -196,9 +217,38 @@ def test_cli_validates_config_cross_checks_signals(tmp_path: Path) -> None:
         component="normal_front",
         unit="newton",
     )
-    path = write_config(tmp_path, VALID_TOML)
+    content = VALID_TOML.split("[signals.rear", 1)[0]
+    path = write_config(tmp_path, content)
 
     assert main(["validate-config", str(path)]) == 0
+
+
+def test_cli_rejects_duplicate_resolved_cells(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    h5 = tmp_path / "sub" / "result.h5"
+    write_hdf5_with_entity(
+        h5,
+        "til_wheel_tire_forces",
+        source_path="til_wheel_tire_forces",
+        component="normal_front",
+        unit="newton",
+    )
+    content = (
+        VALID_TOML.replace(
+            "[signals.rear_left_wheel_load]",
+            "[signals.front_right_wheel_load]",
+        )
+        .replace(
+            'entity = "/results/til_wheel_tire_forces_2"',
+            'entity = "til_wheel_tire_forces"',
+        )
+        .replace('component = "normal_rear"', 'component = "normal_front"')
+    )
+    path = write_config(tmp_path, content)
+
+    assert main(["validate-config", str(path)]) == 2
+    assert "duplicate HDF5 cell" in capsys.readouterr().err
 
 
 def test_cli_notes_missing_simulation_hdf5(

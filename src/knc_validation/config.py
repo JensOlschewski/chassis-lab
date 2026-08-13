@@ -36,7 +36,13 @@ class CaseConfig:
     loadcase: str
     simulation_hdf5: Path
     gravity: float
-    signals: tuple[SignalRef, ...]
+    signals: tuple[tuple[str, SignalRef], ...]
+
+    def signal(self, canonical: str) -> SignalRef:
+        for name, ref in self.signals:
+            if name == canonical:
+                return ref
+        raise KeyError(canonical)
 
 
 def load_config(path: Path | str) -> CaseConfig:
@@ -58,7 +64,9 @@ def load_config(path: Path | str) -> CaseConfig:
     case = _require_table(raw, "case")
     inputs = _require_table(raw, "inputs")
     physics = _require_table(raw, "physics")
-    signals = _require_table(raw, "signals")
+    signals = raw.get("signals")
+    if signals is not None and not isinstance(signals, dict):
+        raise ConfigError("[signals] must be a table")
 
     _require_keys(case, CASE_KEYS, "[case]")
     _require_keys(inputs, INPUTS_KEYS, "[inputs]")
@@ -92,12 +100,19 @@ def load_config(path: Path | str) -> CaseConfig:
     if gravity <= 0:
         raise ConfigError("[physics].gravity must be positive")
 
-    if not signals:
-        raise ConfigError("[signals] must define at least one signal")
+    if signals is None:
+        if domain != "svc":
+            raise ConfigError("[signals] is required outside the svc domain")
+        from knc_validation.svc import SVC_SIGNAL_MAPPING
 
-    refs = tuple(
-        _parse_signal(canonical, table) for canonical, table in signals.items()
-    )
+        refs = SVC_SIGNAL_MAPPING
+    else:
+        if not signals:
+            raise ConfigError("[signals] must define at least one signal")
+        refs = tuple(
+            (canonical, _parse_signal(canonical, table))
+            for canonical, table in signals.items()
+        )
     return CaseConfig(
         path=config_path.resolve(),
         name=name,

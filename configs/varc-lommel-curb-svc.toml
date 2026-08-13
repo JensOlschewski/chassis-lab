@@ -1,0 +1,11 @@
+[case]
+name = "varc-lommel-curb-svc"
+domain = "svc"
+variant = "VARC"
+loadcase = "CURB"
+
+[inputs]
+simulation_hdf5 = "../artifacts/varc-lommel-curb-svc/result.h5"
+
+[physics]
+gravity = 9.80665

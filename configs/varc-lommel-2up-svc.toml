@@ -1,0 +1,11 @@
+[case]
+name = "varc-lommel-2up-svc"
+domain = "svc"
+variant = "VARC"
+loadcase = "2UP"
+
+[inputs]
+simulation_hdf5 = "../artifacts/varc-lommel-2up-svc/result.h5"
+
+[physics]
+gravity = 9.80665
