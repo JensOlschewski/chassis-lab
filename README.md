@@ -116,6 +116,17 @@ source unit but the configured physical unit is known, and `ERROR` for missing
 signals or mismatched units. Add `--strict-units` to reject missing source
 metadata.
 
+## Conventions
+
+`knc_validation.conventions` is shared by domain evaluators. It defines
+canonical corners, baseline policies, explicit scale/sign rules, and supported
+unit conversions. `apply_convention` returns values together with source,
+original unit, target unit, corner, baseline, scale, and sign provenance.
+
+Missing source units cannot be converted implicitly. They remain
+`UNVERIFIED` during config validation and require explicit semantic metadata
+before `apply_convention` can transform values.
+
 Run development checks:
 
 ```shell
