@@ -52,7 +52,9 @@ class SvcGeometryResult:
     ride_heights_mm: dict[str, float]
     wheelbase_mm: float
     tracks_mm: dict[str, float]
-    cg_coordinates_mm: dict[str, float]
+    cg_x_from_front_axle_mm: float
+    cg_x_global_mm: float
+    cg_height_mm: float
     inertias_kg_mm2: dict[str, float]
     signals: tuple[TransformedSignal, ...]
     sample_index: int
@@ -63,7 +65,9 @@ class SvcGeometryResult:
             "ride_heights_mm": self.ride_heights_mm,
             "wheelbase_mm": self.wheelbase_mm,
             "tracks_mm": self.tracks_mm,
-            "cg_coordinates_mm": self.cg_coordinates_mm,
+            "cg_x_from_front_axle_mm": self.cg_x_from_front_axle_mm,
+            "cg_x_global_mm": self.cg_x_global_mm,
+            "cg_height_mm": self.cg_height_mm,
             "inertias_kg_mm2": self.inertias_kg_mm2,
             "signals": [signal.as_dict() for signal in self.signals],
             "sample_index": self.sample_index,
@@ -201,10 +205,10 @@ def evaluate_svc_geometry(
         raise SvcEvaluationError(
             f"wheelbase must be positive, found {wheelbase}"
         )
-    cg_x = (
-        values["front_left_wheel_center_x"]
-        + loads.distribution_percent["rear"] / 100.0 * wheelbase
+    cg_x_from_front_axle = (
+        loads.distribution_percent["rear"] / 100.0 * wheelbase
     )
+    cg_x_global = values["front_left_wheel_center_x"] + cg_x_from_front_axle
     return SvcGeometryResult(
         loads=loads,
         ride_heights_mm=ride_heights,
@@ -213,7 +217,9 @@ def evaluate_svc_geometry(
             "front": values["front_track"],
             "rear": values["rear_track"],
         },
-        cg_coordinates_mm={"x": cg_x, "z": values["cg_height"]},
+        cg_x_from_front_axle_mm=cg_x_from_front_axle,
+        cg_x_global_mm=cg_x_global,
+        cg_height_mm=values["cg_height"],
         inertias_kg_mm2={
             "xx": values["inertia_xx"],
             "yy": values["inertia_yy"],

@@ -1,0 +1,35 @@
+{
+    "schema_version": 1,
+    "case": {
+        "name": "varb-lommel-2up-svc",
+        "variant": "VARB",
+        "loadcase": "2UP"
+    },
+    "coordinate_system": {
+        "cg_x_origin": "front_axle_wheel_center",
+        "cg_x_positive": "rearward"
+    },
+    "sources": [
+        {
+            "file": "veh_inf.htm",
+            "sha256": "fc444b946a69df88e878b557c452db29557a8a8e6f6dc6f69bfd5b7cecdab221",
+            "test_date": "2019-09-03",
+            "result": "2 passenger vehicle information"
+        }
+    ],
+    "values": {
+        "front_left_mass_kg": 449,
+        "front_right_mass_kg": 427,
+        "rear_left_mass_kg": 384,
+        "rear_right_mass_kg": 383,
+        "front_mass_kg": 876,
+        "rear_mass_kg": 767,
+        "total_mass_kg": 1643,
+        "front_distribution_percent": 53.3,
+        "rear_distribution_percent": 46.7,
+        "wheelbase_mm": 2497.0,
+        "front_track_mm": 1498.0,
+        "rear_track_mm": 1463.0,
+        "cg_x_from_front_axle_mm": 1165.6719415702983
+    }
+}

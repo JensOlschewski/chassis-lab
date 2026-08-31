@@ -9,6 +9,8 @@ from chassis_lab.config import (
     CaseConfig,
     ConfigError,
     SignalRef,
+    ValidationConfig,
+    ValidationTolerances,
     load_config,
 )
 
@@ -35,6 +37,22 @@ entity = "/results/til_wheel_tire_forces_2"
 component = "normal_rear"
 unit = "newton"
 """
+
+VALIDATION_TOML = (
+    VALID_TOML
+    + """
+[validation]
+reference = "../measures/reference.json"
+
+[validation.tolerances.absolute]
+total_mass_kg = 20.0
+wheelbase_mm = 5.0
+
+[validation.tolerances.relative_percent]
+total_mass_kg = 1.0
+inertia_xx_kg_mm2 = 5.0
+"""
+)
 
 
 def write_config(tmp_path: Path, text: str, name: str = "case.toml") -> Path:
@@ -71,6 +89,90 @@ def test_loads_config_and_resolves_relative_path(tmp_path: Path) -> None:
             ),
         ),
     )
+    assert config.validation is None
+
+
+def test_loads_validation_config_and_resolves_reference(tmp_path: Path) -> None:
+    config = load_config(write_config(tmp_path, VALIDATION_TOML))
+
+    assert config.validation == ValidationConfig(
+        reference=(tmp_path / "../measures/reference.json").resolve(),
+        tolerances=ValidationTolerances(
+            absolute=(("total_mass_kg", 20.0), ("wheelbase_mm", 5.0)),
+            relative_percent=(
+                ("total_mass_kg", 1.0),
+                ("inertia_xx_kg_mm2", 5.0),
+            ),
+        ),
+    )
+    assert config.validation.tolerances.absolute_for("total_mass_kg") == 20.0
+    assert (
+        config.validation.tolerances.relative_percent_for("total_mass_kg")
+        == 1.0
+    )
+    assert config.validation.tolerances.absolute_for("missing") is None
+
+
+def test_validation_allows_only_absolute_tolerances(tmp_path: Path) -> None:
+    content = VALIDATION_TOML.split(
+        "[validation.tolerances.relative_percent]", 1
+    )[0]
+
+    config = load_config(write_config(tmp_path, content))
+
+    assert config.validation is not None
+    assert config.validation.tolerances.relative_percent == ()
+
+
+@pytest.mark.parametrize(
+    ("replacement", "message"),
+    [
+        ("", "missing key"),
+        ('reference = ""', "reference must be a non-empty string"),
+    ],
+)
+def test_rejects_missing_or_empty_validation_reference(
+    tmp_path: Path, replacement: str, message: str
+) -> None:
+    content = VALIDATION_TOML.replace(
+        'reference = "../measures/reference.json"', replacement
+    )
+
+    with pytest.raises(ConfigError, match=message):
+        load_config(write_config(tmp_path, content))
+
+
+def test_rejects_validation_without_tolerances(tmp_path: Path) -> None:
+    content = (
+        VALID_TOML
+        + """
+[validation]
+reference = "../measures/reference.json"
+[validation.tolerances]
+"""
+    )
+
+    with pytest.raises(ConfigError, match="at least one tolerance"):
+        load_config(write_config(tmp_path, content))
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "true", '"wide"'])
+def test_rejects_invalid_tolerance_values(tmp_path: Path, value: str) -> None:
+    content = VALIDATION_TOML.replace(
+        "total_mass_kg = 20.0", f"total_mass_kg = {value}", 1
+    )
+
+    with pytest.raises(ConfigError, match="must be"):
+        load_config(write_config(tmp_path, content))
+
+
+def test_rejects_unknown_validation_key(tmp_path: Path) -> None:
+    content = VALIDATION_TOML.replace(
+        "[validation]\n", "[validation]\nunknown = true\n"
+    )
+
+    with pytest.raises(ConfigError, match=r"unknown \[validation\] key"):
+        load_config(write_config(tmp_path, content))
 
 
 def test_preserves_absolute_simulation_path(tmp_path: Path) -> None:
