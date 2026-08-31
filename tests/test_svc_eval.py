@@ -206,8 +206,14 @@ def test_evaluates_static_geometry_from_final_sample(tmp_path: Path) -> None:
     }
     assert result.wheelbase_mm == 2800.0
     assert result.tracks_mm == {"front": 1600.0, "rear": 1580.0}
-    assert result.cg_coordinates_mm == {"x": 2400.0, "z": 700.0}
+    assert result.cg_x_from_front_axle_mm == 1400.0
+    assert result.cg_x_global_mm == 2400.0
+    assert result.cg_height_mm == 700.0
     assert result.inertias_kg_mm2 == {"xx": 1.0, "yy": 2.0, "zz": 3.0}
+
+    data = result.as_dict()
+    assert data["cg_x_from_front_axle_mm"] == 1400.0
+    assert data["cg_x_global_mm"] == 2400.0
 
 
 def test_preserves_signal_provenance_and_accepts_loaded_config(

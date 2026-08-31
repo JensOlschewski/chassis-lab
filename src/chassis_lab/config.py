@@ -2,14 +2,17 @@
 
 import tomllib
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
-TOP_LEVEL_KEYS = {"case", "inputs", "physics", "signals"}
+TOP_LEVEL_KEYS = {"case", "inputs", "physics", "signals", "validation"}
 CASE_KEYS = {"name", "domain", "variant", "loadcase"}
 INPUTS_KEYS = {"simulation_hdf5"}
 PHYSICS_KEYS = {"gravity"}
 SIGNAL_KEYS = {"entity", "component", "unit"}
+VALIDATION_KEYS = {"reference", "tolerances"}
+TOLERANCE_KEYS = {"absolute", "relative_percent"}
 
 
 class ConfigError(ValueError):
@@ -26,6 +29,28 @@ class SignalRef:
 
 
 @dataclass(frozen=True)
+class ValidationTolerances:
+    """Per-metric absolute and relative acceptance tolerances."""
+
+    absolute: tuple[tuple[str, float], ...]
+    relative_percent: tuple[tuple[str, float], ...]
+
+    def absolute_for(self, metric: str) -> float | None:
+        return _lookup_value(self.absolute, metric)
+
+    def relative_percent_for(self, metric: str) -> float | None:
+        return _lookup_value(self.relative_percent, metric)
+
+
+@dataclass(frozen=True)
+class ValidationConfig:
+    """Reference input and acceptance policy for one case."""
+
+    reference: Path
+    tolerances: ValidationTolerances
+
+
+@dataclass(frozen=True)
 class CaseConfig:
     """Validated TOML case configuration with resolved paths."""
 
@@ -37,6 +62,7 @@ class CaseConfig:
     simulation_hdf5: Path
     gravity: float
     signals: tuple[tuple[str, SignalRef], ...]
+    validation: ValidationConfig | None = None
 
     def signal(self, canonical: str) -> SignalRef:
         for name, ref in self.signals:
@@ -67,6 +93,7 @@ def load_config(path: Path | str) -> CaseConfig:
     signals = raw.get("signals")
     if signals is not None and not isinstance(signals, dict):
         raise ConfigError("[signals] must be a table")
+    validation = _parse_validation(raw.get("validation"), config_path)
 
     _require_keys(case, CASE_KEYS, "[case]")
     _require_keys(inputs, INPUTS_KEYS, "[inputs]")
@@ -122,6 +149,7 @@ def load_config(path: Path | str) -> CaseConfig:
         simulation_hdf5=simulation,
         gravity=float(gravity),
         signals=refs,
+        validation=validation,
     )
 
 
@@ -147,6 +175,79 @@ def _parse_signal(canonical: str, table: object) -> SignalRef:
     if not isinstance(unit, str):
         raise ConfigError(f"signal '{canonical}'.unit must be a string")
     return SignalRef(entity=entity, component=component, unit=unit)
+
+
+def _parse_validation(
+    raw: object, config_path: Path
+) -> ValidationConfig | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError("[validation] must be a table")
+    _reject_unknown(raw, VALIDATION_KEYS, "[validation]")
+    _require_keys(raw, VALIDATION_KEYS, "[validation]")
+
+    reference_value = raw["reference"]
+    if not isinstance(reference_value, str) or not reference_value:
+        raise ConfigError("[validation].reference must be a non-empty string")
+    reference = Path(reference_value).expanduser()
+    if not reference.is_absolute():
+        reference = (config_path.parent / reference).resolve()
+    else:
+        reference = reference.resolve()
+
+    tolerances = raw["tolerances"]
+    if not isinstance(tolerances, dict):
+        raise ConfigError("[validation.tolerances] must be a table")
+    _reject_unknown(tolerances, TOLERANCE_KEYS, "[validation.tolerances]")
+    absolute = _parse_tolerance_table(tolerances, "absolute")
+    relative = _parse_tolerance_table(tolerances, "relative_percent")
+    if not absolute and not relative:
+        raise ConfigError(
+            "[validation.tolerances] must define at least one tolerance"
+        )
+    return ValidationConfig(
+        reference=reference,
+        tolerances=ValidationTolerances(
+            absolute=absolute,
+            relative_percent=relative,
+        ),
+    )
+
+
+def _parse_tolerance_table(
+    tolerances: dict[str, Any], name: str
+) -> tuple[tuple[str, float], ...]:
+    table = tolerances.get(name)
+    if table is None:
+        return ()
+    if not isinstance(table, dict):
+        raise ConfigError(f"[validation.tolerances.{name}] must be a table")
+
+    parsed: list[tuple[str, float]] = []
+    for metric, value in table.items():
+        if not metric:
+            raise ConfigError("tolerance metric names must be non-empty")
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise ConfigError(
+                f"tolerance '{metric}' in {name} must be a number"
+            )
+        numeric = float(value)
+        if not isfinite(numeric) or numeric <= 0:
+            raise ConfigError(
+                f"tolerance '{metric}' in {name} must be finite and positive"
+            )
+        parsed.append((metric, numeric))
+    return tuple(parsed)
+
+
+def _lookup_value(
+    values: tuple[tuple[str, float], ...], metric: str
+) -> float | None:
+    for name, value in values:
+        if name == metric:
+            return value
+    return None
 
 
 def _require_table(raw: dict[str, Any], key: str) -> dict[str, Any]:

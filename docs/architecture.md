@@ -98,6 +98,29 @@ equilibrium is expected at the end of the event. The SVC longitudinal
 coordinate uses front-left wheel-center X as origin; CG-X is that origin plus
 rear axle mass fraction times wheelbase. Values remain unrounded internally.
 
+### SVC reference comparison
+
+Reviewed SVC references use Lommel vehicle-information HTML for masses,
+geometry, and ride heights, plus compensated MOI output where available. JSON
+source entries retain SHA-256 checksums. Curb references contain all 21 metrics;
+2UP references contain only measured values (13 for VARB and 17 for VARC).
+Missing 2UP CG-height, inertia, and VARB ride-height values are not inferred.
+
+Acceptance uses the greater of each configured absolute tolerance and relative
+percentage. Case TOML files are the authoritative tolerance policy. Against the
+current HDF5 artifacts, remaining out-of-tolerance metrics are:
+
+| Case | Discrepancies |
+| --- | --- |
+| VARB curb | front-left mass; front-right, rear-left, rear-right ride height |
+| VARC curb | front-left mass; wheelbase; rear-left, rear-right ride height |
+| VARB 2UP | front-left mass |
+| VARC 2UP | front-left mass; rear-left, rear-right ride height |
+
+These failures are reported validation results, not relaxed away. Real-data
+integration tests pin the discrepancy sets so source, mapping, or model changes
+require explicit review.
+
 ## External-tool integration
 
 The tools are configured by executable path, with command discovery through
