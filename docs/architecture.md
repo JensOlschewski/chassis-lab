@@ -89,9 +89,12 @@ artifacts/<case>/<run-id>/
 configuration, HDF5 format version, converter version when available, and KnC
 validation version. Inputs are never overwritten.
 
-The `create-run` command currently creates the run directory and `run.json`.
-Metrics, reports, and figures are added by domain evaluators later; manifest
-creation does not imply that those outputs exist yet.
+The `create-run` command creates the run directory and `run.json`; manifest
+creation does not imply that other outputs exist. `validate-svc` prints a
+console summary and writes `metrics.json` and `summary.csv` only when explicit
+output paths are supplied. Report content has no timestamp and preserves
+reference metric order, making repeated output deterministic for unchanged
+inputs.
 
 SVC static evaluators use final HDF5 sample by default because Adams static
 equilibrium is expected at the end of the event. The SVC longitudinal
