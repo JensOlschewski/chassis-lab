@@ -98,6 +98,22 @@ This validates the configured HDF5 input and writes `run.json` below
 checksums, configuration, HDF5 metadata, software versions, and Git revision.
 Run creation never overwrites source inputs or existing run directories.
 
+Validate an SVC case and optionally write deterministic machine-readable
+reports:
+
+```shell
+.venv/bin/clab validate-svc configs/varb-lommel-curb-svc.toml \
+    --json-output artifacts/varb-svc/metrics.json \
+    --csv-output artifacts/varb-svc/summary.csv
+```
+
+Console output is concise and expands only failed metrics. JSON contains all
+metrics, explicit units, input SHA-256 checksums, and declared physical-source
+provenance. CSV contains one standalone row per metric. Existing report files
+are preserved unless `--force` is supplied. Exit status is `0` when every
+metric passes, `1` when comparison completes with discrepancies, and `2` for
+configuration, input, or report errors.
+
 A case TOML declares the case metadata, simulation input, and gravitational
 constant. SVC cases inherit one shared canonical signal mapping from
 `chassis_lab.svc`, so VARB/VARC and loadcase files do not duplicate mappings:

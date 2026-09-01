@@ -16,6 +16,15 @@ from chassis_lab.hdf5 import (
     inspect_hdf5,
 )
 from chassis_lab.runs import RunError, create_run
+from chassis_lab.svc_eval import SvcEvaluationError
+from chassis_lab.svc_reference import SvcReferenceError
+from chassis_lab.svc_reporting import (
+    SvcReportError,
+    build_svc_report,
+    render_svc_console,
+    write_svc_outputs,
+)
+from chassis_lab.svc_validation import SvcValidationError, validate_svc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -83,6 +92,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_parser.set_defaults(handler=_validate_config)
 
+    validate_svc_parser = subparsers.add_parser(
+        "validate-svc",
+        help="validate an SVC result against its configured reference",
+    )
+    validate_svc_parser.add_argument("path", type=Path, help="TOML config file")
+    validate_svc_parser.add_argument(
+        "--json-output", type=Path, help="write detailed JSON report"
+    )
+    validate_svc_parser.add_argument(
+        "--csv-output", type=Path, help="write metric CSV report"
+    )
+    validate_svc_parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="replace existing report outputs",
+    )
+    validate_svc_parser.set_defaults(handler=_validate_svc)
+
     convert_parser = subparsers.add_parser(
         "convert-res",
         help="convert an Adams/Car .res result file to HDF5",
@@ -126,6 +154,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         Hdf5FormatError,
         SignalLookupError,
         RunError,
+        SvcEvaluationError,
+        SvcReferenceError,
+        SvcReportError,
+        SvcValidationError,
         OSError,
     ) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -205,6 +237,20 @@ def _validate_config(args: argparse.Namespace) -> int:
         print(f"Signals: {len(config.signals)}")
         _check_signals(config, strict_units=args.strict_units)
     return 0
+
+
+def _validate_svc(args: argparse.Namespace) -> int:
+    config = load_config(args.path)
+    validation = validate_svc(config)
+    report = build_svc_report(config, validation)
+    write_svc_outputs(
+        report,
+        json_path=args.json_output,
+        csv_path=args.csv_output,
+        force=args.force,
+    )
+    print(render_svc_console(report), end="")
+    return 0 if report.passed else 1
 
 
 def _config_as_dict(config: CaseConfig) -> dict[str, object]:
