@@ -18,11 +18,11 @@ SVC_SIGNAL_MAPPING: tuple[tuple[str, SignalRef], ...] = (
     ),
     (
         "rear_left_wheel_load",
-        SignalRef("/results/til_wheel_tire_forces_2", "normal_rear", "newton"),
+        SignalRef("til_wheel_tire_forces", "normal_rear", "newton"),
     ),
     (
         "rear_right_wheel_load",
-        SignalRef("/results/tir_wheel_tire_forces_2", "normal_rear", "newton"),
+        SignalRef("tir_wheel_tire_forces", "normal_rear", "newton"),
     ),
     (
         "front_left_ride_height",
@@ -51,6 +51,38 @@ SVC_SIGNAL_MAPPING: tuple[tuple[str, SignalRef], ...] = (
     (
         "front_left_wheel_center_x",
         SignalRef("B479_FDJ3_16z_front_whl.whl_wheel", "X", "mm"),
+    ),
+    (
+        "front_left_toe",
+        SignalRef("toe_camber_body", "left_toe_angle_front", "deg"),
+    ),
+    (
+        "front_right_toe",
+        SignalRef("toe_camber_body", "right_toe_angle_front", "deg"),
+    ),
+    (
+        "rear_left_toe",
+        SignalRef("toe_camber_body", "left_toe_angle_rear", "deg"),
+    ),
+    (
+        "rear_right_toe",
+        SignalRef("toe_camber_body", "right_toe_angle_rear", "deg"),
+    ),
+    (
+        "front_left_camber",
+        SignalRef("toe_camber_body", "left_camber_angle_front", "deg"),
+    ),
+    (
+        "front_right_camber",
+        SignalRef("toe_camber_body", "right_camber_angle_front", "deg"),
+    ),
+    (
+        "rear_left_camber",
+        SignalRef("toe_camber_body", "left_camber_angle_rear", "deg"),
+    ),
+    (
+        "rear_right_camber",
+        SignalRef("toe_camber_body", "right_camber_angle_rear", "deg"),
     ),
 )
 
@@ -136,5 +168,53 @@ SVC_SIGNAL_CONVENTIONS: dict[str, SignalConvention] = {
     ),
     "front_left_wheel_center_x": SignalConvention(
         unit="mm", source_unit="mm", baseline=BaselinePolicy.STATIC_SIMULATION
+    ),
+    "front_left_toe": SignalConvention(
+        unit="deg",
+        source_unit="deg",
+        corner=Corner.FRONT_LEFT,
+        baseline=BaselinePolicy.STATIC_SIMULATION,
+    ),
+    "front_right_toe": SignalConvention(
+        unit="deg",
+        source_unit="deg",
+        corner=Corner.FRONT_RIGHT,
+        baseline=BaselinePolicy.STATIC_SIMULATION,
+    ),
+    "rear_left_toe": SignalConvention(
+        unit="deg",
+        source_unit="deg",
+        corner=Corner.REAR_LEFT,
+        baseline=BaselinePolicy.STATIC_SIMULATION,
+    ),
+    "rear_right_toe": SignalConvention(
+        unit="deg",
+        source_unit="deg",
+        corner=Corner.REAR_RIGHT,
+        baseline=BaselinePolicy.STATIC_SIMULATION,
+    ),
+    "front_left_camber": SignalConvention(
+        unit="deg",
+        source_unit="deg",
+        corner=Corner.FRONT_LEFT,
+        baseline=BaselinePolicy.STATIC_SIMULATION,
+    ),
+    "front_right_camber": SignalConvention(
+        unit="deg",
+        source_unit="deg",
+        corner=Corner.FRONT_RIGHT,
+        baseline=BaselinePolicy.STATIC_SIMULATION,
+    ),
+    "rear_left_camber": SignalConvention(
+        unit="deg",
+        source_unit="deg",
+        corner=Corner.REAR_LEFT,
+        baseline=BaselinePolicy.STATIC_SIMULATION,
+    ),
+    "rear_right_camber": SignalConvention(
+        unit="deg",
+        source_unit="deg",
+        corner=Corner.REAR_RIGHT,
+        baseline=BaselinePolicy.STATIC_SIMULATION,
     ),
 }

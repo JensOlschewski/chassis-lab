@@ -102,9 +102,13 @@ rear axle mass fraction times wheelbase. Values remain unrounded internally.
 
 Reviewed SVC references use Lommel vehicle-information HTML for masses,
 geometry, and ride heights, plus compensated MOI output where available. JSON
-source entries retain SHA-256 checksums. Curb references contain all 21 metrics;
-2UP references contain only measured values (13 for VARB and 17 for VARC).
-Missing 2UP CG-height, inertia, and VARB ride-height values are not inferred.
+source entries retain SHA-256 checksums. Toe and camber add eight metrics where
+static alignment was measured. VARB curb remains at 21 metrics because its curb
+alignment cells are empty. VARB 2UP has 21 metrics, VARC 2UP has 25, and VARC
+curb has 29. The HTML "Test Condition" alignment column is used for 2UP. Adams
+`toe_camber_body` values are interpreted as degrees; empty legacy HDF5 unit
+metadata remains unverified. Missing 2UP CG-height, inertia, and VARB ride-height
+values are not inferred.
 
 Acceptance uses the greater of each configured absolute tolerance and relative
 percentage. Case TOML files are the authoritative tolerance policy. Against the
@@ -113,8 +117,8 @@ current HDF5 artifacts, remaining out-of-tolerance metrics are:
 | Case | Discrepancies |
 | --- | --- |
 | VARB curb | front-left mass; front-right, rear-left, rear-right ride height |
-| VARC curb | front-left mass; wheelbase; rear-left, rear-right ride height |
-| VARB 2UP | front-left mass |
+| VARC curb | front-left mass; wheelbase; rear ride heights; rear toe/camber |
+| VARB 2UP | front-left mass; front-right toe and camber |
 | VARC 2UP | front-left mass; rear-left, rear-right ride height |
 
 These failures are reported validation results, not relaxed away. Real-data

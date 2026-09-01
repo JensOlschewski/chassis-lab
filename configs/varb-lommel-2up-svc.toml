@@ -30,6 +30,14 @@ wheelbase_mm = 5.0
 front_track_mm = 10.0
 rear_track_mm = 10.0
 cg_x_from_front_axle_mm = 20.0
+toe_front_left_deg = 0.2
+toe_front_right_deg = 0.2
+toe_rear_left_deg = 0.2
+toe_rear_right_deg = 0.2
+camber_front_left_deg = 0.2
+camber_front_right_deg = 0.2
+camber_rear_left_deg = 0.2
+camber_rear_right_deg = 0.2
 
 [validation.tolerances.relative_percent]
 front_left_mass_kg = 2.0

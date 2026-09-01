@@ -18,9 +18,9 @@ VARB_2UP_CONFIG_PATH = _ROOT / "configs" / "varb-lommel-2up-svc.toml"
 VARC_2UP_CONFIG_PATH = _ROOT / "configs" / "varc-lommel-2up-svc.toml"
 EXPECTED_METRIC_COUNTS = {
     "varb-lommel-curb-svc": 21,
-    "varc-lommel-curb-svc": 21,
-    "varb-lommel-2up-svc": 13,
-    "varc-lommel-2up-svc": 17,
+    "varc-lommel-curb-svc": 29,
+    "varb-lommel-2up-svc": 21,
+    "varc-lommel-2up-svc": 25,
 }
 EXPECTED_FAILURES = {
     "varb-lommel-curb-svc": {
@@ -34,8 +34,16 @@ EXPECTED_FAILURES = {
         "wheelbase_mm",
         "ride_height_rear_left_mm",
         "ride_height_rear_right_mm",
+        "toe_rear_left_deg",
+        "toe_rear_right_deg",
+        "camber_rear_left_deg",
+        "camber_rear_right_deg",
     },
-    "varb-lommel-2up-svc": {"front_left_mass_kg"},
+    "varb-lommel-2up-svc": {
+        "front_left_mass_kg",
+        "toe_front_right_deg",
+        "camber_front_right_deg",
+    },
     "varc-lommel-2up-svc": {
         "front_left_mass_kg",
         "ride_height_rear_left_mm",
@@ -71,6 +79,8 @@ def test_evaluate_svc_geometry_returns_all_metrics(svc_config: Path) -> None:
     assert len(result.ride_heights_mm) == 4
     assert len(result.tracks_mm) == 2
     assert len(result.inertias_kg_mm2) == 3
+    assert len(result.toe_deg) == 4
+    assert len(result.camber_deg) == 4
     assert result.cg_x_from_front_axle_mm > 0
     assert result.cg_height_mm > 0
 
