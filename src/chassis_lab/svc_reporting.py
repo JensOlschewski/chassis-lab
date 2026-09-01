@@ -35,7 +35,11 @@ _UNIT_SUFFIXES = (
     ("_percent", "%"),
     ("_kg", "kg"),
     ("_mm", "mm"),
+    ("_deg", "deg"),
 )
+_GREEN = "\x1b[32m"
+_RED = "\x1b[31m"
+_RESET = "\x1b[0m"
 
 
 class SvcReportError(RuntimeError):
@@ -153,41 +157,54 @@ def metric_unit(name: str) -> str:
     raise SvcReportError(f"no report unit defined for SVC metric: {name}")
 
 
-def render_svc_console(report: SvcReport) -> str:
-    """Render concise human output, listing details only for failures."""
+def metric_group(name: str) -> str:
+    """Return stable SVC console group for a canonical metric."""
+    if name.endswith("_mass_kg") or name.endswith("_distribution_percent"):
+        return "loads"
+    if name.startswith("ride_height_"):
+        return "ride_height"
+    if name.startswith(("toe_", "camber_")):
+        return "alignment"
+    return "geometry"
+
+
+def render_svc_console(report: SvcReport, *, color: bool = False) -> str:
+    """Render all metrics in cargo-style domain groups."""
     passed_count = len(report.metrics) - len(report.failed)
     lines = [
-        f"SVC validation: {'PASS' if report.passed else 'FAIL'}",
-        (
-            f"Case: {report.config.name} "
-            f"({report.config.variant}, {report.config.loadcase})"
-        ),
-        f"Simulation: {report.simulation_input.path}",
-        f"Reference: {report.reference_input.path}",
-        (
-            f"Metrics: {passed_count} passed, {len(report.failed)} failed, "
-            f"{len(report.metrics)} total"
-        ),
+        "SVC validation",
+        f"case: {report.config.name} "
+        f"({report.config.variant}, {report.config.loadcase})",
+        f"simulation: {report.simulation_input.path}",
+        f"reference: {report.reference_input.path}",
+        "",
+        f"running {len(report.metrics)} metrics",
     ]
-    if report.failed:
-        lines.extend(
-            [
-                "",
-                "Failed metrics:",
-                "METRIC                               ACTUAL      REFERENCE  "
-                "DIFFERENCE     ALLOWED  UNIT",
-            ]
-        )
-        for report_metric in report.failed:
+    groups: dict[str, list[SvcReportMetric]] = {}
+    for report_metric in report.metrics:
+        group = metric_group(report_metric.comparison.name)
+        groups.setdefault(group, []).append(report_metric)
+    for group, metrics in groups.items():
+        lines.extend(("", f"svc::{group}"))
+        for report_metric in metrics:
             metric = report_metric.comparison
+            status = _status(metric.passed, color=color)
+            comparison = "<=" if metric.passed else ">"
             lines.append(
-                f"{metric.name:<34} "
-                f"{_number(metric.actual):>11} "
-                f"{_number(metric.reference):>11} "
-                f"{_number(metric.difference):>11} "
-                f"{_number(metric.allowed_difference):>11}  "
-                f"{report_metric.unit}"
+                f"  {metric.name} ... {status} "
+                f"(actual {_number(metric.actual)}; "
+                f"reference {_number(metric.reference)}; "
+                f"diff {_number(metric.difference)} {comparison} "
+                f"{_number(metric.allowed_difference)} {report_metric.unit})"
             )
+    status = _status(report.passed, color=color)
+    lines.extend(
+        (
+            "",
+            f"validation result: {status}. {passed_count} passed; "
+            f"{len(report.failed)} failed; {len(report.metrics)} total",
+        )
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -263,3 +280,11 @@ def _provenance(path: Path) -> FileProvenance:
 
 def _number(value: float) -> str:
     return f"{value:.8g}"
+
+
+def _status(passed: bool, *, color: bool) -> str:
+    text = "ok" if passed else "FAILED"
+    if not color:
+        return text
+    ansi = _GREEN if passed else _RED
+    return f"{ansi}{text}{_RESET}"

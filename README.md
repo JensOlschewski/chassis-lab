@@ -107,12 +107,15 @@ reports:
     --csv-output artifacts/varb-svc/summary.csv
 ```
 
-Console output is concise and expands only failed metrics. JSON contains all
-metrics, explicit units, input SHA-256 checksums, and declared physical-source
-provenance. CSV contains one standalone row per metric. Existing report files
-are preserved unless `--force` is supplied. Exit status is `0` when every
-metric passes, `1` when comparison completes with discrepancies, and `2` for
-configuration, input, or report errors.
+Console output lists every metric as `ok` or `FAILED` in cargo-style domain
+groups such as `svc::loads`, `svc::geometry`, and `svc::alignment`. JSON
+contains all metrics, explicit units, input SHA-256 checksums, and declared
+physical-source provenance. CSV contains one standalone row per metric.
+Existing report files are preserved unless `--force` is supplied. Exit status
+is `0` when every metric passes, `1` when comparison completes with
+discrepancies, and `2` for configuration, input, or report errors. Console
+status uses green/red ANSI colors on terminals. Use `--color always` or
+`--color never` to override detection; `NO_COLOR` disables automatic color.
 
 A case TOML declares the case metadata, simulation input, and gravitational
 constant. SVC cases inherit one shared canonical signal mapping from

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -108,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="replace existing report outputs",
+    )
+    validate_svc_parser.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="color console status (default: auto)",
     )
     validate_svc_parser.set_defaults(handler=_validate_svc)
 
@@ -249,7 +256,12 @@ def _validate_svc(args: argparse.Namespace) -> int:
         csv_path=args.csv_output,
         force=args.force,
     )
-    print(render_svc_console(report), end="")
+    color = args.color == "always" or (
+        args.color == "auto"
+        and sys.stdout.isatty()
+        and "NO_COLOR" not in os.environ
+    )
+    print(render_svc_console(report, color=color), end="")
     return 0 if report.passed else 1
 
 

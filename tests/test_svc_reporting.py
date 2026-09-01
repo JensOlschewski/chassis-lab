@@ -18,6 +18,7 @@ from chassis_lab.svc_reporting import (
     CSV_FIELDS,
     SvcReportError,
     build_svc_report,
+    metric_group,
     metric_unit,
     render_svc_console,
     render_svc_csv,
@@ -135,23 +136,47 @@ def test_builds_report_with_units_and_provenance(tmp_path: Path) -> None:
     )
 
 
-def test_console_is_concise_and_lists_only_failures(tmp_path: Path) -> None:
+def test_console_groups_and_lists_all_metrics(tmp_path: Path) -> None:
     config = write_inputs(tmp_path)
     report = build_svc_report(config, validation_result())
 
     assert render_svc_console(report) == (
-        "SVC validation: FAIL\n"
-        "Case: svc-report (VARB, CURB)\n"
-        f"Simulation: {config.simulation_hdf5}\n"
-        f"Reference: {config.validation.reference}\n"
-        "Metrics: 1 passed, 1 failed, 2 total\n"
+        "SVC validation\n"
+        "case: svc-report (VARB, CURB)\n"
+        f"simulation: {config.simulation_hdf5}\n"
+        f"reference: {config.validation.reference}\n"
         "\n"
-        "Failed metrics:\n"
-        "METRIC                               ACTUAL      REFERENCE  "
-        "DIFFERENCE     ALLOWED  UNIT\n"
-        "wheelbase_mm                              2510        2500  "
-        "        10           5  mm\n"
+        "running 2 metrics\n"
+        "\n"
+        "svc::loads\n"
+        "  total_mass_kg ... ok (actual 1510; reference 1500; "
+        "diff 10 <= 20 kg)\n"
+        "\n"
+        "svc::geometry\n"
+        "  wheelbase_mm ... FAILED (actual 2510; reference 2500; "
+        "diff 10 > 5 mm)\n"
+        "\n"
+        "validation result: FAILED. 1 passed; 1 failed; 2 total\n"
     )
+
+
+def test_assigns_metric_units_and_console_groups() -> None:
+    assert metric_unit("toe_front_left_deg") == "deg"
+    assert metric_group("front_left_mass_kg") == "loads"
+    assert metric_group("wheelbase_mm") == "geometry"
+    assert metric_group("ride_height_front_left_mm") == "ride_height"
+    assert metric_group("camber_rear_right_deg") == "alignment"
+
+
+def test_console_colors_status_only_when_requested(tmp_path: Path) -> None:
+    report = build_svc_report(write_inputs(tmp_path), validation_result())
+
+    plain = render_svc_console(report)
+    colored = render_svc_console(report, color=True)
+
+    assert "\x1b[" not in plain
+    assert "\x1b[32mok\x1b[0m" in colored
+    assert "\x1b[31mFAILED\x1b[0m" in colored
 
 
 def test_json_and_csv_are_deterministic(tmp_path: Path) -> None:
@@ -249,7 +274,10 @@ wheelbase_mm = 5.0
     )
 
     assert exit_code == 1
-    assert capsys.readouterr().out.startswith("SVC validation: FAIL\n")
+    output = capsys.readouterr().out
+    assert output.startswith("SVC validation\n")
+    assert "total_mass_kg ... ok" in output
+    assert "wheelbase_mm ... FAILED" in output
     assert json.loads(json_path.read_text())["failed_count"] == 1
     with csv_path.open(encoding="utf-8", newline="") as stream:
         assert len(list(csv.DictReader(stream))) == 2
@@ -293,7 +321,9 @@ wheelbase_mm = 5.0
         lambda loaded: validation_result(passed=True),
     )
 
-    assert main(["validate-svc", str(config.path)]) == 0
+    assert main(["validate-svc", str(config.path), "--color", "always"]) == 0
     output = capsys.readouterr().out
-    assert output.startswith("SVC validation: PASS\n")
-    assert "Failed metrics:" not in output
+    assert output.startswith("SVC validation\n")
+    assert "total_mass_kg ... \x1b[32mok\x1b[0m" in output
+    assert "wheelbase_mm ... \x1b[32mok\x1b[0m" in output
+    assert "validation result: \x1b[32mok\x1b[0m." in output
