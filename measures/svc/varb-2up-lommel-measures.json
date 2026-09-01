@@ -30,6 +30,14 @@
         "wheelbase_mm": 2497.0,
         "front_track_mm": 1498.0,
         "rear_track_mm": 1463.0,
-        "cg_x_from_front_axle_mm": 1165.6719415702983
+        "cg_x_from_front_axle_mm": 1165.6719415702983,
+        "toe_front_left_deg": 0.15,
+        "toe_front_right_deg": -0.26,
+        "toe_rear_left_deg": 0.25,
+        "toe_rear_right_deg": 0.21,
+        "camber_front_left_deg": -0.90,
+        "camber_front_right_deg": -0.69,
+        "camber_rear_left_deg": -0.57,
+        "camber_rear_right_deg": -0.65
     }
 }

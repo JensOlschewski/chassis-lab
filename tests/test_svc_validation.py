@@ -47,6 +47,18 @@ def geometry_result() -> SvcGeometryResult:
         cg_x_global_mm=2983.35,
         cg_height_mm=490.0,
         inertias_kg_mm2={"xx": 500e6, "yy": 1900e6, "zz": 2000e6},
+        toe_deg={
+            "front_left": 0.1,
+            "front_right": -0.1,
+            "rear_left": 0.2,
+            "rear_right": -0.2,
+        },
+        camber_deg={
+            "front_left": -1.0,
+            "front_right": -1.1,
+            "rear_left": -1.2,
+            "rear_right": -1.3,
+        },
         signals=(),
         sample_index=-1,
     )
@@ -95,13 +107,15 @@ def tolerances(
 def test_flattens_geometry_to_canonical_metrics() -> None:
     metrics = svc_metrics(geometry_result())
 
-    assert len(metrics) == 21
+    assert len(metrics) == 29
     assert metrics["front_left_mass_kg"] == 400.0
     assert metrics["front_mass_kg"] == 790.0
     assert metrics["front_distribution_percent"] == 52.666
     assert metrics["cg_x_from_front_axle_mm"] == 1183.35
     assert metrics["inertia_zz_kg_mm2"] == 2000e6
     assert metrics["ride_height_rear_right_mm"] == 350.0
+    assert metrics["toe_front_right_deg"] == -0.1
+    assert metrics["camber_rear_left_deg"] == -1.2
     assert "cg_x_global_mm" not in metrics
 
 

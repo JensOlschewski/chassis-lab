@@ -34,6 +34,14 @@
         "ride_height_front_left_mm": 345,
         "ride_height_front_right_mm": 344,
         "ride_height_rear_left_mm": 331,
-        "ride_height_rear_right_mm": 328
+        "ride_height_rear_right_mm": 328,
+        "toe_front_left_deg": -0.02,
+        "toe_front_right_deg": -0.02,
+        "toe_rear_left_deg": -0.09,
+        "toe_rear_right_deg": -0.31,
+        "camber_front_left_deg": -0.89,
+        "camber_front_right_deg": -1.01,
+        "camber_rear_left_deg": -1.47,
+        "camber_rear_right_deg": -1.57
     }
 }

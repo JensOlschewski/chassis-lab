@@ -38,6 +38,14 @@ ride_height_front_left_mm = 2.0
 ride_height_front_right_mm = 2.0
 ride_height_rear_left_mm = 2.0
 ride_height_rear_right_mm = 2.0
+toe_front_left_deg = 0.2
+toe_front_right_deg = 0.2
+toe_rear_left_deg = 0.2
+toe_rear_right_deg = 0.2
+camber_front_left_deg = 0.2
+camber_front_right_deg = 0.2
+camber_rear_left_deg = 0.2
+camber_rear_right_deg = 0.2
 
 [validation.tolerances.relative_percent]
 front_left_mass_kg = 2.0

@@ -56,6 +56,8 @@ class SvcGeometryResult:
     cg_x_global_mm: float
     cg_height_mm: float
     inertias_kg_mm2: dict[str, float]
+    toe_deg: dict[str, float]
+    camber_deg: dict[str, float]
     signals: tuple[TransformedSignal, ...]
     sample_index: int
 
@@ -69,6 +71,8 @@ class SvcGeometryResult:
             "cg_x_global_mm": self.cg_x_global_mm,
             "cg_height_mm": self.cg_height_mm,
             "inertias_kg_mm2": self.inertias_kg_mm2,
+            "toe_deg": self.toe_deg,
+            "camber_deg": self.camber_deg,
             "signals": [signal.as_dict() for signal in self.signals],
             "sample_index": self.sample_index,
         }
@@ -167,6 +171,14 @@ def evaluate_svc_geometry(
         "inertia_yy",
         "inertia_zz",
         "front_left_wheel_center_x",
+        "front_left_toe",
+        "front_right_toe",
+        "rear_left_toe",
+        "rear_right_toe",
+        "front_left_camber",
+        "front_right_camber",
+        "rear_left_camber",
+        "rear_right_camber",
     )
     with AdamsHdf5(case.simulation_hdf5) as result:
         for name in names:
@@ -224,6 +236,16 @@ def evaluate_svc_geometry(
             "xx": values["inertia_xx"],
             "yy": values["inertia_yy"],
             "zz": values["inertia_zz"],
+        },
+        toe_deg={
+            name.removesuffix("_toe"): values[name]
+            for name in names
+            if name.endswith("_toe")
+        },
+        camber_deg={
+            name.removesuffix("_camber"): values[name]
+            for name in names
+            if name.endswith("_camber")
         },
         signals=tuple(transformed),
         sample_index=sample_index,

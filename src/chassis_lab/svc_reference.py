@@ -41,6 +41,14 @@ SVC_REFERENCE_METRICS = {
     "ride_height_front_right_mm",
     "ride_height_rear_left_mm",
     "ride_height_rear_right_mm",
+    "toe_front_left_deg",
+    "toe_front_right_deg",
+    "toe_rear_left_deg",
+    "toe_rear_right_deg",
+    "camber_front_left_deg",
+    "camber_front_right_deg",
+    "camber_rear_left_deg",
+    "camber_rear_right_deg",
 }
 
 

@@ -33,7 +33,7 @@ entity = "til_wheel_tire_forces"
 component = "normal_front"
 unit = "newton"
 [signals.rear_left_wheel_load]
-entity = "/results/til_wheel_tire_forces_2"
+entity = "til_wheel_tire_forces"
 component = "normal_rear"
 unit = "newton"
 """
@@ -83,7 +83,7 @@ def test_loads_config_and_resolves_relative_path(tmp_path: Path) -> None:
         (
             "rear_left_wheel_load",
             SignalRef(
-                entity="/results/til_wheel_tire_forces_2",
+                entity="til_wheel_tire_forces",
                 component="normal_rear",
                 unit="newton",
             ),
@@ -193,9 +193,9 @@ def test_svc_uses_shared_mapping_when_signals_are_omitted(
     content = VALID_TOML.split("[signals]", 1)[0]
     config = load_config(write_config(tmp_path, content))
 
-    assert len(config.signals) == 17
+    assert len(config.signals) == 25
     assert config.signal("rear_left_wheel_load").entity == (
-        "/results/til_wheel_tire_forces_2"
+        "til_wheel_tire_forces"
     )
 
 
@@ -378,7 +378,7 @@ def test_cli_rejects_duplicate_resolved_cells(
             "[signals.front_right_wheel_load]",
         )
         .replace(
-            'entity = "/results/til_wheel_tire_forces_2"',
+            'entity = "til_wheel_tire_forces"',
             'entity = "til_wheel_tire_forces"',
         )
         .replace('component = "normal_rear"', 'component = "normal_front"')

@@ -129,6 +129,38 @@ unit = "kg*mm^2"
 entity = "front_wheel"
 component = "x"
 unit = "mm"
+[signals.front_left_toe]
+entity = "toe_camber_body"
+component = "left_toe_angle_front"
+unit = "deg"
+[signals.front_right_toe]
+entity = "toe_camber_body"
+component = "right_toe_angle_front"
+unit = "deg"
+[signals.rear_left_toe]
+entity = "/results/toe_camber_body_2"
+component = "left_toe_angle_rear"
+unit = "deg"
+[signals.rear_right_toe]
+entity = "/results/toe_camber_body_2"
+component = "right_toe_angle_rear"
+unit = "deg"
+[signals.front_left_camber]
+entity = "toe_camber_body"
+component = "left_camber_angle_front"
+unit = "deg"
+[signals.front_right_camber]
+entity = "toe_camber_body"
+component = "right_camber_angle_front"
+unit = "deg"
+[signals.rear_left_camber]
+entity = "/results/toe_camber_body_2"
+component = "left_camber_angle_rear"
+unit = "deg"
+[signals.rear_right_camber]
+entity = "/results/toe_camber_body_2"
+component = "right_camber_angle_rear"
+unit = "deg"
 """,
         encoding="utf-8",
     )
@@ -155,8 +187,28 @@ unit = "mm"
                 ["mm"] * 4 + ["kg*mm^2"] * 3,
             ),
             "front_wheel": (["x"], [1000.0], ["mm"]),
+            "toe_camber_body": (
+                [
+                    "left_toe_angle_front",
+                    "right_toe_angle_front",
+                    "left_camber_angle_front",
+                    "right_camber_angle_front",
+                ],
+                [0.1, -0.1, -1.0, -1.1],
+                [""] * 4,
+            ),
+            "toe_camber_body_2": (
+                [
+                    "left_toe_angle_rear",
+                    "right_toe_angle_rear",
+                    "left_camber_angle_rear",
+                    "right_camber_angle_rear",
+                ],
+                [0.2, -0.2, -1.2, -1.3],
+                [""] * 4,
+            ),
         }
-        h5.attrs["signal_count"] = 16
+        h5.attrs["signal_count"] = 24
         for group_name, (components, row, units) in metadata.items():
             group = results.create_group(group_name)
             group.create_dataset("values", data=np.asarray([row, row]))
@@ -210,6 +262,18 @@ def test_evaluates_static_geometry_from_final_sample(tmp_path: Path) -> None:
     assert result.cg_x_global_mm == 2400.0
     assert result.cg_height_mm == 700.0
     assert result.inertias_kg_mm2 == {"xx": 1.0, "yy": 2.0, "zz": 3.0}
+    assert result.toe_deg == {
+        "front_left": 0.1,
+        "front_right": -0.1,
+        "rear_left": 0.2,
+        "rear_right": -0.2,
+    }
+    assert result.camber_deg == {
+        "front_left": -1.0,
+        "front_right": -1.1,
+        "rear_left": -1.2,
+        "rear_right": -1.3,
+    }
 
     data = result.as_dict()
     assert data["cg_x_from_front_axle_mm"] == 1400.0

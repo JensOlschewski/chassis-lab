@@ -90,6 +90,14 @@ def svc_metrics(result: SvcGeometryResult) -> dict[str, float]:
         "ride_height_front_right_mm": result.ride_heights_mm["front_right"],
         "ride_height_rear_left_mm": result.ride_heights_mm["rear_left"],
         "ride_height_rear_right_mm": result.ride_heights_mm["rear_right"],
+        "toe_front_left_deg": result.toe_deg["front_left"],
+        "toe_front_right_deg": result.toe_deg["front_right"],
+        "toe_rear_left_deg": result.toe_deg["rear_left"],
+        "toe_rear_right_deg": result.toe_deg["rear_right"],
+        "camber_front_left_deg": result.camber_deg["front_left"],
+        "camber_front_right_deg": result.camber_deg["front_right"],
+        "camber_rear_left_deg": result.camber_deg["rear_left"],
+        "camber_rear_right_deg": result.camber_deg["rear_right"],
     }
 
 
