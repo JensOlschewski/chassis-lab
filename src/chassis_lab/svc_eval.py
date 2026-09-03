@@ -85,7 +85,7 @@ def evaluate_svc_loads(
 ) -> SvcLoadResult:
     """Calculate SVC values; ``-1`` means static final sample."""
     case = load_config(config) if not isinstance(config, CaseConfig) else config
-    if case.domain != "svc":
+    if case.domain not in {"svc", "multi"}:
         raise SvcEvaluationError(
             f"SVC evaluator requires domain 'svc', found '{case.domain}'"
         )
@@ -152,7 +152,7 @@ def evaluate_svc_geometry(
 ) -> SvcGeometryResult:
     """Calculate SVC static geometry and inertia at selected sample."""
     case = load_config(config) if not isinstance(config, CaseConfig) else config
-    if case.domain != "svc":
+    if case.domain not in {"svc", "multi"}:
         raise SvcEvaluationError(
             f"SVC evaluator requires domain 'svc', found '{case.domain}'"
         )

@@ -1,19 +1,17 @@
 [case]
 name = "varb-lommel-curb-svc"
-domain = "svc"
 variant = "VARB"
 loadcase = "CURB"
-
-[inputs]
-simulation_hdf5 = "../artifacts/varb-lommel-curb-svc/result.h5"
 
 [physics]
 gravity = 9.80665
 
-[validation]
-reference = "../measures/svc/varb-curb-lommel-measures.json"
+[svc.inputs]
+signal_map = "signals/svc.toml"
+simulation_hdf5 = "../artifacts/varb-lommel-curb-svc/result.h5"
+measurement_reference = "../measures/svc/varb-curb-lommel-measures.json"
 
-[validation.tolerances.absolute]
+[svc.validation.tolerances.absolute]
 front_left_mass_kg = 10.0
 front_right_mass_kg = 10.0
 rear_left_mass_kg = 10.0
@@ -39,7 +37,7 @@ ride_height_front_right_mm = 2.0
 ride_height_rear_left_mm = 2.0
 ride_height_rear_right_mm = 2.0
 
-[validation.tolerances.relative_percent]
+[svc.validation.tolerances.relative_percent]
 front_left_mass_kg = 2.0
 front_right_mass_kg = 2.0
 rear_left_mass_kg = 2.0

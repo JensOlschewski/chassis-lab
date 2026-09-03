@@ -109,3 +109,96 @@ def test_create_run_cli_prints_directory(tmp_path: Path, capsys) -> None:
         == 0
     )
     assert capsys.readouterr().out.strip().endswith("artifacts/demo/cli-run")
+
+
+def test_create_vertical_run_records_measurement_provenance(
+    tmp_path: Path,
+) -> None:
+    config_path = write_inputs(tmp_path)
+    measurement = tmp_path / "measurement.acd"
+    names = [
+        f"{prefix}{suffix}"
+        for prefix in ("lf", "rf", "lr", "rr")
+        for suffix in ("slope", "wcx", "wcy", "wcz")
+    ]
+    measurement.write_text(
+        "\n".join(
+            (
+                "FileInfo: ASCII3",
+                "TestInfo:\ttesttype\ttesttype\tTest type\tstring\t\tvert",
+                "TestInfo:\tbrakeson\tbrakeson\tBrakes applied\tinteger\t\t1",
+                "TestInfo:\tengineon\tengineon\tEngine running\tinteger\t\t0",
+                "TestInfo:\tfarbon\tfarbon\tFront ARB\tinteger\t\t1",
+                "TestInfo:\trarbon\trarbon\tRear ARB\tinteger\t\tNaN",
+                "\t".join(
+                    ["Cycle", "WC X", "WC Y", "WC Z"] * 4
+                    + ["string", "Description"]
+                ),
+                "\t".join(["0"] * len(names) + ["float", "Offset"]),
+                "\t".join(names + ["string", "Name"]),
+                "\t".join(["NaN", "mm", "mm", "mm"] * 4 + ["string", "Units"]),
+                "\t".join(["NaN"] * len(names) + ["string", "KPoly"]),
+                "\t".join(["0"] * len(names)),
+                "\t".join(["0"] * len(names)),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        """\
+[case]
+name = "demo"
+variant = "VARB"
+loadcase = "2UP"
+[physics]
+gravity = 9.80665
+[svc.inputs]
+simulation_hdf5 = "result.h5"
+[svc.signals.signal]
+entity = "entity"
+component = "value"
+unit = "mm"
+[vertical.inputs]
+measurement_acd = "measurement.acd"
+simulation_hdf5 = "result.h5"
+[vertical.setup]
+code = "b1e0f1"
+brakes_applied = true
+engine_running = false
+front_arb_connected = true
+[vertical.window]
+minimum_mm = -1
+maximum_mm = 1
+step_mm = 1
+[vertical.signals.front_left_travel]
+entity = "entity"
+component = "value"
+unit = "mm"
+"""
+    )
+
+    run_dir = create_run(
+        config_path,
+        domain="vertical",
+        artifacts_root=tmp_path / "artifacts",
+        run_id="vertical-run",
+    )
+    manifest = json.loads((run_dir / "run.json").read_text())
+
+    assert manifest["config"]["snapshot"]["domain"] == "vertical"
+    assert manifest["config"]["snapshot"]["setup"] == {
+        "code": "b1e0f1",
+        "brakes_applied": True,
+        "engine_running": False,
+        "front_arb_connected": True,
+        "rear_arb_connected": None,
+    }
+    assert manifest["config"]["snapshot"]["window"] == {
+        "minimum_mm": -1,
+        "maximum_mm": 1,
+        "step_mm": 1,
+    }
+    assert manifest["inputs"]["measurement_acd"]["sha256"] == sha256_file(
+        measurement
+    )

@@ -1,11 +1,11 @@
 [case]
 name = "varc-beflex-2up-svc"
-domain = "svc"
 variant = "VARC"
 loadcase = "2UP"
 
-[inputs]
-simulation_hdf5 = "../artifacts/varc-beflex-2up-svc/result.h5"
-
 [physics]
 gravity = 9.80665
+
+[svc.inputs]
+signal_map = "signals/svc.toml"
+simulation_hdf5 = "../artifacts/varc-beflex-2up-svc/result.h5"

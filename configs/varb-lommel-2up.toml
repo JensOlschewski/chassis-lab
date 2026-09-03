@@ -1,22 +1,18 @@
 [case]
-name = "varb-lommel-2up-svc"
-domain = "svc"
+name = "varb-lommel-2up"
 variant = "VARB"
 loadcase = "2UP"
-
-[inputs]
-# Relative paths are resolved against this file; absolute paths are used as-is.
-simulation_hdf5 = "../artifacts/varb-lommel-2up-svc/result.h5"
 
 [physics]
 gravity = 9.80665 # m/s^2
 
-# SVC uses shared canonical signal mapping from chassis_lab.svc.
+[svc.inputs]
+# Relative paths are resolved against this file; absolute paths are used as-is.
+signal_map = "signals/svc.toml"
+simulation_hdf5 = "../artifacts/varb-lommel-2up-svc/result.h5"
+measurement_reference = "../measures/svc/varb-2up-lommel-measures.json"
 
-[validation]
-reference = "../measures/svc/varb-2up-lommel-measures.json"
-
-[validation.tolerances.absolute]
+[svc.validation.tolerances.absolute]
 front_left_mass_kg = 10.0
 front_right_mass_kg = 10.0
 rear_left_mass_kg = 10.0
@@ -39,7 +35,7 @@ camber_front_right_deg = 0.2
 camber_rear_left_deg = 0.2
 camber_rear_right_deg = 0.2
 
-[validation.tolerances.relative_percent]
+[svc.validation.tolerances.relative_percent]
 front_left_mass_kg = 2.0
 front_right_mass_kg = 2.0
 rear_left_mass_kg = 2.0
@@ -48,3 +44,18 @@ front_mass_kg = 1.5
 rear_mass_kg = 1.5
 total_mass_kg = 1.0
 cg_x_from_front_axle_mm = 1.0
+
+[vertical.inputs]
+signal_map = "signals/knc.toml"
+measurement_acd = "../measures/raw/varb/knc/bounce b1e0f1 front and rear.acd"
+simulation_hdf5 = "../artifacts/varb-lommel-2up-vertical/result.h5"
+# reference add later
+
+[vertical.setup]
+code = "b1e0f1"
+brakes_applied = true
+engine_running = false
+front_arb_connected = true
+window_minimum_mm = -65.0
+window_maximum_mm = 65.0
+window_step_mm = 1.0

@@ -1,14 +1,46 @@
 [case]
-name = "varb-lommel-2up-svc-example"
-domain = "svc"
-variant = "VARB"
+name = "example-config"
+variant = "EXAMPLE"
 loadcase = "2UP"
-
-[inputs]
-# Relative paths are resolved against this file; absolute paths are used as-is.
-simulation_hdf5 = "../artifacts/example/result.h5"
 
 [physics]
 gravity = 9.80665 # m/s^2
 
-# SVC uses shared canonical signal mapping from chassis_lab.svc.
+[svc.inputs]
+# INPUTS — relative paths resolve from this file; absolute paths remain unchanged.
+# signal_map selects reusable canonical SVC mapping shared by loadcases.
+# simulation_hdf5 points to converted Adams results.
+# measurement_reference points to curated SVC reference JSON.
+
+signal_map = "signals/svc.toml"
+simulation_hdf5 = "../artifacts/example-svc/result.h5"
+measurement_reference = "../measures/svc/example-measures.json"
+
+[svc.validation.tolerances.absolute]
+# Used by `clab validate-svc`.
+# Absolute and relative tolerances are independently optional.
+# Allowed difference uses larger configured absolute or relative limit.
+
+total_mass_kg = 20.0
+wheelbase_mm = 2000.0
+
+[svc.validation.tolerances.relative_percent]
+total_mass_kg = 1.0
+wheelbase_mm = 0.5
+
+[vertical.inputs]
+# signal_map selects reusable canonical KnC mapping shared by loadcases.
+signal_map = "signals/knc.toml"
+measurement_acd = "../measures/raw/example/knc/bounce b1e0f1.acd"
+simulation_hdf5 = "../artifacts/example-vertical/result.h5"
+
+[vertical.setup]
+# SETUP — must match ACD TestInfo metadata.
+code = "b1e0f1"
+brakes_applied = true
+engine_running = false
+front_arb_connected = true
+# WINDOW — inclusive wheel-travel range and interpolation step in mm.
+window_minimum_mm = -70.0
+window_maximum_mm = 70.0
+window_step_mm = 1.0

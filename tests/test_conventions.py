@@ -1,6 +1,9 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 
+from chassis_lab.config import load_config
 from chassis_lab.conventions import (
     BaselinePolicy,
     ConventionError,
@@ -9,13 +12,33 @@ from chassis_lab.conventions import (
     apply_convention,
     convert_values,
 )
-from chassis_lab.svc import SVC_SIGNAL_CONVENTIONS, SVC_SIGNAL_MAPPING
+from chassis_lab.svc import SVC_SIGNAL_CONVENTIONS
+from chassis_lab.vertical import VERTICAL_SIGNAL_CONVENTIONS
 
 
 def test_svc_mapping_has_one_convention_per_signal() -> None:
-    names = {name for name, _ in SVC_SIGNAL_MAPPING}
+    root = Path(__file__).resolve().parents[1]
+    config = load_config(root / "configs" / "varb-lommel-2up.toml")
+    names = {name for name, _ in config.signals}
 
     assert set(SVC_SIGNAL_CONVENTIONS) == names
+
+
+def test_vertical_mapping_has_one_convention_per_signal() -> None:
+    root = Path(__file__).resolve().parents[1]
+    config = load_config(root / "configs" / "varb-lommel-2up.toml")
+    assert config.vertical is not None
+    names = {name for name, _ in config.vertical.signals}
+
+    assert set(VERTICAL_SIGNAL_CONVENTIONS) == names
+    assert all(
+        convention.baseline == BaselinePolicy.STATIC_SIMULATION
+        for convention in VERTICAL_SIGNAL_CONVENTIONS.values()
+    )
+    assert all(
+        convention.corner is not None
+        for convention in VERTICAL_SIGNAL_CONVENTIONS.values()
+    )
 
 
 def test_converts_force_to_mass_without_rounding() -> None:

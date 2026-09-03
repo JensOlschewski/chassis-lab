@@ -35,7 +35,12 @@ def write_acd(
 
     lines = []
     if preamble:
-        lines.extend(("FileInfo: ASCII3", "TestInfo: Example"))
+        lines.extend(
+            (
+                "FileInfo: ASCII3",
+                "TestInfo:\tbrakeson\tbrakeson\tBrakes applied\tinteger\t\t1",
+            )
+        )
     lines.extend(
         (
             row(descriptions, "string", "Description"),
@@ -86,6 +91,14 @@ def test_detects_full_ascii3_and_cp1252(tmp_path: Path) -> None:
     assert summary.dialect == "ascii3"
     assert summary.data_start_line == 9
     assert summary.sample_count == 2
+
+    measurement = AcdFile(path)
+    brakes = measurement.test_info("brakeson")
+    assert brakes.name == "brakeson"
+    assert brakes.description == "Brakes applied"
+    assert brakes.data_type == "integer"
+    assert brakes.unit == ""
+    assert brakes.value == "1"
 
 
 def test_preserves_non_finite_values(tmp_path: Path) -> None:
