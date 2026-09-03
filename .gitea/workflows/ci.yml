@@ -25,6 +25,9 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install Rust build tools
+        run: apt-get update && apt-get install -y cmake
+
       - name: Install Python package
         run: python -m pip install ".[dev]"
 
@@ -38,7 +41,7 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Build repository converter
-        run: cargo build --workspace --release
+        run: cargo build --workspace --release --locked
 
       - name: Check Python
         run: ruff check . && ruff format --check .
@@ -63,6 +66,9 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust build tools
+        run: apt-get update && apt-get install -y cmake
 
       - name: Validate release tag
         env:
