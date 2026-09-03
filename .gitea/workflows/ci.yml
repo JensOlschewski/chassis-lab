@@ -2,6 +2,10 @@ name: CI
 
 on:
   push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
   pull_request:
 
 jobs:
@@ -41,3 +45,82 @@ jobs:
 
       - name: Test Python and integration
         run: pytest -q
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          if not re.fullmatch(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", tag):
+              print(f"invalid release tag: {tag}", file=sys.stderr)
+              raise SystemExit(1)
+
+          expected = tag[1:]
+          python_version = re.search(
+              r'^version = "([^"]+)"',
+              Path("pyproject.toml").read_text(),
+              re.MULTILINE,
+          ).group(1)
+          rust_version = re.search(
+              r'^version = "([^"]+)"',
+              Path("Cargo.toml").read_text(),
+              re.MULTILINE,
+          ).group(1)
+          if {python_version, rust_version} != {expected}:
+              print(
+                  f"tag {tag} does not match Python {python_version} "
+                  f"and Rust {rust_version}",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+          PY
+
+      - name: Build Python wheel
+        run: |
+          python -m pip install build
+          python -m build --wheel
+
+      - name: Build Rust converter
+        run: cargo build --workspace --release --locked
+
+      - name: Package release artifacts
+        run: |
+          tar -czf "dist/adams-res-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
+            -C target/release adams-res
+          (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS)
+
+      - name: Publish Gitea release
+        uses: https://gitea.com/actions/gitea-release-action@5a83c90484ef4355121df5eb60558c8ce66e81ac
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ChassisLab ${{ github.ref_name }}
+          body: |
+            ChassisLab ${{ github.ref_name }}.
+
+            Includes Python wheel and Linux x86_64 `adams-res` binary.
+          files: |
+            dist/*

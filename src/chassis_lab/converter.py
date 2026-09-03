@@ -7,6 +7,8 @@ from pathlib import Path
 
 DEFAULT_BINARY = "adams-res"
 REPOSITORY_BINARIES = (
+    Path(__file__).resolve().parents[2] / "target/release/adams-res",
+    Path(__file__).resolve().parents[2] / "target/debug/adams-res",
     Path(__file__).resolve().parents[2] / "reader/target/release/adams-res",
     Path(__file__).resolve().parents[2] / "reader/target/debug/adams-res",
 )
