@@ -9,6 +9,7 @@ build/
 dist/
 *.egg-info/
 artifacts/
+target/
 measures/raw/
 *.h5
 *.hdf5

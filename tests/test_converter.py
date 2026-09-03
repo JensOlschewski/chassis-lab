@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pytest
 
+import chassis_lab.converter as converter
 from chassis_lab.converter import ConversionError, convert_res
+from chassis_lab.hdf5 import AdamsHdf5
 
 
 def make_fake_converter(path: Path, exit_code: int = 0) -> Path:
@@ -103,3 +105,43 @@ def test_raises_on_missing_binary(tmp_path: Path) -> None:
 
     with pytest.raises(ConversionError, match="not found"):
         convert_res(res, binary=str(tmp_path / "nonexistent"))
+
+
+def test_prefers_repository_converter(tmp_path: Path, monkeypatch) -> None:
+    res = tmp_path / "run.res"
+    res.write_text("dummy")
+    fake = make_fake_converter(tmp_path)
+    monkeypatch.setattr(converter, "REPOSITORY_BINARIES", (fake,))
+
+    result = convert_res(res)
+
+    assert result.binary == str(fake)
+
+
+def test_repository_converter_round_trip_to_python_reader(
+    tmp_path: Path,
+) -> None:
+    binary_available = any(
+        path.is_file() for path in converter.REPOSITORY_BINARIES
+    )
+    if not binary_available:
+        pytest.skip("build reader before running integration test")
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "reader/tests/fixtures/minimal.res"
+    )
+
+    result = convert_res(source, output=tmp_path / "result.h5")
+
+    with AdamsHdf5(result.h5_path) as hdf5:
+        assert hdf5.summary.format_version == 3
+        assert hdf5.summary.sample_count == 2
+        assert hdf5.summary.signal_count == 3
+        front_left = hdf5.read_signal(
+            "vehicle.ride_heights", "front_left", expected_unit="mm"
+        )
+        wheelbase = hdf5.read_signal(
+            "svc_output", "Wheelbase", expected_unit="mm"
+        )
+    assert front_left.values.tolist() == [361.0, 360.5]
+    assert wheelbase.values.tolist() == [2490.0, 2490.0]

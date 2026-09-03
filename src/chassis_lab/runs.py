@@ -14,6 +14,7 @@ from typing import Any
 from chassis_lab import __version__
 from chassis_lab.acd import inspect_acd
 from chassis_lab.config import CaseConfig, load_config
+from chassis_lab.converter import converter_provenance
 from chassis_lab.hdf5 import AdamsHdf5
 from chassis_lab.vertical import validate_vertical_measurement
 
@@ -132,6 +133,13 @@ def _build_manifest(
             "maximum_mm": config.vertical.window.maximum_mm,
             "step_mm": config.vertical.window.step_mm,
         }
+    converter = converter_provenance()
+    converter_path = converter["path"]
+    converter["source_revision"] = (
+        _git_metadata(Path(converter_path))["revision"]
+        if converter_path is not None
+        else None
+    )
     return {
         "schema_version": 1,
         "run": {
@@ -153,7 +161,7 @@ def _build_manifest(
             "chassis_lab": __version__,
             "python": platform.python_version(),
             "platform": platform.platform(),
-            "converter": {"name": "adams-res-cli", "version": None},
+            "converter": converter,
         },
         "git": _git_metadata(config.path),
     }

@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_BINARY = "adams-res"
+REPOSITORY_BINARIES = (
+    Path(__file__).resolve().parents[2] / "reader/target/release/adams-res",
+    Path(__file__).resolve().parents[2] / "reader/target/debug/adams-res",
+)
 
 
 class ConversionError(RuntimeError):
@@ -76,4 +80,33 @@ def _resolve_binary(binary: str) -> str | None:
     expanded = Path(binary).expanduser()
     if expanded.is_absolute() or "/" in binary:
         return str(expanded) if expanded.is_file() else None
+    if binary == DEFAULT_BINARY:
+        for candidate in REPOSITORY_BINARIES:
+            if candidate.is_file():
+                return str(candidate)
     return shutil.which(binary)
+
+
+def converter_provenance(binary: str = DEFAULT_BINARY) -> dict[str, str | None]:
+    """Return converter identity and reported version when available."""
+    executable = _resolve_binary(binary)
+    provenance: dict[str, str | None] = {
+        "name": "adams-res-cli",
+        "path": executable,
+        "version": None,
+    }
+    if executable is None:
+        return provenance
+    try:
+        completed = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return provenance
+    if completed.returncode == 0:
+        version = (completed.stdout or completed.stderr).strip()
+        provenance["version"] = version or None
+    return provenance
