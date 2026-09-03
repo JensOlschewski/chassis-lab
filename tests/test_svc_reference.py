@@ -13,9 +13,9 @@ def reference_data() -> dict[str, object]:
     return {
         "schema_version": 1,
         "case": {
-            "name": "varb-lommel-curb-svc",
-            "variant": "VARB",
-            "loadcase": "CURB",
+            "name": "example-config",
+            "variant": "EXAMPLE",
+            "loadcase": "2UP",
         },
         "coordinate_system": {
             "cg_x_origin": "front_axle_wheel_center",
@@ -58,7 +58,7 @@ def test_loads_svc_reference(tmp_path: Path) -> None:
 
     assert reference.path == path.resolve()
     assert reference.schema_version == 1
-    assert reference.case.name == "varb-lommel-curb-svc"
+    assert reference.case.name == "example-config"
     assert reference.coordinate_system.cg_x_positive == "rearward"
     assert reference.sources[0].file == "source.txt"
     assert reference.value("total_mass_kg") == 1500.0

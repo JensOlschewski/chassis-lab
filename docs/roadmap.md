@@ -96,9 +96,25 @@ Issues:
    validation stages.
 2. Add Gitea Actions for linting and synthetic unit tests.
 3. Add private-runner integration tests against authorized validation data.
-4. Define semantic versioning and compatibility with `adams-res-cli`.
-5. Publish operator documentation and migration status.
-6. Mark MATLAB evaluators legacy only after domain sign-off.
+4. Define synchronized Python/Rust semantic versions and HDF5 compatibility.
+5. Publish tagged Python and Rust release artifacts with checksums.
+6. Publish operator documentation and migration status.
+7. Mark MATLAB evaluators legacy only after domain sign-off.
+
+## Release compatibility policy
+
+- `pyproject.toml` and the Cargo workspace use the same `MAJOR.MINOR.PATCH`
+  version for compatible Python and `adams-res` releases.
+- Releases use matching `vMAJOR.MINOR.PATCH` tags.
+- HDF5 format versions are independent of package versions. Breaking schema
+  changes require a new format version and coordinated reader/reporting support.
+- Run manifests record Python version, converter version, converter source
+  revision, HDF5 format version, and repository revision.
+- Each release publishes a Python wheel and standalone `adams-res` binaries for
+  supported targets. Current workflow target is Linux x86_64. Checksums
+  accompany every artifact.
+- Existing standalone Rust users can continue building `converter/` directly;
+  repository releases are the compatibility reference after migration.
 
 ## Gitea maintenance policy
 
@@ -112,3 +128,4 @@ Issues:
   runner.
 - Stable states are tagged as `v0.x.y` during migration and `v1.0.0` after all
   supported domains reach sign-off.
+- `v*` tags are protected; only trusted maintainers can trigger release jobs.

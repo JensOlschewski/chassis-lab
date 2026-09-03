@@ -1,22 +1,31 @@
 # Architecture
 
-## Responsibility boundaries
+## Pipeline
 
-The KnC workflow consists of independently testable stages:
+```text
+Adams .res / Lommel .acd
+        ↓
+converter/ — Rust result converter
+        ↓
+HDF5 format 3
+        ↓
+src/chassis_lab/ — Python validation
+        ↓
+JSON, CSV, SVG, and run manifests
+```
 
-1. `adams-scripts` generates KnC-specific Adams control/input files from an
-   exported model.
-2. Adams 2019.2 executes the event and creates a text `.res` file.
-3. `adams-res-cli` converts `.res` to HDF5.
-4. `chassis-lab` imports HDF5 and physical `.acd` measurements, applies
-   documented conventions, and creates validation outputs.
+## Repository
 
-This project does not parse `.res`, edit Adams model databases, or own the
-solver invocation during the initial implementation.
+- `converter/` parses Adams `.res` files and writes normalized HDF5.
+- `src/chassis_lab/` reads HDF5 and Lommel `.acd` measurements.
+- `configs/` stores commented example configuration and signal-map TOML files.
+- `measures/` stores synthetic examples; real measurement data stays external.
+- `tests/` contains Python, Rust, and cross-language tests.
+- `artifacts/` stores generated results and remains untracked.
 
-## HDF5 input contract
+## HDF5 contract
 
-The current supported contract is `adams-res-cli` format version 3:
+Supported format version: `3`.
 
 ```text
 /
@@ -28,121 +37,58 @@ The current supported contract is `adams-res-cli` format version 3:
     └── adams_ids          uint64 [component]
 ```
 
-Entity attributes may additionally include `original_name`, `source_path`, and
-`object_id`. Signal lookup will use source path plus component name. Adams IDs
-remain available for diagnostics, but are not stable semantic identifiers for
-validation configuration.
+Signal lookup uses source path plus component. Adams IDs remain diagnostic
+metadata, not stable configuration identifiers. `AdamsHdf5` rejects unsupported
+versions and malformed dimensions.
 
-The reader must reject unsupported format versions and malformed dimensions.
-Changes to this contract require coordination with `adams-res-cli` and a new
-format version when compatibility cannot be retained.
+## Measurements
 
-## Measurement input contract
+Lommel `.acd` files contain metadata, offsets, channel names, units, and numeric
+samples. The reader detects data boundaries instead of relying on VARB/VARC line
+numbers. It preserves `NaN` and `Inf`; evaluators decide whether they are valid.
 
-Lommel `.acd` exports are tab-separated files containing:
+## Configuration
 
-- a physical offset row at line 2;
-- normalized channel names at line 3;
-- units at line 4;
-- metadata followed by numeric samples.
+`configs/example-config.toml` defines vehicle metadata and SVC inputs. Private
+domain configurations can add vertical inputs using the same structure:
 
-Existing MATLAB scripts assume samples start at line 30 for VARB and line 33
-for VARC. The Python parser must detect the numeric data section from content
-and validate required channels rather than depending on variant-specific line
-numbers.
-
-## Canonical model
-
-All domain evaluators consume a common signal representation:
-
-- canonical corner names: `front_left`, `front_right`, `rear_left`,
-  `rear_right`;
-- numerical values with explicit units;
-- source and original signal identifier;
-- baseline policy: absolute, measurement offset, or static simulation;
-- explicit scale and sign convention.
-
-Conversions and sign changes belong in configuration/convention code, not in
-plotting functions. This prevents repetition of the current MATLAB right-side
-toe inversions and mixed radian/degree or Nm/Nmm conversions.
-
-`chassis_lab.conventions` owns these transformations. It rejects missing
-source units, applies only declared conversions, and returns transformed values
-with source, original unit, target unit, corner, baseline, scale, and sign
-provenance. Empty units in legacy HDF5 metadata are therefore unverified, not
-implicitly converted.
-
-Canonical HDF5 entity/component/unit mappings live in reusable TOML files
-under `configs/signals/`. Case TOML files reference one map per configured
-domain through `[svc.inputs].signal_map` or `[vertical.inputs].signal_map`.
-Inline signal tables remain supported for isolated fixtures or model-specific
-exceptions, but a domain cannot combine both forms. Mapping files are resolved
-relative to the case config and included in report and run-manifest provenance.
-
-## Outputs
-
-Every run writes to a new directory under `artifacts/`:
-
-```text
-artifacts/<case>/<run-id>/
-├── run.json
-├── metrics.json
-├── summary.csv
-├── report.html
-└── figures/
+```toml
+[svc.inputs]
+signal_map = "example-signals.toml"
+simulation_hdf5 = "..."
+measurement_reference = "...json"
 ```
 
-`run.json` records the input paths and checksums, database Git revision,
-configuration, HDF5 format version, converter version when available, and KnC
-validation version. Inputs are never overwritten.
+`[vertical.setup]` contains setup flags and `window_*_mm` bounds. Signal maps
+contain canonical names, HDF5 entities, components, and units. Inline mappings
+remain available for isolated fixtures, but cannot be combined with `signal_map`.
 
-The `create-run` command creates the run directory and `run.json`; manifest
-creation does not imply that other outputs exist. `validate-svc` prints a
-console summary and writes `metrics.json` and `summary.csv` only when explicit
-output paths are supplied. Report content has no timestamp and preserves
-reference metric order, making repeated output deterministic for unchanged
-inputs.
+## Conventions
 
-SVC static evaluators use final HDF5 sample by default because Adams static
-equilibrium is expected at the end of the event. The SVC longitudinal
-coordinate uses front-left wheel-center X as origin; CG-X is that origin plus
-rear axle mass fraction times wheelbase. Values remain unrounded internally.
+`chassis_lab.conventions` owns units, corners, signs, scales, and baseline
+policies. `apply_convention` returns transformed values with provenance. Missing
+source units remain unverified and cannot be converted implicitly.
 
-### SVC reference comparison
+SVC evaluators use the final HDF5 sample by default. Vertical evaluation compares
+measurement-offset and static-simulation X/Y/Z trajectories for all four corners
+on the configured travel grid. Incomplete coverage and setup mismatches fail.
 
-Reviewed SVC references use Lommel vehicle-information HTML for masses,
-geometry, and ride heights, plus compensated MOI output where available. JSON
-source entries retain SHA-256 checksums. Toe and camber add eight metrics where
-static alignment was measured. VARB curb remains at 21 metrics because its curb
-alignment cells are empty. VARB 2UP has 21 metrics, VARC 2UP has 25, and VARC
-curb has 29. The HTML "Test Condition" alignment column is used for 2UP. Adams
-`toe_camber_body` values are interpreted as degrees; empty legacy HDF5 unit
-metadata remains unverified. Missing 2UP CG-height, inertia, and VARB ride-height
-values are not inferred.
+## Provenance and outputs
 
-Acceptance uses the greater of each configured absolute tolerance and relative
-percentage. Case TOML files are the authoritative tolerance policy. Against the
-current HDF5 artifacts, remaining out-of-tolerance metrics are:
+`create-run` writes `run.json` with resolved input paths, SHA-256 checksums, HDF5
+metadata, Python and converter versions, converter source revision, and Git
+revision. Reports are deterministic and never overwrite existing files without
+`--force`.
 
-| Case | Discrepancies |
-| --- | --- |
-| VARB curb | front-left mass; front-right, rear-left, rear-right ride height |
-| VARC curb | front-left mass; wheelbase; rear ride heights; rear toe/camber |
-| VARB 2UP | front-left mass; front-right toe and camber |
-| VARC 2UP | front-left mass; rear-left, rear-right ride height |
+Raw measurements and generated HDF5 files are local ignored inputs.
 
-These failures are reported validation results, not relaxed away. Real-data
-integration tests pin the discrepancy sets so source, mapping, or model changes
-require explicit review.
+## Checks
 
-## External-tool integration
-
-The tools are configured by executable path, with command discovery through
-`PATH` as the default. The eventual orchestration layer may invoke them through
-`subprocess`, but analysis commands continue to accept existing HDF5 files so
-that they are deterministic and usable without Adams.
-
-The current `adams-scripts/knc` implementation is a prototype. Before it is
-integrated, it needs tests and corrections for rear-wheel ID discovery, repeated
-right-front control lines, duplicate variable reassignment, and a stray shell
-character in the right-front lookup.
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --locked
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/pytest -q
+```
