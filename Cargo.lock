@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "adams-res-cli"
+name = "adams-res-converter"
 version = "0.3.0"
 dependencies = [
  "anyhow",

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 
-use adams_res_cli::{hdf5_writer, parser};
+use adams_res_converter::{hdf5_writer, parser};
 
 #[derive(Debug, Parser)]
 #[command(

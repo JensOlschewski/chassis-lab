@@ -1,5 +1,5 @@
 [package]
-name = "adams-res-cli"
+name = "adams-res-converter"
 version.workspace = true
 edition = "2024"
 
