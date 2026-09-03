@@ -1,0 +1,26 @@
+# Minimal, synthetic SVC configuration.
+# Relative paths resolve from this file's directory.
+
+[case]
+name = "example-config"
+variant = "EXAMPLE"
+loadcase = "2UP"
+
+[physics]
+gravity = 9.80665 # m/s^2
+
+[svc.inputs]
+# Replace these example paths with converted simulation output and reviewed
+# measurements from your own vehicle or test campaign.
+signal_map = "example-signals.toml"
+simulation_hdf5 = "../artifacts/example/result.h5"
+measurement_reference = "../measures/example-measures.json"
+
+[svc.validation.tolerances.absolute]
+# Keep only metrics relevant to your example or validation case.
+total_mass_kg = 20.0
+wheelbase_mm = 5.0
+
+[svc.validation.tolerances.relative_percent]
+total_mass_kg = 1.0
+wheelbase_mm = 0.5

@@ -10,7 +10,13 @@ dist/
 *.egg-info/
 artifacts/
 target/
+configs/*.toml
+!configs/example-config.toml
+!configs/example-signals.toml
+configs/signals/
 measures/raw/
+measures/**/*.json
+!measures/example-measures.json
 *.h5
 *.hdf5
 *.res

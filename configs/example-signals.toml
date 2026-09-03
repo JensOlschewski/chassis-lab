@@ -1,0 +1,27 @@
+# Synthetic signal map used by example-config.toml.
+# Entity and component names must match converted HDF5 metadata exactly.
+
+[signals.front_left_wheel_load]
+entity = "example.wheel_loads"
+component = "front_left"
+unit = "newton"
+
+[signals.front_right_wheel_load]
+entity = "example.wheel_loads"
+component = "front_right"
+unit = "newton"
+
+[signals.rear_left_wheel_load]
+entity = "example.wheel_loads"
+component = "rear_left"
+unit = "newton"
+
+[signals.rear_right_wheel_load]
+entity = "example.wheel_loads"
+component = "rear_right"
+unit = "newton"
+
+[signals.wheelbase]
+entity = "example.geometry"
+component = "wheelbase"
+unit = "mm"

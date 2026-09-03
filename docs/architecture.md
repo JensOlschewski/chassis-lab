@@ -18,7 +18,8 @@ JSON, CSV, SVG, and run manifests
 
 - `converter/` parses Adams `.res` files and writes normalized HDF5.
 - `src/chassis_lab/` reads HDF5 and Lommel `.acd` measurements.
-- `configs/` stores case and reusable signal-map TOML files.
+- `configs/` stores commented example configuration and signal-map TOML files.
+- `measures/` stores synthetic examples; real measurement data stays external.
 - `tests/` contains Python, Rust, and cross-language tests.
 - `artifacts/` stores generated results and remains untracked.
 
@@ -48,18 +49,14 @@ numbers. It preserves `NaN` and `Inf`; evaluators decide whether they are valid.
 
 ## Configuration
 
-Case files define vehicle metadata once, then domain inputs:
+`configs/example-config.toml` defines vehicle metadata and SVC inputs. Private
+domain configurations can add vertical inputs using the same structure:
 
 ```toml
 [svc.inputs]
-signal_map = "signals/svc.toml"
+signal_map = "example-signals.toml"
 simulation_hdf5 = "..."
 measurement_reference = "...json"
-
-[vertical.inputs]
-signal_map = "signals/knc.toml"
-measurement_acd = "...acd"
-simulation_hdf5 = "...h5"
 ```
 
 `[vertical.setup]` contains setup flags and `window_*_mm` bounds. Signal maps
