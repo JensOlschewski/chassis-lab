@@ -12,7 +12,7 @@ from chassis_lab.runs import sha256_file
 from chassis_lab.svc_reference import load_svc_reference
 from chassis_lab.svc_validation import MetricComparison, SvcValidationResult
 
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 CSV_FIELDS = (
     "case",
     "variant",
@@ -27,6 +27,7 @@ CSV_FIELDS = (
     "allowed_difference",
     "passed",
     "config_sha256",
+    "signal_map_sha256",
     "simulation_sha256",
     "reference_sha256",
 )
@@ -70,6 +71,7 @@ class SvcReport:
     validation: SvcValidationResult
     sample_index: int
     config_input: FileProvenance
+    signal_map_input: FileProvenance | None
     simulation_input: FileProvenance
     reference_input: FileProvenance
     reference_sources: tuple[dict[str, str | None], ...]
@@ -86,6 +88,13 @@ class SvcReport:
         )
 
     def as_dict(self) -> dict[str, object]:
+        inputs = {
+            "config": self.config_input.as_dict(),
+            "simulation_hdf5": self.simulation_input.as_dict(),
+            "reference": self.reference_input.as_dict(),
+        }
+        if self.signal_map_input is not None:
+            inputs["signal_map"] = self.signal_map_input.as_dict()
         return {
             "schema_version": REPORT_SCHEMA_VERSION,
             "case": {
@@ -96,11 +105,7 @@ class SvcReport:
             "sample_index": self.sample_index,
             "passed": self.passed,
             "failed_count": len(self.failed),
-            "inputs": {
-                "config": self.config_input.as_dict(),
-                "simulation_hdf5": self.simulation_input.as_dict(),
-                "reference": self.reference_input.as_dict(),
-            },
+            "inputs": inputs,
             "reference_sources": list(self.reference_sources),
             "software": {"chassis_lab": __version__},
             "metrics": [metric.as_dict() for metric in self.metrics],
@@ -142,6 +147,11 @@ def build_svc_report(
         validation=validation,
         sample_index=sample_index,
         config_input=_provenance(config.path),
+        signal_map_input=(
+            _provenance(config.svc_signal_map)
+            if config.svc_signal_map is not None
+            else None
+        ),
         simulation_input=_provenance(config.simulation_hdf5),
         reference_input=_provenance(reference.path),
         reference_sources=sources,
@@ -235,6 +245,11 @@ def render_svc_csv(report: SvcReport) -> str:
                 "allowed_difference": metric.allowed_difference,
                 "passed": str(metric.passed).lower(),
                 "config_sha256": report.config_input.sha256,
+                "signal_map_sha256": (
+                    report.signal_map_input.sha256
+                    if report.signal_map_input is not None
+                    else ""
+                ),
                 "simulation_sha256": report.simulation_input.sha256,
                 "reference_sha256": report.reference_input.sha256,
             }

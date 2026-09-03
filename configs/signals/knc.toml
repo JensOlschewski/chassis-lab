@@ -1,0 +1,79 @@
+[signals.front_left_travel]
+entity = "wheel_center_rise_front_wrt_body"
+component = "left_z"
+unit = "mm"
+
+[signals.front_left_wheel_center_x]
+entity = "wheel_center_rise_front_wrt_body"
+component = "left_x"
+unit = "mm"
+
+[signals.front_left_wheel_center_y]
+entity = "wheel_center_rise_front_wrt_body"
+component = "left_y"
+unit = "mm"
+
+[signals.front_left_wheel_center_z]
+entity = "wheel_center_rise_front_wrt_body"
+component = "left_z"
+unit = "mm"
+
+[signals.front_right_travel]
+entity = "wheel_center_rise_front_wrt_body"
+component = "right_z"
+unit = "mm"
+
+[signals.front_right_wheel_center_x]
+entity = "wheel_center_rise_front_wrt_body"
+component = "right_x"
+unit = "mm"
+
+[signals.front_right_wheel_center_y]
+entity = "wheel_center_rise_front_wrt_body"
+component = "right_y"
+unit = "mm"
+
+[signals.front_right_wheel_center_z]
+entity = "wheel_center_rise_front_wrt_body"
+component = "right_z"
+unit = "mm"
+
+[signals.rear_left_travel]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "left_z"
+unit = "mm"
+
+[signals.rear_left_wheel_center_x]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "left_x"
+unit = "mm"
+
+[signals.rear_left_wheel_center_y]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "left_y"
+unit = "mm"
+
+[signals.rear_left_wheel_center_z]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "left_z"
+unit = "mm"
+
+[signals.rear_right_travel]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "right_z"
+unit = "mm"
+
+[signals.rear_right_wheel_center_x]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "right_x"
+unit = "mm"
+
+[signals.rear_right_wheel_center_y]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "right_y"
+unit = "mm"
+
+[signals.rear_right_wheel_center_z]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "right_z"
+unit = "mm"

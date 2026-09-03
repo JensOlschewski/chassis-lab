@@ -84,16 +84,17 @@ Convert a `.res` result file to HDF5 and validate a case configuration:
 ```shell
 .venv/bin/clab convert-res /path/to/result.res -o artifacts/svc/result.h5 \
     --binary /path/to/adams-res
-.venv/bin/clab validate-config configs/varb-lommel-2up-svc.toml
+.venv/bin/clab validate-config configs/varb-lommel-2up.toml
 ```
 
 Create an isolated, auditable run manifest:
 
 ```shell
-.venv/bin/clab create-run configs/varb-lommel-2up-svc.toml
+.venv/bin/clab create-run configs/varb-lommel-2up.toml
+.venv/bin/clab create-run configs/varb-lommel-2up.toml --domain vertical
 ```
 
-This validates the configured HDF5 input and writes `run.json` below
+This validates inputs for the selected domain and writes `run.json` below
 `artifacts/<case>/<run-id>/`. The manifest records resolved inputs, SHA-256
 checksums, configuration, HDF5 metadata, software versions, and Git revision.
 Run creation never overwrites source inputs or existing run directories.
@@ -117,28 +118,62 @@ discrepancies, and `2` for configuration, input, or report errors. Console
 status uses green/red ANSI colors on terminals. Use `--color always` or
 `--color never` to override detection; `NO_COLOR` disables automatic color.
 
-A case TOML declares the case metadata, simulation input, and gravitational
-constant. SVC cases inherit one shared canonical signal mapping from
-`chassis_lab.svc`, so VARB/VARC and loadcase files do not duplicate mappings:
+Compare vertical wheel-center trajectories and optionally export a fixed SVG,
+JSON provenance report, and metric CSV:
+
+```shell
+.venv/bin/clab validate-vertical configs/varb-lommel-2up.toml \
+    --plot-output artifacts/varb-vertical/trajectories.svg \
+    --json-output artifacts/varb-vertical/report.json \
+    --csv-output artifacts/varb-vertical/metrics.csv
+```
+
+Vertical reports contain baseline difference, RMSE, and maximum absolute error
+for X/Y/Z at all four corners. These metrics are informational until reviewed
+vertical tolerances are configured. Structural errors, setup mismatches,
+missing coverage, and invalid units fail the command. Plotting is always
+non-interactive and only SVG is accepted.
+
+A unified case TOML declares vehicle/loadcase metadata once and contains
+domain sections. Domain input tables reference reusable signal-map TOML files;
+loadcase files contain only inputs, setup, validation, and physics:
 
 ```toml
 [case]
-name = "varb-lommel-2up-svc"
-domain = "svc"
+name = "varb-lommel-2up"
 variant = "VARB"
 loadcase = "2UP"
 
-[inputs]
-simulation_hdf5 = "../artifacts/varb-lommel-2up-svc/result.h5"
-
 [physics]
-gravity = 9.80665 # m/s^2
+gravity = 9.80665
+
+[svc.inputs]
+signal_map = "signals/svc.toml"
+simulation_hdf5 = "../artifacts/varb-lommel-2up-svc/result.h5"
+measurement_reference = "../measures/svc/varb-2up-lommel-measures.json"
+
+[vertical.inputs]
+signal_map = "signals/knc.toml"
+measurement_acd = "../measures/raw/varb/knc/bounce b1e0f1 front and rear.acd"
+simulation_hdf5 = "../artifacts/varb-lommel-2up-vertical/result.h5"
+
+[vertical.setup]
+code = "b1e0f1"
+brakes_applied = true
+engine_running = false
+front_arb_connected = true
 ```
 
-Paths in `[inputs]` are resolved relative to the configuration file, so runs
+`configs/signals/svc.toml` and `configs/signals/knc.toml` own canonical HDF5
+entity/component/unit mappings. A config may instead declare inline
+`[svc.signals.*]` or `[vertical.signals.*]` entries for a one-off model, but it
+cannot combine an inline mapping with input `signal_map`. Reports and run
+manifests record the selected mapping file and SHA-256 digest.
+
+Paths in input sections are resolved relative to the configuration file, so runs
 never depend on the current working directory. Signals whose entity shares a
 source path with another axis (such as the rear wheel-tire forces) must be
-pinned to their explicit `/results/<group>` path in `[signals]`.
+pinned to their explicit `/results/<group>` path in a signal map.
 `validate-config` re-checks every shared mapping against the HDF5 file when
 present, including source units and duplicate-cell detection. It reports
 `VERIFIED` for matching source metadata, `UNVERIFIED` when legacy HDF5 omits a

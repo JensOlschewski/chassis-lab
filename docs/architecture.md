@@ -72,6 +72,13 @@ with source, original unit, target unit, corner, baseline, scale, and sign
 provenance. Empty units in legacy HDF5 metadata are therefore unverified, not
 implicitly converted.
 
+Canonical HDF5 entity/component/unit mappings live in reusable TOML files
+under `configs/signals/`. Case TOML files reference one map per configured
+domain through `[svc.inputs].signal_map` or `[vertical.inputs].signal_map`.
+Inline signal tables remain supported for isolated fixtures or model-specific
+exceptions, but a domain cannot combine both forms. Mapping files are resolved
+relative to the case config and included in report and run-manifest provenance.
+
 ## Outputs
 
 Every run writes to a new directory under `artifacts/`:

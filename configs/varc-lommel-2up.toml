@@ -1,19 +1,17 @@
 [case]
-name = "varc-lommel-2up-svc"
-domain = "svc"
+name = "varc-lommel-2up"
 variant = "VARC"
 loadcase = "2UP"
-
-[inputs]
-simulation_hdf5 = "../artifacts/varc-lommel-2up-svc/result.h5"
 
 [physics]
 gravity = 9.80665
 
-[validation]
-reference = "../measures/svc/varc-2up-lommel-measures.json"
+[svc.inputs]
+signal_map = "signals/svc.toml"
+simulation_hdf5 = "../artifacts/varc-lommel-2up-svc/result.h5"
+measurement_reference = "../measures/svc/varc-2up-lommel-measures.json"
 
-[validation.tolerances.absolute]
+[svc.validation.tolerances.absolute]
 front_left_mass_kg = 10.0
 front_right_mass_kg = 10.0
 rear_left_mass_kg = 10.0
@@ -40,7 +38,7 @@ camber_front_right_deg = 0.2
 camber_rear_left_deg = 0.2
 camber_rear_right_deg = 0.2
 
-[validation.tolerances.relative_percent]
+[svc.validation.tolerances.relative_percent]
 front_left_mass_kg = 2.0
 front_right_mass_kg = 2.0
 rear_left_mass_kg = 2.0
@@ -49,3 +47,17 @@ front_mass_kg = 1.5
 rear_mass_kg = 1.5
 total_mass_kg = 1.0
 cg_x_from_front_axle_mm = 1.0
+
+[vertical.inputs]
+signal_map = "signals/knc.toml"
+measurement_acd = "../measures/raw/varc/knc/bounce b1e0f1 front and rear.acd"
+simulation_hdf5 = "../artifacts/varc-lommel-2up-vertical/result.h5"
+
+[vertical.setup]
+code = "b1e0f1"
+brakes_applied = true
+engine_running = false
+front_arb_connected = true
+window_minimum_mm = -65.0
+window_maximum_mm = 65.0
+window_step_mm = 1.0

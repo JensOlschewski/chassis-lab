@@ -1,7 +1,7 @@
 {
     "schema_version": 1,
     "case": {
-        "name": "varb-lommel-2up-svc",
+        "name": "varb-lommel-2up",
         "variant": "VARB",
         "loadcase": "2UP"
     },

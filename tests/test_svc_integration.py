@@ -14,13 +14,13 @@ from chassis_lab.svc_validation import (
 _ROOT = Path(__file__).resolve().parent.parent
 VARB_CONFIG_PATH = _ROOT / "configs" / "varb-lommel-curb-svc.toml"
 VARC_CONFIG_PATH = _ROOT / "configs" / "varc-lommel-curb-svc.toml"
-VARB_2UP_CONFIG_PATH = _ROOT / "configs" / "varb-lommel-2up-svc.toml"
-VARC_2UP_CONFIG_PATH = _ROOT / "configs" / "varc-lommel-2up-svc.toml"
+VARB_2UP_CONFIG_PATH = _ROOT / "configs" / "varb-lommel-2up.toml"
+VARC_2UP_CONFIG_PATH = _ROOT / "configs" / "varc-lommel-2up.toml"
 EXPECTED_METRIC_COUNTS = {
     "varb-lommel-curb-svc": 21,
     "varc-lommel-curb-svc": 29,
-    "varb-lommel-2up-svc": 21,
-    "varc-lommel-2up-svc": 25,
+    "varb-lommel-2up": 21,
+    "varc-lommel-2up": 25,
 }
 EXPECTED_FAILURES = {
     "varb-lommel-curb-svc": {
@@ -39,12 +39,12 @@ EXPECTED_FAILURES = {
         "camber_rear_left_deg",
         "camber_rear_right_deg",
     },
-    "varb-lommel-2up-svc": {
+    "varb-lommel-2up": {
         "front_left_mass_kg",
         "toe_front_right_deg",
         "camber_front_right_deg",
     },
-    "varc-lommel-2up-svc": {
+    "varc-lommel-2up": {
         "front_left_mass_kg",
         "ride_height_rear_left_mm",
         "ride_height_rear_right_mm",

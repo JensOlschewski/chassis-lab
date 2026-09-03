@@ -45,6 +45,24 @@ class AcdSignalInfo:
 
 
 @dataclass(frozen=True)
+class AcdTestInfo:
+    name: str
+    description: str
+    data_type: str
+    unit: str
+    value: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "data_type": self.data_type,
+            "unit": self.unit,
+            "value": self.value,
+        }
+
+
+@dataclass(frozen=True)
 class AcdSignal:
     info: AcdSignalInfo
     values: NDArray[np.float64]
@@ -95,8 +113,21 @@ class AcdFile:
             self.dialect,
             self.data_start_line,
             self._signals,
+            self._test_info,
         ) = _read_header(self.path)
         self._by_name = {signal.name: signal for signal in self._signals}
+        self._test_info_by_name = {info.name: info for info in self._test_info}
+
+    def test_info(
+        self, name: str | None = None
+    ) -> AcdTestInfo | tuple[AcdTestInfo, ...]:
+        """Return embedded test metadata or one named metadata field."""
+        if name is None:
+            return self._test_info
+        try:
+            return self._test_info_by_name[name]
+        except KeyError as error:
+            raise KeyError(f"ACD test metadata not found: {name}") from error
 
     def signals(self, match: str | None = None) -> tuple[AcdSignalInfo, ...]:
         if match is None:
@@ -231,7 +262,13 @@ def inspect_acd(path: Path | str) -> AcdSummary:
 
 def _read_header(
     path: Path,
-) -> tuple[str, str, int, tuple[AcdSignalInfo, ...]]:
+) -> tuple[
+    str,
+    str,
+    int,
+    tuple[AcdSignalInfo, ...],
+    tuple[AcdTestInfo, ...],
+]:
     errors: list[UnicodeDecodeError] = []
     for encoding in ("utf-8-sig", "cp1252"):
         try:
@@ -246,8 +283,15 @@ def _read_header(
 def _parse_header(
     path: Path,
     encoding: str,
-) -> tuple[str, str, int, tuple[AcdSignalInfo, ...]]:
+) -> tuple[
+    str,
+    str,
+    int,
+    tuple[AcdSignalInfo, ...],
+    tuple[AcdTestInfo, ...],
+]:
     metadata: dict[str, list[str]] = {}
+    test_info: list[AcdTestInfo] = []
     first_content = ""
     kpoly_line = 0
     data_start_line = 0
@@ -259,6 +303,16 @@ def _parse_header(
             fields = [
                 field.strip() for field in line.rstrip("\r\n").split("\t")
             ]
+            if len(fields) >= 7 and fields[0] == "TestInfo:":
+                test_info.append(
+                    AcdTestInfo(
+                        name=fields[1],
+                        description=fields[3],
+                        data_type=fields[4],
+                        unit=_normalize_unit(fields[5]),
+                        value=_normalize_unit("\t".join(fields[6:])),
+                    )
+                )
             label = fields[-1] if fields else ""
             if label in REQUIRED_METADATA:
                 metadata[label] = fields[:-2]
@@ -323,7 +377,10 @@ def _parse_header(
         for column, name in enumerate(names)
     )
     dialect = "ascii3" if first_content.startswith("FileInfo:") else "stripped"
-    return encoding, dialect, data_start_line, signals
+    test_names = [info.name for info in test_info]
+    if len(test_names) != len(set(test_names)):
+        raise AcdFormatError("ACD test metadata names must be unique")
+    return encoding, dialect, data_start_line, signals, tuple(test_info)
 
 
 def _normalize_unit(unit: str) -> str:

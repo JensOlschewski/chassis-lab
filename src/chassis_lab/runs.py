@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from chassis_lab import __version__
+from chassis_lab.acd import inspect_acd
 from chassis_lab.config import CaseConfig, load_config
 from chassis_lab.hdf5 import AdamsHdf5
+from chassis_lab.vertical import validate_vertical_measurement
 
 
 class RunError(RuntimeError):
@@ -35,16 +37,22 @@ def sha256_file(path: Path | str) -> str:
 def create_run(
     config_path: Path | str,
     *,
+    domain: str = "svc",
     artifacts_root: Path | str | None = None,
     run_id: str | None = None,
 ) -> Path:
     """Validate inputs and create isolated run directory with ``run.json``."""
     config = load_config(config_path)
-    if not config.simulation_hdf5.is_file():
+    simulation_hdf5, domain_inputs, signals = _domain_inputs(config, domain)
+    if not simulation_hdf5.is_file():
         raise FileNotFoundError(
-            f"simulation HDF5 file does not exist: {config.simulation_hdf5}"
+            f"simulation HDF5 file does not exist: {simulation_hdf5}"
         )
-    with AdamsHdf5(config.simulation_hdf5) as result:
+    if domain == "vertical":
+        measurement = domain_inputs["measurement_acd"]
+        validate_vertical_measurement(config.vertical)
+        inspect_acd(measurement)
+    with AdamsHdf5(simulation_hdf5) as result:
         hdf5_summary = result.summary.as_dict()
 
     root = (
@@ -59,7 +67,15 @@ def create_run(
     except FileExistsError as error:
         raise RunError(f"run directory already exists: {run_dir}") from error
 
-    manifest = _build_manifest(config, hdf5_summary, run_dir, root)
+    manifest = _build_manifest(
+        config,
+        hdf5_summary,
+        run_dir,
+        root,
+        domain=domain,
+        domain_inputs=domain_inputs,
+        signals=signals,
+    )
     manifest_path = run_dir / "run.json"
     temporary_path = run_dir / ".run.json.tmp"
     try:
@@ -79,13 +95,17 @@ def _build_manifest(
     hdf5_summary: dict[str, Any],
     run_dir: Path,
     artifacts_root: Path,
+    *,
+    domain: str,
+    domain_inputs: dict[str, Path],
+    signals: tuple,
 ) -> dict[str, Any]:
     config_data = {
         "name": config.name,
-        "domain": config.domain,
+        "domain": domain,
         "variant": config.variant,
         "loadcase": config.loadcase,
-        "simulation_hdf5": str(config.simulation_hdf5),
+        "simulation_hdf5": str(domain_inputs["simulation_hdf5"]),
         "gravity": config.gravity,
         "signals": [
             {
@@ -94,9 +114,24 @@ def _build_manifest(
                 "component": ref.component,
                 "unit": ref.unit,
             }
-            for canonical, ref in config.signals
+            for canonical, ref in signals
         ],
     }
+    if "measurement_acd" in domain_inputs:
+        config_data["measurement_acd"] = str(domain_inputs["measurement_acd"])
+    if domain == "vertical" and config.vertical is not None:
+        config_data["setup"] = {
+            "code": config.vertical.setup.code,
+            "brakes_applied": config.vertical.setup.brakes_applied,
+            "engine_running": config.vertical.setup.engine_running,
+            "front_arb_connected": config.vertical.setup.front_arb_connected,
+            "rear_arb_connected": config.vertical.setup.rear_arb_connected,
+        }
+        config_data["window"] = {
+            "minimum_mm": config.vertical.window.minimum_mm,
+            "maximum_mm": config.vertical.window.maximum_mm,
+            "step_mm": config.vertical.window.step_mm,
+        }
     return {
         "schema_version": 1,
         "run": {
@@ -109,7 +144,9 @@ def _build_manifest(
         "config": {"path": str(config.path), "snapshot": config_data},
         "inputs": {
             "config": _file_record(config.path),
-            "simulation_hdf5": _file_record(config.simulation_hdf5),
+            **{
+                name: _file_record(path) for name, path in domain_inputs.items()
+            },
         },
         "hdf5": hdf5_summary,
         "software": {
@@ -120,6 +157,31 @@ def _build_manifest(
         },
         "git": _git_metadata(config.path),
     }
+
+
+def _domain_inputs(
+    config: CaseConfig, domain: str
+) -> tuple[Path, dict[str, Path], tuple]:
+    if domain == "svc":
+        simulation = config.simulation_hdf5
+        inputs = {"simulation_hdf5": simulation}
+        if config.svc_signal_map is not None:
+            inputs["signal_map"] = config.svc_signal_map
+        return simulation, inputs, config.signals
+    if domain == "vertical":
+        if config.vertical is None:
+            raise RunError(
+                f"case '{config.name}' has no [vertical] configuration"
+            )
+        simulation = config.vertical.simulation_hdf5
+        inputs = {
+            "simulation_hdf5": simulation,
+            "measurement_acd": config.vertical.measurement_acd,
+        }
+        if config.vertical.signal_map is not None:
+            inputs["signal_map"] = config.vertical.signal_map
+        return simulation, inputs, config.vertical.signals
+    raise RunError(f"unsupported run domain: {domain}")
 
 
 def _file_record(path: Path) -> dict[str, Any]:

@@ -54,6 +54,46 @@ inertia_xx_kg_mm2 = 5.0
 """
 )
 
+UNIFIED_TOML = """\
+[case]
+name = "varb-lommel-2up"
+variant = "VARB"
+loadcase = "2UP"
+
+[physics]
+gravity = 9.80665
+
+[svc.inputs]
+simulation_hdf5 = "svc.h5"
+measurement_reference = "reference.json"
+
+[svc.validation.tolerances.absolute]
+total_mass_kg = 20.0
+
+[svc.signals.signal]
+entity = "svc"
+component = "value"
+unit = "mm"
+
+[vertical.inputs]
+measurement_acd = "bounce.acd"
+simulation_hdf5 = "vertical.h5"
+
+[vertical.setup]
+code = "b1e0f1"
+brakes_applied = true
+engine_running = false
+front_arb_connected = true
+window_minimum_mm = -75
+window_maximum_mm = 75
+window_step_mm = 1
+
+[vertical.signals.front_left_travel]
+entity = "wheel_center_rise_front_wrt_body"
+component = "left_z"
+unit = "mm"
+"""
+
 
 def write_config(tmp_path: Path, text: str, name: str = "case.toml") -> Path:
     path = tmp_path / name
@@ -90,6 +130,93 @@ def test_loads_config_and_resolves_relative_path(tmp_path: Path) -> None:
         ),
     )
     assert config.validation is None
+
+
+def test_loads_unified_svc_and_vertical_config(tmp_path: Path) -> None:
+    config = load_config(write_config(tmp_path, UNIFIED_TOML))
+
+    assert config.name == "varb-lommel-2up"
+    assert config.domain == "multi"
+    assert config.simulation_hdf5 == (tmp_path / "svc.h5").resolve()
+    assert config.validation is not None
+    assert (
+        config.validation.reference == (tmp_path / "reference.json").resolve()
+    )
+    assert len(config.signals) == 1
+    assert config.vertical is not None
+    assert (
+        config.vertical.measurement_acd == (tmp_path / "bounce.acd").resolve()
+    )
+    assert (
+        config.vertical.simulation_hdf5 == (tmp_path / "vertical.h5").resolve()
+    )
+    assert config.vertical.setup.code == "b1e0f1"
+    assert config.vertical.setup.rear_arb_connected is None
+    assert config.vertical.window.minimum_mm == -75.0
+    assert config.vertical.signal("front_left_travel").component == "left_z"
+
+
+def test_loads_unified_signal_maps_from_domain_inputs(tmp_path: Path) -> None:
+    signal_map = tmp_path / "signals.toml"
+    signal_map.write_text(
+        "[signals.signal]\n"
+        'entity = "entity"\ncomponent = "value"\nunit = "mm"\n'
+    )
+    content = UNIFIED_TOML.replace(
+        'simulation_hdf5 = "svc.h5"',
+        'signal_map = "signals.toml"\nsimulation_hdf5 = "svc.h5"',
+    ).replace(
+        'simulation_hdf5 = "vertical.h5"',
+        'signal_map = "signals.toml"\nsimulation_hdf5 = "vertical.h5"',
+    )
+    content = content.replace(
+        "[svc.signals.signal]\n"
+        'entity = "svc"\ncomponent = "value"\nunit = "mm"\n\n',
+        "",
+    ).replace(
+        "[vertical.signals.front_left_travel]\n"
+        'entity = "wheel_center_rise_front_wrt_body"\n'
+        'component = "left_z"\n'
+        'unit = "mm"\n',
+        "",
+    )
+
+    config = load_config(write_config(tmp_path, content))
+
+    assert config.svc_signal_map == signal_map.resolve()
+    assert config.vertical is not None
+    assert config.vertical.signal_map == signal_map.resolve()
+
+
+def test_rejects_unified_signal_map_outside_inputs(tmp_path: Path) -> None:
+    content = UNIFIED_TOML.replace(
+        "[svc.inputs]", '[svc]\nsignal_map = "signals.toml"\n\n[svc.inputs]'
+    )
+
+    with pytest.raises(ConfigError, match=r"unknown \[svc\] key"):
+        load_config(write_config(tmp_path, content))
+
+
+def test_rejects_reference_inside_unified_validation(tmp_path: Path) -> None:
+    content = UNIFIED_TOML.replace(
+        "[svc.validation.tolerances.absolute]",
+        '[svc.validation]\nreference = "other.json"\n\n'
+        "[svc.validation.tolerances.absolute]",
+    )
+
+    with pytest.raises(ConfigError, match=r"unknown \[svc.validation\] key"):
+        load_config(write_config(tmp_path, content))
+
+
+def test_requires_unified_measurement_reference_for_validation(
+    tmp_path: Path,
+) -> None:
+    content = UNIFIED_TOML.replace(
+        'measurement_reference = "reference.json"\n', ""
+    )
+
+    with pytest.raises(ConfigError, match="measurement_reference"):
+        load_config(write_config(tmp_path, content))
 
 
 def test_loads_validation_config_and_resolves_reference(tmp_path: Path) -> None:
@@ -187,16 +314,42 @@ def test_preserves_absolute_simulation_path(tmp_path: Path) -> None:
     assert config.simulation_hdf5 == absolute.resolve()
 
 
-def test_svc_uses_shared_mapping_when_signals_are_omitted(
+def test_loads_reusable_signal_map(
     tmp_path: Path,
 ) -> None:
     content = VALID_TOML.split("[signals]", 1)[0]
-    config = load_config(write_config(tmp_path, content))
+    signal_map = tmp_path / "signals.toml"
+    signal_map.write_text(
+        """\
+[signals.rear_left_wheel_load]
+entity = "til_wheel_tire_forces"
+component = "normal_rear"
+unit = "newton"
+"""
+    )
+    config = load_config(
+        write_config(tmp_path, f'signal_map = "signals.toml"\n{content}')
+    )
 
-    assert len(config.signals) == 25
+    assert config.svc_signal_map == signal_map.resolve()
+    assert len(config.signals) == 1
     assert config.signal("rear_left_wheel_load").entity == (
         "til_wheel_tire_forces"
     )
+
+
+def test_rejects_missing_or_conflicting_signal_map(tmp_path: Path) -> None:
+    without_inline = VALID_TOML.split("[signals]", 1)[0]
+    with_missing_map = f'signal_map = "missing.toml"\n{without_inline}'
+    with_both = f'signal_map = "signals.toml"\n{VALID_TOML}'
+    (tmp_path / "signals.toml").write_text("[signals]\n")
+
+    with pytest.raises(FileNotFoundError, match="signal map does not exist"):
+        load_config(
+            write_config(tmp_path, with_missing_map, "case-missing.toml")
+        )
+    with pytest.raises(ConfigError, match="cannot define both"):
+        load_config(write_config(tmp_path, with_both, "both.toml"))
 
 
 @pytest.mark.parametrize(
@@ -217,7 +370,7 @@ def test_rejects_missing_required_tables(tmp_path: Path) -> None:
         'domain = "svc"', 'domain = "vertical"'
     )
     without_signals = without_signals.split("[signals]", 1)[0]
-    with pytest.raises(ConfigError, match=r"\[signals\] is required"):
+    with pytest.raises(ConfigError, match="signal_map or inline signals"):
         load_config(write_config(tmp_path, without_signals))
 
 

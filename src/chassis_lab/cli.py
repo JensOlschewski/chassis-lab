@@ -26,6 +26,17 @@ from chassis_lab.svc_reporting import (
     write_svc_outputs,
 )
 from chassis_lab.svc_validation import SvcValidationError, validate_svc
+from chassis_lab.vertical import (
+    VerticalEvaluationError,
+    evaluate_vertical,
+    validate_vertical_measurement,
+)
+from chassis_lab.vertical_reporting import (
+    VerticalReportError,
+    build_vertical_report,
+    render_vertical_console,
+    write_vertical_outputs,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,6 +129,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_svc_parser.set_defaults(handler=_validate_svc)
 
+    validate_vertical_parser = subparsers.add_parser(
+        "validate-vertical",
+        help="compare vertical wheel-center trajectories",
+    )
+    validate_vertical_parser.add_argument(
+        "path", type=Path, help="unified TOML config file"
+    )
+    validate_vertical_parser.add_argument(
+        "--plot-output", type=Path, help="write deterministic SVG plot"
+    )
+    validate_vertical_parser.add_argument(
+        "--json-output", type=Path, help="write detailed JSON report"
+    )
+    validate_vertical_parser.add_argument(
+        "--csv-output", type=Path, help="write metric CSV report"
+    )
+    validate_vertical_parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="replace existing report outputs",
+    )
+    validate_vertical_parser.set_defaults(handler=_validate_vertical)
+
     convert_parser = subparsers.add_parser(
         "convert-res",
         help="convert an Adams/Car .res result file to HDF5",
@@ -144,6 +179,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--artifacts-root", type=Path, help="root directory for run artifacts"
     )
+    run_parser.add_argument(
+        "--domain",
+        choices=("svc", "vertical"),
+        default="svc",
+        help="configured analysis domain (default: svc)",
+    )
     run_parser.add_argument("--run-id", help="explicit run ID")
     run_parser.set_defaults(handler=_create_run)
     return parser
@@ -165,6 +206,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         SvcReferenceError,
         SvcReportError,
         SvcValidationError,
+        VerticalEvaluationError,
+        VerticalReportError,
         OSError,
     ) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -234,15 +277,27 @@ def _validate_config(args: argparse.Namespace) -> int:
 
     if args.json:
         _check_signals(config, quiet=True, strict_units=args.strict_units)
+        _check_vertical_signals(
+            config, quiet=True, strict_units=args.strict_units
+        )
         print(json.dumps(_config_as_dict(config), indent=2))
     else:
         print(f"Config: {config.path}")
         print(f"Case: {config.name} ({config.domain}, {config.variant})")
         print(f"Loadcase: {config.loadcase}")
         print(f"Simulation: {config.simulation_hdf5}")
+        if config.svc_signal_map is not None:
+            print(f"SVC signal map: {config.svc_signal_map}")
         print(f"Gravity: {config.gravity}")
         print(f"Signals: {len(config.signals)}")
         _check_signals(config, strict_units=args.strict_units)
+        if config.vertical is not None:
+            print(f"Vertical measurement: {config.vertical.measurement_acd}")
+            print(f"Vertical simulation: {config.vertical.simulation_hdf5}")
+            if config.vertical.signal_map is not None:
+                print(f"Vertical signal map: {config.vertical.signal_map}")
+            print(f"Vertical signals: {len(config.vertical.signals)}")
+        _check_vertical_signals(config, strict_units=args.strict_units)
     return 0
 
 
@@ -265,8 +320,23 @@ def _validate_svc(args: argparse.Namespace) -> int:
     return 0 if report.passed else 1
 
 
+def _validate_vertical(args: argparse.Namespace) -> int:
+    config = load_config(args.path)
+    result = evaluate_vertical(config)
+    report = build_vertical_report(config, result)
+    write_vertical_outputs(
+        report,
+        plot_path=args.plot_output,
+        json_path=args.json_output,
+        csv_path=args.csv_output,
+        force=args.force,
+    )
+    print(render_vertical_console(report), end="")
+    return 0
+
+
 def _config_as_dict(config: CaseConfig) -> dict[str, object]:
-    return {
+    output: dict[str, object] = {
         "name": config.name,
         "domain": config.domain,
         "variant": config.variant,
@@ -283,6 +353,39 @@ def _config_as_dict(config: CaseConfig) -> dict[str, object]:
             for canonical, ref in config.signals
         ],
     }
+    if config.svc_signal_map is not None:
+        output["svc_signal_map"] = str(config.svc_signal_map)
+    if config.vertical is not None:
+        output["vertical"] = {
+            "measurement_acd": str(config.vertical.measurement_acd),
+            "simulation_hdf5": str(config.vertical.simulation_hdf5),
+            "setup": {
+                "code": config.vertical.setup.code,
+                "brakes_applied": config.vertical.setup.brakes_applied,
+                "engine_running": config.vertical.setup.engine_running,
+                "front_arb_connected": (
+                    config.vertical.setup.front_arb_connected
+                ),
+                "rear_arb_connected": config.vertical.setup.rear_arb_connected,
+            },
+            "window": {
+                "minimum_mm": config.vertical.window.minimum_mm,
+                "maximum_mm": config.vertical.window.maximum_mm,
+                "step_mm": config.vertical.window.step_mm,
+            },
+            "signals": [
+                {
+                    "canonical": canonical,
+                    "entity": ref.entity,
+                    "component": ref.component,
+                    "unit": ref.unit,
+                }
+                for canonical, ref in config.vertical.signals
+            ],
+        }
+        if config.vertical.signal_map is not None:
+            output["vertical"]["signal_map"] = str(config.vertical.signal_map)
+    return output
 
 
 def _check_signals(
@@ -341,6 +444,72 @@ def _check_signals(
             raise ConfigError("signal mapping invalid: " + "; ".join(errors))
 
 
+def _check_vertical_signals(
+    config: CaseConfig,
+    *,
+    quiet: bool = False,
+    strict_units: bool = False,
+) -> None:
+    vertical = config.vertical
+    if vertical is None:
+        return
+    if vertical.measurement_acd.is_file():
+        validate_vertical_measurement(vertical)
+    elif not quiet:
+        print(
+            "Note: vertical measurement ACD not present; skipped cross-check "
+            f"({vertical.measurement_acd})"
+        )
+    if not vertical.simulation_hdf5.is_file():
+        if not quiet:
+            print(
+                "Note: vertical simulation HDF5 not present; skipped signal "
+                f"cross-check ({vertical.simulation_hdf5})"
+            )
+        return
+    with AdamsHdf5(vertical.simulation_hdf5) as result:
+        errors = []
+        resolved: dict[tuple[str, int], str] = {}
+        for canonical, ref in vertical.signals:
+            try:
+                info = result.resolve_signal(ref.entity, ref.component)
+            except SignalLookupError as error:
+                errors.append(f"{canonical}: {error}")
+                continue
+            if info.unit and info.unit != ref.unit:
+                errors.append(
+                    f"{canonical}: source unit '{info.unit}' "
+                    f"!= configured '{ref.unit}'"
+                )
+            elif not info.unit and strict_units:
+                errors.append(
+                    f"{canonical}: source unit missing; expected '{ref.unit}'"
+                )
+            cell = (info.group_name, info.column)
+            previous = resolved.get(cell)
+            if previous is not None and not _is_vertical_travel_alias(
+                previous, canonical
+            ):
+                errors.append(f"{canonical}: duplicate HDF5 cell {cell}")
+            resolved[cell] = canonical
+        if errors:
+            raise ConfigError(
+                "vertical signal mapping invalid: " + "; ".join(errors)
+            )
+
+
+def _is_vertical_travel_alias(first: str, second: str) -> bool:
+    names = {first, second}
+    return any(
+        names
+        == {
+            f"{corner}_travel",
+            f"{corner}_wheel_center_z",
+        }
+        for corner in ("front_left", "front_right", "rear_left", "rear_right")
+    )
+
+
 def _convert_res(args: argparse.Namespace) -> int:
     result = convert_res(
         args.input,
@@ -355,6 +524,7 @@ def _convert_res(args: argparse.Namespace) -> int:
 def _create_run(args: argparse.Namespace) -> int:
     run_dir = create_run(
         args.path,
+        domain=args.domain,
         artifacts_root=args.artifacts_root,
         run_id=args.run_id,
     )

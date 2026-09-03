@@ -136,6 +136,18 @@ def test_builds_report_with_units_and_provenance(tmp_path: Path) -> None:
     )
 
 
+def test_report_records_external_signal_map(tmp_path: Path) -> None:
+    signal_map = tmp_path / "svc-signals.toml"
+    signal_map.write_text("[signals]\n")
+    config = replace(write_inputs(tmp_path), svc_signal_map=signal_map)
+
+    report = build_svc_report(config, validation_result())
+
+    assert report.signal_map_input is not None
+    assert report.signal_map_input.sha256 == sha256_file(signal_map)
+    assert report.as_dict()["inputs"]["signal_map"]["path"] == str(signal_map)
+
+
 def test_console_groups_and_lists_all_metrics(tmp_path: Path) -> None:
     config = write_inputs(tmp_path)
     report = build_svc_report(config, validation_result())
@@ -186,7 +198,7 @@ def test_json_and_csv_are_deterministic(tmp_path: Path) -> None:
     json_output = render_svc_json(report)
     assert json_output == render_svc_json(report)
     data = json.loads(json_output)
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == 2
     assert data["failed_count"] == 1
     assert data["metrics"][0]["unit"] == "kg"
     assert data["inputs"]["simulation_hdf5"]["sha256"] == sha256_file(
@@ -248,6 +260,10 @@ loadcase = "CURB"
 simulation_hdf5 = "{config.simulation_hdf5.name}"
 [physics]
 gravity = 9.80665
+[signals.signal]
+entity = "entity"
+component = "value"
+unit = "mm"
 [validation]
 reference = "{config.validation.reference.name}"
 [validation.tolerances.absolute]
@@ -308,6 +324,10 @@ loadcase = "CURB"
 simulation_hdf5 = "{config.simulation_hdf5.name}"
 [physics]
 gravity = 9.80665
+[signals.signal]
+entity = "entity"
+component = "value"
+unit = "mm"
 [validation]
 reference = "{config.validation.reference.name}"
 [validation.tolerances.absolute]
