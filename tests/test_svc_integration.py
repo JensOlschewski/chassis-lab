@@ -19,7 +19,7 @@ def test_example_config_loads_without_private_data() -> None:
     config = load_config(EXAMPLE_CONFIG_PATH)
 
     assert config.name == "example-config"
-    assert config.simulation_hdf5.name == "result.h5"
+    assert config.simulation_hdf5.name == "example-svc.h5"
     assert config.validation is not None
     assert config.validation.reference.name == "example-measures.json"
 

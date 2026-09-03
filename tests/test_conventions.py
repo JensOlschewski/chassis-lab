@@ -21,14 +21,7 @@ def test_svc_mapping_has_one_convention_per_signal() -> None:
     config = load_config(root / "configs" / "example-config.toml")
     names = {name for name, _ in config.signals}
 
-    assert names == {
-        "front_left_wheel_load",
-        "front_right_wheel_load",
-        "rear_left_wheel_load",
-        "rear_right_wheel_load",
-        "wheelbase",
-    }
-    assert names <= set(SVC_SIGNAL_CONVENTIONS)
+    assert names == set(SVC_SIGNAL_CONVENTIONS)
 
 
 def test_vertical_mapping_has_one_convention_per_signal() -> None:

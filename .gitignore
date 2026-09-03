@@ -20,3 +20,5 @@ measures/**/*.json
 *.h5
 *.hdf5
 *.res
+!converter/examples/example-svc.h5
+!converter/examples/example-svc.res
