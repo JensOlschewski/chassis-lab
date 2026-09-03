@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use adams_res_cli::{hdf5_writer, parser};
+use adams_res_converter::{hdf5_writer, parser};
 use hdf5::types::VarLenUnicode;
 use tempfile::tempdir;
 

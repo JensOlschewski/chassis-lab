@@ -67,7 +67,7 @@ fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-fn print_values(result: &adams_res_cli::model::AdamsResult) {
+fn print_values(result: &adams_res_converter::model::AdamsResult) {
     println!("ID\tENTITY\tCOMPONENT\tUNITS");
     for (entity, component) in result.values() {
         println!(
