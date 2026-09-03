@@ -125,10 +125,10 @@ def test_repository_converter_round_trip_to_python_reader(
         path.is_file() for path in converter.REPOSITORY_BINARIES
     )
     if not binary_available:
-        pytest.skip("build reader before running integration test")
+        pytest.skip("build converter before running integration test")
     source = (
         Path(__file__).resolve().parents[1]
-        / "reader/tests/fixtures/minimal.res"
+        / "converter/tests/fixtures/minimal.res"
     )
 
     result = convert_res(source, output=tmp_path / "result.h5")

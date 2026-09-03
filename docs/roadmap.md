@@ -113,7 +113,7 @@ Issues:
 - Each release publishes a Python wheel and standalone `adams-res` binaries for
   supported targets. Current workflow target is Linux x86_64. Checksums
   accompany every artifact.
-- Existing standalone Rust users can continue building `reader/` directly;
+- Existing standalone Rust users can continue building `converter/` directly;
   repository releases are the compatibility reference after migration.
 
 ## Gitea maintenance policy

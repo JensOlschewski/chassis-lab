@@ -5,7 +5,7 @@
 ```text
 Adams .res / Lommel .acd
         ↓
-reader/ — Rust result converter
+converter/ — Rust result converter
         ↓
 HDF5 format 3
         ↓
@@ -16,7 +16,7 @@ JSON, CSV, SVG, and run manifests
 
 ## Repository
 
-- `reader/` parses Adams `.res` files and writes normalized HDF5.
+- `converter/` parses Adams `.res` files and writes normalized HDF5.
 - `src/chassis_lab/` reads HDF5 and Lommel `.acd` measurements.
 - `configs/` stores case and reusable signal-map TOML files.
 - `tests/` contains Python, Rust, and cross-language tests.

@@ -1,6 +1,6 @@
-# adams-res
+# adams-res-converter
 
-A small Rust CLI that converts Adams/Car text result files (`.res`) to HDF5.
+Rust library and CLI that convert Adams/Car text result files (`.res`) to HDF5.
 
 The parser follows the structure used by the MATLAB `ResImportTool_20160629.m` reader, but it:
 
@@ -120,8 +120,10 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
-## Current scope
+## Scope
 
-This version targets the text-based Adams/Car `.res` layout represented by the supplied MATLAB reader: an entity/component header followed by `<Step ...>` blocks. Component values are selected using the global `id` attribute defined by Adams rather than the order in which components happen to appear in the header. If a file contains no IDs at all, header order is used as a compatibility fallback. Mixed presence of IDs is rejected as ambiguous.
-
-Like the MATLAB script, the current implementation holds all numerical series in memory before writing HDF5. A later version can add streaming/chunked output if very large result files require it.
+The parser handles the text-based Adams/Car layout represented by the supplied
+MATLAB reader: an entity/component header followed by `<Step ...>` blocks.
+Values use Adams component IDs when present, with header-order fallback when no
+IDs exist. Mixed ID presence is rejected as ambiguous. Results are held in
+memory before HDF5 output.

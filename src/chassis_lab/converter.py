@@ -9,8 +9,8 @@ DEFAULT_BINARY = "adams-res"
 REPOSITORY_BINARIES = (
     Path(__file__).resolve().parents[2] / "target/release/adams-res",
     Path(__file__).resolve().parents[2] / "target/debug/adams-res",
-    Path(__file__).resolve().parents[2] / "reader/target/release/adams-res",
-    Path(__file__).resolve().parents[2] / "reader/target/debug/adams-res",
+    Path(__file__).resolve().parents[2] / "converter/target/release/adams-res",
+    Path(__file__).resolve().parents[2] / "converter/target/debug/adams-res",
 )
 
 
@@ -93,7 +93,7 @@ def converter_provenance(binary: str = DEFAULT_BINARY) -> dict[str, str | None]:
     """Return converter identity and reported version when available."""
     executable = _resolve_binary(binary)
     provenance: dict[str, str | None] = {
-        "name": "adams-res-cli",
+        "name": "adams-res-converter",
         "path": executable,
         "version": None,
     }

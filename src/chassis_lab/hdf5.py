@@ -1,4 +1,4 @@
-"""Read and validate the HDF5 contract produced by adams-res-cli."""
+"""Read and validate the HDF5 contract produced by adams-res."""
 
 from dataclasses import dataclass
 from pathlib import Path
