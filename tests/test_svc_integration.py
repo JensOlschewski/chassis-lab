@@ -1,10 +1,11 @@
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from chassis_lab.config import load_config
-from chassis_lab.svc_eval import evaluate_svc_geometry
+from chassis_lab.svc_eval import SvcGeometryResult, evaluate_svc_geometry
 from chassis_lab.svc_validation import (
     SvcValidationError,
     validate_svc,
@@ -104,10 +105,9 @@ def test_validate_svc_exposes_expected_failures(svc_config: Path) -> None:
 def test_validate_svc_result_without_validation_raises() -> None:
     config = load_config(VARB_CONFIG_PATH)
     bare = replace(config, validation=None)
-    geometry = evaluate_svc_geometry(VARB_CONFIG_PATH)
 
     with pytest.raises(SvcValidationError, match=r"no \[validation\]"):
-        validate_svc_result(bare, geometry)
+        validate_svc_result(bare, cast(SvcGeometryResult, None))
 
 
 def test_validate_svc_roundtrip_dict(svc_config: Path) -> None:
