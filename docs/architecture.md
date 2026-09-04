@@ -1,6 +1,9 @@
 # Architecture
 
-## Pipeline
+## Current and target pipeline
+
+Version `0.3.1` is the observable parity baseline during the Rust CLI rewrite.
+Its current pipeline is:
 
 ```text
 Adams .res / Lommel .acd
@@ -14,10 +17,107 @@ src/chassis_lab/ — Python validation
 JSON, CSV, SVG, and run manifests
 ```
 
+The target `0.4.0` pipeline is:
+
+```text
+Adams .res / HDF5 v3 / Lommel .acd / TOML
+                       ↓
+        Rust CLI, parsers, domain model, conventions
+                       ↓
+          normalized f64 arrays plus typed metadata
+                       ↓
+       embedded Python scientific analysis and plotting
+                       ↓
+              typed metrics, curves, SVG bytes
+                       ↓
+        Rust validation, reports, provenance, outputs
+```
+
+Rust is the application. Python is an embedded scientific capability, not a
+second CLI or an owner of engineering files.
+
+## Ownership
+
+| Concern | Owner |
+|---|---|
+| CLI parsing, help, completion, errors, and exit codes | Rust |
+| TOML configuration, path resolution, and reference JSON | Rust |
+| Domain types, units, corners, signs, scales, and baselines | Rust |
+| `.res`, HDF5 v3, and Lommel `.acd` parsing | Rust |
+| Conversion, orchestration, validation policy, and provenance | Rust |
+| Console, JSON, CSV, SVG file handling, and overwrite safety | Rust |
+| Signal processing, interpolation, fitting, and curve algorithms | Python |
+| Headless deterministic plotting | Python |
+
+Stable domain calculations that do not benefit from the scientific Python
+ecosystem, including SVC calculations and tolerance comparison, belong in Rust.
+Python remains appropriate for evolving NumPy/SciPy algorithms and Matplotlib
+rendering.
+
+## Rust/Python boundary
+
+Rust calls Python through PyO3 using narrow operation-specific requests. A
+request contains normalized `f64` arrays, sample axes, explicit units, setup and
+algorithm parameters, and immutable source identifiers. Python returns typed
+metric values, processed curves, warnings, and optional SVG bytes.
+
+Python production modules must not receive CLI arguments or paths to TOML,
+HDF5, ACD, or RES files. They must not resolve paths, convert units, select
+corner/sign conventions, write reports, or create run directories. Rust
+validates returned shapes and finite-value requirements before accepting output.
+
+Initial integration may copy Rust vectors into NumPy-owned arrays. Zero-copy
+sharing requires measured need and must not weaken lifetime or aliasing safety.
+One interpreter is used per CLI process; subinterpreters are excluded unless the
+scientific dependency stack explicitly supports them.
+
+Python exceptions become Rust operational errors with useful operation context.
+Public exit semantics remain:
+
+- `0`: command completed successfully.
+- `1`: one or more requested engineering validations failed.
+- `2`: configuration, input, runtime, or output operation failed.
+
+## CLI parity contract
+
+The Rust CLI replaces the Python entry point without dropping `0.3.1`
+capabilities:
+
+| `0.3.1` command | Target command | Output and side effects |
+|---|---|---|
+| `clab inspect-h5 FILE` | `clab inspect FILE` | HDF5 summary; read-only |
+| `clab list-h5-signals FILE` | `clab inspect FILE --signals` | HDF5 signal catalog; read-only |
+| `clab inspect-acd FILE` | `clab inspect FILE` | ACD summary; read-only |
+| `clab list-acd-signals FILE` | `clab inspect FILE --signals` | ACD signal catalog; read-only |
+| `adams-res FILE --list` | `clab inspect FILE --signals` | RES signal catalog; read-only |
+| `clab validate-config CONFIG` | `clab check CONFIG` | Config and referenced-input checks; read-only |
+| `clab validate-svc CONFIG` | `clab validate CONFIG --domain svc` | Console and optional JSON/CSV reports |
+| `clab validate-vertical CONFIG` | `clab validate CONFIG --domain vertical` | Console and optional JSON/CSV/SVG reports |
+| `clab convert-res INPUT` | `clab convert INPUT` | Writes normalized HDF5 |
+| `clab create-run CONFIG` | `clab run create CONFIG` | Creates isolated run directory and manifest |
+
+`clab inspect FILE` detects supported input format from extension and signature;
+`--type h5|acd|res` overrides ambiguous detection. `--signals` combines summary
+and signal listing, while `--match` implies signal listing.
+
+`clab validate CONFIG` runs every configured domain by default. Repeatable
+`--domain DOMAIN` options select a subset. This avoids conflicting boolean flags
+and scales to later validation domains. Multi-domain reports use deterministic
+filenames below `--output-dir`.
+
+Temporary hidden aliases may preserve old flat command forms during migration.
+Read-only commands never convert or write implicitly. JSON and CSV fields,
+console meaning, filtering, color policy, output paths, and `--force` behavior
+remain compatible until an explicitly versioned contract change.
+
 ## Repository
 
-- `converter/` parses Adams `.res` files and writes normalized HDF5.
-- `src/chassis_lab/` reads HDF5 and Lommel `.acd` measurements.
+- `converter/` provides the Rust `.res` parser, HDF5 writer, and compatibility
+  `adams-res` frontend.
+- Rust workspace crates will own the unified `clab` frontend and application
+  core.
+- `src/chassis_lab/` currently owns validation; after migration it contains only
+  embedded scientific analysis and plotting modules.
 - `configs/` stores commented example configuration and signal-map TOML files.
 - `measures/` stores synthetic examples; real measurement data stays external.
 - `tests/` contains Python, Rust, and cross-language tests.
@@ -65,9 +165,10 @@ remain available for isolated fixtures, but cannot be combined with `signal_map`
 
 ## Conventions
 
-`chassis_lab.conventions` owns units, corners, signs, scales, and baseline
-policies. `apply_convention` returns transformed values with provenance. Missing
-source units remain unverified and cannot be converted implicitly.
+During `0.3.x`, `chassis_lab.conventions` owns units, corners, signs, scales, and
+baseline policies. The Rust core assumes this ownership for `0.4.0` and passes
+only normalized arrays with explicit units to Python. Missing source units remain
+unverified and cannot be converted implicitly.
 
 SVC evaluators use the final HDF5 sample by default. Vertical evaluation compares
 measurement-offset and static-simulation X/Y/Z trajectories for all four corners
@@ -81,6 +182,20 @@ revision. Reports are deterministic and never overwrite existing files without
 `--force`.
 
 Raw measurements and generated HDF5 files are local ignored inputs.
+
+## Distribution
+
+Standalone means one installed command with no user-managed Python, pip,
+virtual environment, or Rust toolchain. The initial release artifact may contain
+`clab` plus a private CPython runtime, standard library, Python modules, and
+scientific native libraries. Literal one-file packaging is not required.
+
+The runtime is located relative to the executable and initialized in isolated
+mode. System `PYTHONHOME`, `PYTHONPATH`, and user site packages must not affect
+execution. Release inputs are pinned and hashed; archives include checksums,
+dependency licenses, and build/runtime provenance. Linux x86_64 is the first
+supported bundled target. Windows and macOS follow only after native clean-host
+tests pass.
 
 ## Checks
 

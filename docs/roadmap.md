@@ -1,8 +1,9 @@
 # ChassisLab Roadmap
 
 The rewrite is incremental. Existing MATLAB output remains the historical
-reference until a domain reaches reviewed Python parity. Known MATLAB corner
-mapping errors are corrected rather than copied into golden data.
+reference until a domain reaches reviewed parity. Version `0.3.1` is the
+behavioral baseline for the Rust-owned application migration. Known MATLAB
+corner mapping errors are corrected rather than copied into golden data.
 
 ## Milestone 1: Foundation
 
@@ -42,7 +43,39 @@ Exit criteria:
 - Unrounded calculations agree with reviewed reference values.
 - Reports include provenance and explicit units.
 
-## Milestone 3: Vertical and Roll
+## Milestone 3: Rust CLI and Embedded Python
+
+Goal: make Rust own the application while retaining Python for scientific signal
+analysis and plotting.
+
+Migration order:
+
+1. Freeze the Rust/Python ownership and `0.3.1` parity contract.
+2. Prove relocatable embedded CPython, NumPy, and Matplotlib packaging.
+3. Add staged runner checks without disabling current CI or releases.
+4. Port configuration, domain types, units, conventions, HDF5, and ACD handling
+   to Rust.
+5. Replace the Python CLI with the unified Rust `clab` command hierarchy.
+6. Port stable SVC computation and reporting to Rust.
+7. Isolate vertical signal processing and plotting behind a narrow PyO3 API.
+8. Port provenance, report serialization, and output safety to Rust.
+9. Publish standalone `v0.4.0` after complete command and numerical parity.
+
+Exit criteria:
+
+- Every `0.3.1` workflow has a tested Rust CLI equivalent.
+- Python production modules receive normalized arrays and return scientific
+  results; they parse no CLI arguments, TOML, HDF5, ACD, or RES files.
+- SVC and vertical synthetic and authorized regressions remain within reviewed
+  tolerances.
+- Linux x86_64 runs offline after relocation without system Python, pip, or a
+  virtual environment.
+- Exit codes, machine-readable reports, overwrite behavior, and provenance
+  remain compatible.
+- Release artifacts include checksums, dependency licenses, and runtime/build
+  metadata.
+
+## Milestone 4: Vertical and Roll
 
 Goal: establish the reusable four-corner kinematics pipeline.
 
@@ -61,7 +94,7 @@ Exit criteria:
 - Vertical and roll plots are generated without interactive state.
 - Selected curve metrics have reviewed tolerances.
 
-## Milestone 4: Steering
+## Milestone 5: Steering
 
 Goal: validate steering geometry and effort without singular metrics.
 
@@ -72,7 +105,7 @@ Issues:
 3. Implement guarded steering-ratio calculation around zero wheel angle.
 4. Validate engine-on and engine-off cases for VARB and VARC.
 
-## Milestone 5: Compliance and Aligning
+## Milestone 6: Compliance and Aligning
 
 Goal: migrate force- and moment-driven KnC events.
 
@@ -86,7 +119,7 @@ Issues include loading/unloading branch detection, hysteresis-aware fitting,
 mm/kN and deg/kN metrics, Nm/Nmm normalization, and documentation of missing
 aligning antiphase simulation results.
 
-## Milestone 6: Automation and Release
+## Milestone 7: Automation and Release
 
 Goal: provide a maintainable private validation service.
 
@@ -104,15 +137,18 @@ Issues:
 ## Release compatibility policy
 
 - `pyproject.toml` and the Cargo workspace use the same `MAJOR.MINOR.PATCH`
-  version for compatible Python and `adams-res` releases.
+  version while both packages remain release inputs.
 - Releases use matching `vMAJOR.MINOR.PATCH` tags.
 - HDF5 format versions are independent of package versions. Breaking schema
   changes require a new format version and coordinated reader/reporting support.
-- Run manifests record Python version, converter version, converter source
-  revision, HDF5 format version, and repository revision.
-- Each release publishes a Python wheel and standalone `adams-res` binaries for
-  supported targets. Current workflow target is Linux x86_64. Checksums
-  accompany every artifact.
+- Run manifests record Rust CLI version, embedded Python and scientific package
+  versions, converter source revision, HDF5 format version, and repository
+  revision.
+- Through `0.3.x`, releases publish a Python wheel and standalone `adams-res`.
+  Starting with `0.4.0`, the primary artifact is a standalone `clab` bundle;
+  `adams-res` remains available during its compatibility window.
+- Current bundled workflow target is Linux x86_64. Checksums accompany every
+  artifact.
 - Existing standalone Rust users can continue building `converter/` directly;
   repository releases are the compatibility reference after migration.
 
@@ -126,6 +162,8 @@ Issues:
   this repository.
 - Normal CI uses synthetic fixtures; authorized real data stays on a private
   runner.
+- Existing runner checks remain active during migration. Bundled-runtime and
+  parity jobs are added before superseded Python CLI jobs are removed.
 - Stable states are tagged as `v0.x.y` during migration and `v1.0.0` after all
   supported domains reach sign-off.
 - `v*` tags are protected; only trusted maintainers can trigger release jobs.
