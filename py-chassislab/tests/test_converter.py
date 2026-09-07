@@ -28,7 +28,7 @@ MINIMAL_RES = (
 
 
 def make_fake_converter(path: Path, exit_code: int = 0) -> Path:
-    binary = path / "adams-res"
+    binary = path / "clab"
     binary.write_text(
         "#!/bin/sh\n"
         'printf "%s\\n" "$@" > "$(dirname "$0")/args.log"\n'
@@ -58,6 +58,12 @@ def test_converts_res_with_default_output(tmp_path: Path) -> None:
     assert result.res_path == res.resolve()
     assert result.h5_path == (tmp_path / "run.h5").resolve()
     assert result.binary == str(fake.resolve())
+    assert read_args(tmp_path) == [
+        "convert",
+        str(res),
+        "-o",
+        str(tmp_path / "run.h5"),
+    ]
 
 
 def test_converts_res_with_explicit_output(tmp_path: Path) -> None:
@@ -91,7 +97,7 @@ def test_forces_existing_output(tmp_path: Path) -> None:
     result = convert_res(res, binary=str(fake), force=True)
 
     assert result.h5_path == (tmp_path / "run.h5").resolve()
-    assert "-f" in read_args(tmp_path)
+    assert "--force" in read_args(tmp_path)
 
 
 def test_default_run_does_not_pass_force(tmp_path: Path) -> None:
@@ -101,7 +107,7 @@ def test_default_run_does_not_pass_force(tmp_path: Path) -> None:
 
     convert_res(res, binary=str(fake))
 
-    assert "-f" not in read_args(tmp_path)
+    assert "--force" not in read_args(tmp_path)
 
 
 def test_raises_on_converter_failure(tmp_path: Path) -> None:
@@ -115,7 +121,7 @@ def test_raises_on_converter_failure(tmp_path: Path) -> None:
 
 def test_raises_on_missing_input(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        convert_res(tmp_path / "missing.res", binary="adams-res")
+        convert_res(tmp_path / "missing.res", binary="clab")
 
 
 def test_raises_on_missing_binary(tmp_path: Path) -> None:

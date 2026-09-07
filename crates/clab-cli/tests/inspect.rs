@@ -6,23 +6,6 @@ use hdf5::File;
 use hdf5::types::VarLenUnicode;
 use tempfile::tempdir;
 
-const MINIMAL_RES: &str = r#"<Result>
-  <Entity type="request" name="ride_heights" entity="vehicle.ride_heights" objectId="42">
-    <Component name="front_left" unitsValue="mm" id="2" />
-    <Component name="front_right" unitsValue="mm" id="1" />
-  </Entity>
-  <Entity type="request" name="svc_output">
-    <Component name="Wheelbase" unitsValue="mm" id="3" />
-  </Entity>
-  <Step type="input">
-    360.0 361.0 2490.0
-  </Step>
-  <Step type="input">
-    359.5 360.5 2490.0
-  </Step>
-</Result>
-"#;
-
 fn inspect(path: &Path, arguments: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_clab"))
         .arg("inspect")
@@ -46,19 +29,6 @@ fn inspects_simulation_hdf5_and_filters_signals() {
     assert!(stdout.contains("ENTITY\tCOMPONENT\tUNIT\tADAMS ID"));
     assert!(stdout.contains("example.geometry\twheelbase\tmm\t5"));
     assert_eq!(stdout.lines().filter(|line| line.contains('\t')).count(), 2);
-}
-
-#[test]
-fn preserves_res_inspection() {
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("minimal.res");
-    std::fs::write(&path, MINIMAL_RES).unwrap();
-    let output = inspect(&path, &["--signals"]);
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.starts_with("2 samples, 3 signals\n"));
-    assert!(stdout.contains("2\tvehicle.ride_heights\tfront_left\tmm"));
 }
 
 #[test]
@@ -108,16 +78,16 @@ fn rejects_invalid_hdf5_and_unsupported_source_kind() {
 }
 
 #[test]
-fn rejects_unsupported_extension() {
+fn rejects_raw_and_unsupported_extensions() {
     let directory = tempdir().unwrap();
-    let path = directory.path().join("input.txt");
-    std::fs::write(&path, "data").unwrap();
-    let output = inspect(&path, &[]);
+    for extension in ["res", "acd", "txt"] {
+        let path = directory.path().join(format!("input.{extension}"));
+        std::fs::write(&path, "data").unwrap();
+        let output = inspect(&path, &[]);
 
-    assert_eq!(output.status.code(), Some(2));
-    assert!(
-        String::from_utf8(output.stderr)
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8(output.stderr)
             .unwrap()
-            .contains("unsupported input extension; expected .res, .h5, or .hdf5")
-    );
+            .contains("clab inspect accepts only .h5 or .hdf5; convert raw .res or .acd inputs first with clab convert"));
+    }
 }

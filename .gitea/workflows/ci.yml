@@ -179,13 +179,13 @@ jobs:
           python -m pip install build
           python -m build --wheel --outdir dist py-chassislab
 
-      - name: Build Rust converter
+      - name: Build Rust workspace
         run: cargo build --workspace --release --locked
 
       - name: Package release artifacts
         run: |
-          tar -czf "dist/adams-res-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
-            -C target/release adams-res
+          tar -czf "dist/clab-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
+            -C target/release clab
           (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS)
 
       - name: Publish Gitea release
@@ -196,6 +196,6 @@ jobs:
           body: |
             ChassisLab ${{ github.ref_name }}.
 
-            Includes Python wheel and Linux x86_64 `adams-res` binary.
+            Includes Python wheel and Linux x86_64 `clab` binary.
           files: |
             dist/*

@@ -144,14 +144,10 @@ Issues:
 - Run manifests record Rust CLI version, embedded Python and scientific package
   versions, converter source revision, HDF5 format version, and repository
   revision.
-- Through `0.3.x`, releases publish a Python wheel and standalone `adams-res`.
-  Starting with `0.4.0`, the primary artifact is a standalone `clab` bundle;
-  `adams-res` remains available during its compatibility window.
+- Releases publish a Python wheel and standalone `clab` bundle.
 - Current bundled workflow target is Linux x86_64. Checksums accompany every
   artifact.
-- Existing standalone Rust users can continue building
-  `crates/clab-converter/` directly;
-  repository releases are the compatibility reference after migration.
+- `crates/clab-converter/` remains a library dependency of the unified CLI.
 
 ## Gitea maintenance policy
 

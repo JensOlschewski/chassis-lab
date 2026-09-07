@@ -20,7 +20,7 @@ enum Command {
     },
     /// Inspect a supported input without writing output.
     Inspect {
-        /// Input file (.res, .h5, or .hdf5).
+        /// Normalized HDF5 simulation or measurement file (.h5 or .hdf5).
         file: PathBuf,
         /// List all available signals or channels.
         #[arg(long)]
@@ -193,43 +193,11 @@ fn inspect(path: &Path, signals: bool, match_text: Option<&str>) -> Result<()> {
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase);
     match extension.as_deref() {
-        Some("res") => inspect_res(path, signals || match_text.is_some(), match_text),
         Some("h5" | "hdf5") => inspect_hdf5(path, signals || match_text.is_some(), match_text),
-        _ => bail!("unsupported input extension; expected .res, .h5, or .hdf5"),
+        _ => bail!(
+            "unsupported input extension; clab inspect accepts only .h5 or .hdf5; convert raw .res or .acd inputs first with clab convert"
+        ),
     }
-}
-
-fn inspect_res(path: &Path, signals: bool, match_text: Option<&str>) -> Result<()> {
-    let result = clab_converter::parser::parse_file(path)
-        .with_context(|| format!("failed to parse '{}'", path.display()))?;
-    println!(
-        "{} samples, {} signals",
-        result.sample_count,
-        result.signal_count()
-    );
-    if signals {
-        println!("ID\tENTITY\tCOMPONENT\tUNITS");
-        for (entity, component) in result.values() {
-            let catalog = format!(
-                "{}\t{}\t{}\t{}",
-                component.adams_id,
-                entity.source_path.as_deref().unwrap_or(&entity.name),
-                component.name,
-                component.units.as_deref().unwrap_or("")
-            );
-            if !matches_catalog(&catalog, match_text) {
-                continue;
-            }
-            println!(
-                "{}\t{}\t{}\t{}",
-                component.adams_id,
-                entity.source_path.as_deref().unwrap_or(&entity.name),
-                component.name,
-                component.units.as_deref().unwrap_or("")
-            );
-        }
-    }
-    Ok(())
 }
 
 fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<()> {
@@ -293,10 +261,6 @@ fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<
         }
     }
     Ok(())
-}
-
-fn matches_catalog(catalog: &str, match_text: Option<&str>) -> bool {
-    match_text.is_none_or(|text| catalog.to_lowercase().contains(&text.to_lowercase()))
 }
 
 #[cfg(test)]

@@ -43,7 +43,7 @@ second CLI or an owner of engineering files.
 | CLI parsing, help, completion, errors, and exit codes | Rust |
 | TOML configuration, path resolution, and reference JSON | Rust |
 | Domain types, units, corners, signs, scales, and baselines | Rust |
-| `.res`, HDF5 v3, and Lommel `.acd` parsing | Rust |
+| `.res` and `.acd` conversion; normalized HDF5 parsing | Rust |
 | Conversion, orchestration, validation policy, and provenance | Rust |
 | Console, JSON, CSV, SVG file handling, and overwrite safety | Rust |
 | Signal processing, interpolation, fitting, and curve algorithms | Python |
@@ -87,18 +87,16 @@ capabilities:
 |---|---|---|
 | `clab inspect-h5 FILE` | `clab inspect FILE` | HDF5 summary; read-only |
 | `clab list-h5-signals FILE` | `clab inspect FILE --signals` | HDF5 signal catalog; read-only |
-| `clab inspect-acd FILE` | `clab inspect FILE` | ACD summary; read-only |
-| `clab list-acd-signals FILE` | `clab inspect FILE --signals` | ACD signal catalog; read-only |
-| `adams-res FILE --list` | `clab inspect FILE --signals` | RES signal catalog; read-only |
 | `clab validate-config CONFIG` | `clab check CONFIG` | Config and referenced-input checks; read-only |
 | `clab validate-svc CONFIG` | `clab validate CONFIG --domain svc` | Console and optional JSON/CSV reports |
 | `clab validate-vertical CONFIG` | `clab validate CONFIG --domain vertical` | Console and optional JSON/CSV/SVG reports |
 | `clab convert-res INPUT` | `clab convert INPUT` | Writes normalized HDF5 |
 | `clab create-run CONFIG` | `clab run create CONFIG` | Creates isolated run directory and manifest |
 
-`clab inspect FILE` detects supported input format from extension and signature;
-`--type h5|acd|res` overrides ambiguous detection. `--signals` combines summary
-and signal listing, while `--match` implies signal listing.
+`clab inspect FILE` accepts normalized simulation or measurement HDF5 files
+(`.h5` or `.hdf5`) only. Convert raw `.res` or `.acd` inputs first with
+`clab convert`. `--signals` combines summary and signal listing, while `--match`
+implies signal listing.
 
 `clab validate CONFIG` runs every configured domain by default. Repeatable
 `--domain DOMAIN` options select a subset. This avoids conflicting boolean flags
@@ -112,10 +110,9 @@ remain compatible until an explicitly versioned contract change.
 
 ## Repository
 
-- `crates/clab-converter/` provides the Rust `.res` parser, HDF5 writer,
-  and compatibility `adams-res` frontend.
-- Rust workspace crates will own the unified `clab` frontend and application
-  core.
+- `crates/clab-converter/` provides Rust `.res` and `.acd` parsers and HDF5
+  writers for the `clab` frontend.
+- Rust workspace crates own the unified `clab` frontend and application core.
 - `py-chassislab/src/chassis_lab/` currently owns validation; after migration it contains only
   embedded scientific analysis and plotting modules.
 - `examples/` stores synthetic inputs, reference values, configuration, and

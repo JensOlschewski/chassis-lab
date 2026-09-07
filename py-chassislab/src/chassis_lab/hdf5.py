@@ -1,4 +1,4 @@
-"""Read and validate the HDF5 contract produced by adams-res."""
+"""Read and validate simulation HDF5 produced by clab."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,7 +106,7 @@ class Signal:
 
 
 class AdamsHdf5:
-    """Lazy, context-managed reader for an adams-res HDF5 file."""
+    """Lazy, context-managed reader for a simulation HDF5 file."""
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path).expanduser().resolve()

@@ -49,11 +49,8 @@ Raw measurements and generated artifacts are not committed.
 ## Releases
 
 Trusted `vMAJOR.MINOR.PATCH` tags publish matching Python and Rust versions as
-Gitea Release assets. Releases include a Python wheel, Linux x86_64
-`adams-res` archive, and `SHA256SUMS`.
-
-`adams-res` remains independently usable from `crates/clab-converter/` or
-the release archive.
+Gitea Release assets. Releases include a Python wheel, Linux x86_64 `clab`
+archive, and `SHA256SUMS`.
 
 ## Development
 

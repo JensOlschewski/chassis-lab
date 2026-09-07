@@ -26,11 +26,6 @@ COMMAND_CONTRACT = {
         ("path",),
         (("--match",), ("--json",)),
     ),
-    "inspect-acd": (("path",), (("--json",),)),
-    "list-acd-signals": (
-        ("path",),
-        (("--match",), ("--json",)),
-    ),
     "validate-config": (
         ("path",),
         (("--json",), ("--strict-units",)),
@@ -151,16 +146,12 @@ def test_inspection_commands_are_read_only(
 ) -> None:
     summary = _Summary()
     monkeypatch.setattr(cli, "inspect_hdf5", lambda _: summary)
-    monkeypatch.setattr(cli, "inspect_acd", lambda _: summary)
     monkeypatch.setattr(cli, "AdamsHdf5", _SignalReader)
-    monkeypatch.setattr(cli, "AcdFile", _SignalReader)
     missing = tmp_path / "input"
 
     commands = (
         ["inspect-h5", str(missing), "--json"],
         ["list-h5-signals", str(missing), "--json"],
-        ["inspect-acd", str(missing), "--json"],
-        ["list-acd-signals", str(missing), "--json"],
     )
     for command in commands:
         assert cli.main(command) == 0
