@@ -86,8 +86,8 @@ channel too. Non-finite sample values are preserved.
 Only synthetic examples belong in Git. Put private or large `.res`, `.acd`,
 `.h5`, and `.hdf5` files under repository-root `local-test-data/`; it is
 ignored. Tests generate their small RES fixture in temporary directories.
-`../../examples/example-vertical.acd` and its matching HDF5 file demonstrate
-the measurement schema without vehicle data.
+`examples/example-vertical.acd` and its matching HDF5 file demonstrate the
+measurement schema without vehicle data.
 
 ## Build on Ubuntu or WSL
 

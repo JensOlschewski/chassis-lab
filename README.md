@@ -31,8 +31,8 @@ standalone `crates/clab-converter/target/` paths, then `PATH`.
 See [`examples/example-config.toml`](examples/example-config.toml) and
 [`examples/example-signals.toml`](examples/example-signals.toml). Both use
 synthetic names and values as templates for private vehicle data.
-`examples/example-vertical.acd` and `examples/example-vertical.h5` are a small
-synthetic vertical measurement pair.
+`crates/clab-converter/examples/example-vertical.acd` and its matching HDF5
+file are a small synthetic vertical measurement pair.
 
 ## Output
 
