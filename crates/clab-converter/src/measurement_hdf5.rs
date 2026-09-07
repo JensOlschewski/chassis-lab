@@ -1,0 +1,132 @@
+use std::collections::HashMap;
+use std::path::Path;
+use std::str::FromStr;
+
+use anyhow::{Context, Result, bail};
+use hdf5::types::VarLenUnicode;
+use hdf5::{File, Location};
+
+use crate::acd::{self, AcdMeasurement};
+
+pub const FORMAT_VERSION: u32 = 1;
+
+/// Imports an ACD measurement into measurement HDF5. The exact `time` channel is sample axis.
+pub fn import_acd(source: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<()> {
+    let source = source.as_ref();
+    let measurement = acd::parse_file(source)
+        .with_context(|| format!("failed to parse ACD file '{}'", source.display()))?;
+    write_file(output.as_ref(), source, &measurement)
+}
+
+pub fn write_file(path: &Path, source: &Path, measurement: &AcdMeasurement) -> Result<()> {
+    let time = measurement
+        .channels
+        .iter()
+        .find(|channel| channel.name == "time")
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "ACD measurement has no channel named exactly 'time'; sample axis requires it"
+            )
+        })?;
+    let sample_count = time.values.len();
+    if measurement
+        .channels
+        .iter()
+        .any(|channel| channel.values.len() != sample_count)
+    {
+        bail!("ACD measurement channels have inconsistent sample counts");
+    }
+
+    let file = File::create(path)
+        .with_context(|| format!("failed to create HDF5 file '{}'", path.display()))?;
+    scalar(&file, "format_version", FORMAT_VERSION)?;
+    scalar(&file, "sample_count", sample_count as u64)?;
+    scalar(&file, "channel_count", measurement.channels.len() as u64)?;
+    string(&file, "source_kind", "measurement")?;
+    string(&file, "source_file", &source.display().to_string())?;
+    string(&file, "encoding", &measurement.encoding)?;
+    string(&file, "dialect", &measurement.dialect)?;
+
+    let measurements = file.create_group("measurements")?;
+    measurements
+        .new_dataset_builder()
+        .with_data(&time.values)
+        .create("sample_axis")?;
+    let channels = measurements.create_group("channels")?;
+    let mut used_names = HashMap::new();
+    for channel in &measurement.channels {
+        let group =
+            channels.create_group(&unique_name(safe_name(&channel.name), &mut used_names))?;
+        group
+            .new_dataset_builder()
+            .with_data(&channel.values)
+            .create("values")?;
+        string(&group, "original_name", &channel.name)?;
+        string(&group, "description", &channel.description)?;
+        string(&group, "unit", &channel.unit)?;
+        scalar(&group, "offset", channel.offset)?;
+        scalar(&group, "column", channel.column)?;
+    }
+    if !measurement.test_info.is_empty() {
+        let test_info = measurements.create_group("test_info")?;
+        let mut used_names = HashMap::new();
+        for info in &measurement.test_info {
+            let group =
+                test_info.create_group(&unique_name(safe_name(&info.name), &mut used_names))?;
+            string(&group, "name", &info.name)?;
+            string(&group, "description", &info.description)?;
+            string(&group, "data_type", &info.data_type)?;
+            string(&group, "unit", &info.unit)?;
+            string(&group, "value", &info.value)?;
+        }
+    }
+    file.flush()?;
+    Ok(())
+}
+
+fn scalar<T: hdf5::H5Type>(location: &Location, name: &str, value: T) -> Result<()> {
+    location
+        .new_attr::<T>()
+        .create(name)?
+        .write_scalar(&value)?;
+    Ok(())
+}
+
+fn string(location: &Location, name: &str, value: &str) -> Result<()> {
+    let value = VarLenUnicode::from_str(value)
+        .with_context(|| format!("'{value}' cannot be represented as an HDF5 UTF-8 string"))?;
+    location
+        .new_attr::<VarLenUnicode>()
+        .shape(())
+        .create(name)?
+        .write_scalar(&value)?;
+    Ok(())
+}
+
+fn safe_name(name: &str) -> String {
+    let safe: String = name
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-') {
+                byte as char
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if safe.is_empty() {
+        "unnamed".into()
+    } else {
+        safe
+    }
+}
+
+fn unique_name(base: String, used: &mut HashMap<String, usize>) -> String {
+    let count = used.entry(base.clone()).or_insert(0);
+    *count += 1;
+    if *count == 1 {
+        base
+    } else {
+        format!("{base}_{count}")
+    }
+}

@@ -3,11 +3,13 @@ use std::process::Command;
 
 use tempfile::tempdir;
 
+mod common;
+
 #[test]
 fn lists_every_value_without_writing_hdf5() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("minimal.res");
-    fs::copy("tests/fixtures/minimal.res", &input).unwrap();
+    fs::write(&input, common::MINIMAL_RES).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_adams-res"))
         .arg(&input)

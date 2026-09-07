@@ -1,6 +1,12 @@
-# adams-res-converter
+# clab-converter
 
-Rust library and CLI that convert Adams/Car text result files (`.res`) to HDF5.
+Rust import library for Adams/Car result files (`.res`) and Lommel measurement
+files (`.acd`). The `adams-res` binary remains a RES-only compatibility frontend.
+
+The library also exposes `measurement_hdf5::import_acd` for Lommel ACD files.
+It writes measurement schema version 1, retaining every channel and using the
+channel named exactly `time` as `/measurements/sample_axis`; imports without
+that channel fail clearly. The `adams-res` binary remains RES-only.
 
 The parser follows the structure used by the MATLAB `ResImportTool_20160629.m` reader, but it:
 
@@ -12,6 +18,8 @@ The parser follows the structure used by the MATLAB `ResImportTool_20160629.m` r
 - refuses to overwrite output unless `--force` is passed.
 
 ## HDF5 layout
+
+### Simulation HDF5
 
 ```text
 /
@@ -51,6 +59,35 @@ with h5py.File("results.h5", "r") as h5:
 ```
 
 Adams IDs remain available for validation and advanced lookup, but normal access uses the entity group and component name.
+
+### Measurement HDF5
+
+ACD imports write a separate measurement HDF5 v1 file. It is never combined
+with simulation results.
+
+```text
+/
+├── attributes: format_version, source_kind, source_file, sample_count,
+│               channel_count, encoding, dialect
+└── measurements/
+    ├── sample_axis
+    ├── channels/<safe-name>/
+    │   ├── values
+    │   └── attributes: original_name, description, unit, offset, column
+    └── test_info/<safe-name>/
+        └── attributes: name, description, data_type, unit, value
+```
+
+The ACD channel named exactly `time` becomes `sample_axis`; it remains a normal
+channel too. Non-finite sample values are preserved.
+
+## Local test data
+
+Only synthetic examples belong in Git. Put private or large `.res`, `.acd`,
+`.h5`, and `.hdf5` files under repository-root `local-test-data/`; it is
+ignored. Tests generate their small RES fixture in temporary directories.
+`examples/example-vertical.acd` and its matching HDF5 file demonstrate the
+measurement schema without vehicle data.
 
 ## Build on Ubuntu or WSL
 

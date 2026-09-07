@@ -276,6 +276,7 @@ fn validate_file(
             channels.len()
         ));
     }
+    channels.sort_by_key(|channel| channel.column);
     let test_info = if measurements
         .member_names()?
         .iter()
@@ -344,6 +345,7 @@ fn validate_test_info(group: &Group) -> Result<Vec<TestInfo>, MeasurementHdf5Err
             value: required_string(&entry, "value")?,
         });
     }
+    info.sort_by(|left, right| left.group_name.cmp(&right.group_name));
     Ok(info)
 }
 

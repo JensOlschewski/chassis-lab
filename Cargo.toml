@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/adams-res-converter",
+    "crates/clab-converter",
     "crates/clab-core",
     "crates/clab-cli",
 ]

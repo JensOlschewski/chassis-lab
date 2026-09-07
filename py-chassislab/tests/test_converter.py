@@ -7,6 +7,25 @@ import chassis_lab.converter as converter
 from chassis_lab.converter import ConversionError, convert_res
 from chassis_lab.hdf5 import AdamsHdf5
 
+MINIMAL_RES = (
+    "<Result>\n"
+    '  <Entity type="request" name="ride_heights" '
+    'entity="vehicle.ride_heights" objectId="42">\n'
+    '    <Component name="front_left" unitsValue="mm" id="2" />\n'
+    '    <Component name="front_right" unitsValue="mm" id="1" />\n'
+    "  </Entity>\n"
+    '  <Entity type="request" name="svc_output">\n'
+    '    <Component name="Wheelbase" unitsValue="mm" id="3" />\n'
+    "  </Entity>\n"
+    '  <Step type="input">\n'
+    "    360.0 361.0 2490.0\n"
+    "  </Step>\n"
+    '  <Step type="input">\n'
+    "    359.5 360.5 2490.0\n"
+    "  </Step>\n"
+    "</Result>\n"
+)
+
 
 def make_fake_converter(path: Path, exit_code: int = 0) -> Path:
     binary = path / "adams-res"
@@ -126,10 +145,8 @@ def test_repository_converter_round_trip_to_python_reader(
     )
     if not binary_available:
         pytest.skip("build converter before running integration test")
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "crates/adams-res-converter/tests/fixtures/minimal.res"
-    )
+    source = tmp_path / "minimal.res"
+    source.write_text(MINIMAL_RES)
 
     result = convert_res(source, output=tmp_path / "result.h5")
 

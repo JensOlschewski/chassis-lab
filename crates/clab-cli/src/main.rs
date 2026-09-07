@@ -81,7 +81,7 @@ fn inspect(path: &Path, signals: bool) -> Result<()> {
     if !is_res {
         bail!("RES inspection currently requires a .res input");
     }
-    let result = adams_res_converter::parser::parse_file(path)
+    let result = clab_converter::parser::parse_file(path)
         .with_context(|| format!("failed to parse '{}'", path.display()))?;
     println!(
         "{} samples, {} signals",

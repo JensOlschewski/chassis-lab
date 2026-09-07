@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 
-use adams_res_converter::{hdf5_writer, parser};
+use clab_converter::{hdf5_writer, parser};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -67,7 +67,7 @@ fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-fn print_values(result: &adams_res_converter::model::AdamsResult) {
+fn print_values(result: &clab_converter::model::AdamsResult) {
     println!("ID\tENTITY\tCOMPONENT\tUNITS");
     for (entity, component) in result.values() {
         println!(

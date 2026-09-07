@@ -12,7 +12,8 @@ mkdir -p "$output/bin" "$output/licenses" "$download"
 
 source <(awk -F= '/^(CPYTHON_URL|CPYTHON_SHA256)=/{print}' "$lock")
 archive="$download/cpython.tar.gz"
-curl --fail --location --silent --show-error "$CPYTHON_URL" --output "$archive"
+curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+    --retry-delay 2 "$CPYTHON_URL" --output "$archive"
 printf '%s  %s\n' "$CPYTHON_SHA256" "$archive" | sha256sum --check --status
 tar -xzf "$archive" --strip-components=1 -C "$output"
 

@@ -10,9 +10,9 @@ REPOSITORY_BINARIES = (
     Path(__file__).resolve().parents[3] / "target/release/adams-res",
     Path(__file__).resolve().parents[3] / "target/debug/adams-res",
     Path(__file__).resolve().parents[3]
-    / "crates/adams-res-converter/target/release/adams-res",
+    / "crates/clab-converter/target/release/adams-res",
     Path(__file__).resolve().parents[3]
-    / "crates/adams-res-converter/target/debug/adams-res",
+    / "crates/clab-converter/target/debug/adams-res",
 )
 
 
@@ -95,7 +95,7 @@ def converter_provenance(binary: str = DEFAULT_BINARY) -> dict[str, str | None]:
     """Return converter identity and reported version when available."""
     executable = _resolve_binary(binary)
     provenance: dict[str, str | None] = {
-        "name": "adams-res-converter",
+        "name": "clab-converter",
         "path": executable,
         "version": None,
     }

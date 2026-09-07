@@ -18,7 +18,7 @@ from chassis_lab.vertical import VERTICAL_SIGNAL_CONVENTIONS
 
 def test_svc_mapping_has_one_convention_per_signal() -> None:
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs" / "example-config.toml")
+    config = load_config(root / "examples" / "example-config.toml")
     names = {name for name, _ in config.signals}
 
     assert names == set(SVC_SIGNAL_CONVENTIONS)
