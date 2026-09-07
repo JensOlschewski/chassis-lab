@@ -1,4 +1,4 @@
-<Result>
+pub const MINIMAL_RES: &str = r#"<Result>
   <Entity type="request" name="ride_heights" entity="vehicle.ride_heights" objectId="42">
     <Component name="front_left" unitsValue="mm" id="2" />
     <Component name="front_right" unitsValue="mm" id="1" />
@@ -13,3 +13,4 @@
     359.5 360.5 2490.0
   </Step>
 </Result>
+"#;

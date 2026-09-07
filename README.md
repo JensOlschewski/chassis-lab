@@ -18,13 +18,14 @@ Convert an Adams result and validate it:
 ```
 
 The converter is discovered from `target/release/`, then `target/debug/`, then
-standalone `crates/adams-res-converter/target/` paths, then `PATH`.
+standalone `crates/clab-converter/target/` paths, then `PATH`.
 
 ## Input
 
-- Adams `.res` files are converted by `crates/adams-res-converter/`.
-- Converted HDF5 files use format version 3.
-- Lommel `.acd` files provide physical measurements.
+- Adams `.res` files are converted by `crates/clab-converter/`.
+- Converted simulation HDF5 files use format version 3.
+- Converted measurement HDF5 files use schema version 1.
+- Lommel `.acd` files provide physical measurements for conversion.
 - TOML files define cases, inputs, signal maps, setup, and tolerances.
 
 See [`configs/example-config.toml`](configs/example-config.toml) and
@@ -48,7 +49,7 @@ Trusted `vMAJOR.MINOR.PATCH` tags publish matching Python and Rust versions as
 Gitea Release assets. Releases include a Python wheel, Linux x86_64
 `adams-res` archive, and `SHA256SUMS`.
 
-`adams-res` remains independently usable from `crates/adams-res-converter/` or
+`adams-res` remains independently usable from `crates/clab-converter/` or
 the release archive.
 
 ## Development

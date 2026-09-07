@@ -1,17 +1,18 @@
-use std::path::Path;
-
-use adams_res_converter::{hdf5_writer, parser};
+use clab_converter::{hdf5_writer, parser};
 use hdf5::types::VarLenUnicode;
 use tempfile::tempdir;
 
+mod common;
+
 #[test]
 fn converts_a_result_file_to_hdf5() {
-    let source = Path::new("tests/fixtures/minimal.res");
-    let result = parser::parse_file(source).unwrap();
     let directory = tempdir().unwrap();
+    let source = directory.path().join("minimal.res");
+    std::fs::write(&source, common::MINIMAL_RES).unwrap();
+    let result = parser::parse_file(&source).unwrap();
     let output = directory.path().join("minimal.h5");
 
-    hdf5_writer::write_file(&output, source, &result).unwrap();
+    hdf5_writer::write_file(&output, &source, &result).unwrap();
 
     let file = hdf5::File::open(output).unwrap();
     assert_eq!(

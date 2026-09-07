@@ -13,7 +13,7 @@ gravity = 9.80665 # m/s^2
 # Replace these example paths with converted simulation output and reviewed
 # measurements from your own vehicle or test campaign.
 signal_map = "example-signals.toml"
-simulation_hdf5 = "../crates/adams-res-converter/examples/example-svc.h5"
+simulation_hdf5 = "../crates/clab-converter/examples/example-svc.h5"
 measurement_reference = "../measures/example-measures.json"
 
 [svc.validation.tolerances.absolute]

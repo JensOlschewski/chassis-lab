@@ -8,9 +8,9 @@ Its current pipeline is:
 ```text
 Adams .res / Lommel .acd
         ↓
-         crates/adams-res-converter/ — Rust result converter
+          crates/clab-converter/ — Rust result converter
         ↓
-HDF5 format 3
+simulation HDF5 v3 / measurement HDF5 v1
         ↓
  py-chassislab/src/chassis_lab/ — Python validation
         ↓
@@ -112,7 +112,7 @@ remain compatible until an explicitly versioned contract change.
 
 ## Repository
 
-- `crates/adams-res-converter/` provides the Rust `.res` parser, HDF5 writer,
+- `crates/clab-converter/` provides the Rust `.res` parser, HDF5 writer,
   and compatibility `adams-res` frontend.
 - Rust workspace crates will own the unified `clab` frontend and application
   core.
@@ -147,6 +147,8 @@ versions and malformed dimensions.
 Lommel `.acd` files contain metadata, offsets, channel names, units, and numeric
 samples. The reader detects data boundaries instead of relying on VARB/VARC line
 numbers. It preserves `NaN` and `Inf`; evaluators decide whether they are valid.
+`clab-converter` imports ACD to measurement HDF5 v1 through its library API,
+using channel name exactly `time` for sample axis and retaining that channel.
 
 ## Configuration
 
