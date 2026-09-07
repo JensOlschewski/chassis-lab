@@ -97,12 +97,11 @@ jobs:
 
       - name: Smoke test in clean Ubuntu container
         run: |
-          docker run --rm --pull=missing \
-            -v "$PWD/dist:/dist:ro" \
+          docker run --rm --pull=missing -i \
             ubuntu:24.04 \
             bash -ceu '
               mkdir /tmp/embed-bundle
-              tar -xzf /dist/embed-bundle-linux-x86_64.tar.gz -C /tmp/embed-bundle
+              tar -xzf - -C /tmp/embed-bundle
               bundle=/tmp/embed-bundle/embed-bundle-linux-x86_64
               env -i \
                 PATH="$bundle/bin:/usr/bin:/bin" \
@@ -111,7 +110,7 @@ jobs:
                 VIRTUAL_ENV=/poisoned \
                 LD_LIBRARY_PATH=/poisoned \
                 "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
-            '
+            ' < dist/embed-bundle-linux-x86_64.tar.gz
 
       - name: Upload experimental bundle
         uses: actions/upload-artifact@v4
