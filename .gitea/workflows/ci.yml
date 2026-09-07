@@ -25,6 +25,17 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
       - name: Install Rust build tools
         run: python -m pip install "cmake>=3.26,<4"
 
@@ -49,9 +60,68 @@ jobs:
       - name: Test Python and integration
         run: pytest -q
 
+  bundle-runtime:
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Rust build tools
+        run: python3 -m pip install "cmake>=3.26,<4"
+
+      - name: Build bundled runtime
+        run: packaging/build-embedded-runtime.sh dist/embed-bundle-linux-x86_64
+
+      - name: Verify bundle checksum
+        run: sha256sum --check dist/embed-bundle-linux-x86_64.tar.gz.sha256
+
+      - name: Smoke test in clean Ubuntu container
+        run: |
+          docker run --rm --pull=missing \
+            -v "$PWD/dist:/dist:ro" \
+            ubuntu:24.04 \
+            bash -ceu '
+              mkdir /tmp/embed-bundle
+              tar -xzf /dist/embed-bundle-linux-x86_64.tar.gz -C /tmp/embed-bundle
+              bundle=/tmp/embed-bundle/embed-bundle-linux-x86_64
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
+            '
+
+      - name: Upload experimental bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: embed-bundle-linux-x86_64
+          path: dist/embed-bundle-linux-x86_64.tar.gz*
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: checks
+    needs: [checks, bundle-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: write
