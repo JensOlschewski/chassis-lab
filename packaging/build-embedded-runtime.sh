@@ -4,6 +4,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 lock="$root/packaging/embedded-runtime-linux-x86_64.lock"
 output=${1:-"$root/dist/embed-bundle-linux-x86_64"}
+output=$(realpath -m "$output")
 download="$output/.wheels"
 
 rm -rf "$output"
