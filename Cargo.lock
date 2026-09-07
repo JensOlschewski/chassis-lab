@@ -109,6 +109,8 @@ dependencies = [
  "clab-converter",
  "clab-core",
  "clap",
+ "hdf5-metno",
+ "tempfile",
 ]
 
 [[package]]
