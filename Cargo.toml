@@ -1,5 +1,9 @@
 [workspace]
-members = ["crates/adams-res-converter"]
+members = [
+    "crates/adams-res-converter",
+    "crates/clab-core",
+    "crates/clab-cli",
+]
 resolver = "3"
 
 [workspace.package]

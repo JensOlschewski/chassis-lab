@@ -1,0 +1,14 @@
+[package]
+name = "clab-cli"
+version.workspace = true
+edition = "2024"
+
+[[bin]]
+name = "clab"
+path = "src/main.rs"
+
+[dependencies]
+adams-res-converter = { path = "../adams-res-converter" }
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive"] }
+clab-core = { path = "../clab-core" }
