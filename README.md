@@ -14,7 +14,7 @@ Convert an Adams result and validate it:
 
 ```bash
 .venv/bin/clab convert-res input.res -o result.h5
-.venv/bin/clab validate-svc configs/example-config.toml
+.venv/bin/clab validate-svc examples/example-config.toml
 ```
 
 The converter is discovered from `target/release/`, then `target/debug/`, then
@@ -28,9 +28,11 @@ standalone `crates/clab-converter/target/` paths, then `PATH`.
 - Lommel `.acd` files provide physical measurements for conversion.
 - TOML files define cases, inputs, signal maps, setup, and tolerances.
 
-See [`configs/example-config.toml`](configs/example-config.toml) and
-[`configs/example-signals.toml`](configs/example-signals.toml). Both use
+See [`examples/example-config.toml`](examples/example-config.toml) and
+[`examples/example-signals.toml`](examples/example-signals.toml). Both use
 synthetic names and values as templates for private vehicle data.
+`examples/example-vertical.acd` and `examples/example-vertical.h5` are a small
+synthetic vertical measurement pair.
 
 ## Output
 
@@ -68,8 +70,8 @@ cargo test --workspace --locked
 ```text
 py-chassislab/      Python package and tests
 crates/             Rust workspace crates
-configs/            commented example configuration and signal map
-measures/           synthetic example reference and data policy
+examples/           committed synthetic inputs and configuration
+local-test-data/    ignored private or large engineering files
 docs/               architecture and roadmap
 ```
 

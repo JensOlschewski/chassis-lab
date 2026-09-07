@@ -118,8 +118,8 @@ remain compatible until an explicitly versioned contract change.
   core.
 - `py-chassislab/src/chassis_lab/` currently owns validation; after migration it contains only
   embedded scientific analysis and plotting modules.
-- `configs/` stores commented example configuration and signal-map TOML files.
-- `measures/` stores synthetic examples; real measurement data stays external.
+- `examples/` stores synthetic inputs, reference values, configuration, and
+  signal-map TOML files; real engineering data stays local.
 - `py-chassislab/tests/` contains Python and cross-language tests; Rust tests
   live beside their crates.
 - `artifacts/` stores generated results and remains untracked.
@@ -152,7 +152,7 @@ using channel name exactly `time` for sample axis and retaining that channel.
 
 ## Configuration
 
-`configs/example-config.toml` defines vehicle metadata and SVC inputs. Private
+`examples/example-config.toml` defines vehicle metadata and SVC inputs. Private
 domain configurations can add vertical inputs using the same structure:
 
 ```toml

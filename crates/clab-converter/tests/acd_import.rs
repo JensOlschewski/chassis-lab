@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::PathBuf;
 
 use clab_converter::measurement_hdf5;
 use clab_core::measurement_hdf5::MeasurementFile;
@@ -58,4 +59,23 @@ fn rejects_acd_without_exact_time_channel() {
 
     let error = measurement_hdf5::import_acd(&source, &output).unwrap_err();
     assert!(error.to_string().contains("named exactly 'time'"));
+}
+
+#[test]
+fn committed_vertical_examples_are_valid_and_correspond() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let source = root.join("examples/example-vertical.acd");
+    let expected = MeasurementFile::open(root.join("examples/example-vertical.h5")).unwrap();
+    let directory = tempdir().unwrap();
+    let output = directory.path().join("example-vertical.h5");
+
+    measurement_hdf5::import_acd(&source, &output).unwrap();
+    let imported = MeasurementFile::open(output).unwrap();
+
+    assert_eq!(
+        expected.read_sample_axis().unwrap(),
+        imported.read_sample_axis().unwrap()
+    );
+    assert_eq!(expected.channels(), imported.channels());
+    assert_eq!(expected.test_info(), imported.test_info());
 }

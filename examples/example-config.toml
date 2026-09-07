@@ -14,7 +14,7 @@ gravity = 9.80665 # m/s^2
 # measurements from your own vehicle or test campaign.
 signal_map = "example-signals.toml"
 simulation_hdf5 = "../crates/clab-converter/examples/example-svc.h5"
-measurement_reference = "../measures/example-measures.json"
+measurement_reference = "example-measures.json"
 
 [svc.validation.tolerances.absolute]
 # Keep only metrics relevant to your example or validation case.

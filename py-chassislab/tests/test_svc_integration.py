@@ -12,7 +12,7 @@ from chassis_lab.svc_validation import (
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
-EXAMPLE_CONFIG_PATH = _ROOT / "configs" / "example-config.toml"
+EXAMPLE_CONFIG_PATH = _ROOT / "examples" / "example-config.toml"
 
 
 def test_example_config_loads_without_private_data() -> None:

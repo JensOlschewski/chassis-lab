@@ -1,8 +1,3 @@
-!configs/example-config.toml
-!configs/example-signals.toml
-!crates/clab-converter/examples/example-svc.h5
-!crates/clab-converter/examples/example-svc.res
-!measures/example-measures.json
 *.egg-info/
 *.h5
 *.hdf5
@@ -15,11 +10,7 @@
 __pycache__/
 artifacts/
 build/
-configs/*.toml
-configs/signals/
 dist/
 htmlcov/
 local-test-data/
-measures/**/*.json
-measures/raw/
 target/
