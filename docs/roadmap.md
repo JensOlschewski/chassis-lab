@@ -149,7 +149,8 @@ Issues:
   `adams-res` remains available during its compatibility window.
 - Current bundled workflow target is Linux x86_64. Checksums accompany every
   artifact.
-- Existing standalone Rust users can continue building `converter/` directly;
+- Existing standalone Rust users can continue building
+  `crates/adams-res-converter/` directly;
   repository releases are the compatibility reference after migration.
 
 ## Gitea maintenance policy

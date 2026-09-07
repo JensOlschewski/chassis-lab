@@ -172,7 +172,7 @@ def test_inspection_commands_are_read_only(
 def test_svc_report_schema_contract(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     config = root / "configs" / "example-config.toml"
     json_output = tmp_path / "svc.json"
     csv_output = tmp_path / "svc.csv"
