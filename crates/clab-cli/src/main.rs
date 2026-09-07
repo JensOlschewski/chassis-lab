@@ -109,8 +109,8 @@ fn convert(input: &Path, explicit_output: Option<&Path>, force: bool) -> Result<
     validate_output(input, &output, force)?;
 
     match kind {
-        InputKind::Res => clab_converter::convert_res(input, &output),
-        InputKind::Acd => clab_converter::measurement_hdf5::import_acd(input, &output),
+        InputKind::Res => clab_converter::convert_res(input, &output, force),
+        InputKind::Acd => clab_converter::measurement_hdf5::import_acd(input, &output, force),
     }
     .with_context(|| format!("failed to generate '{}'", output.display()))?;
 

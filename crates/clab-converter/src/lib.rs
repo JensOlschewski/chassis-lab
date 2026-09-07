@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
+use tempfile::NamedTempFile;
 
 pub mod acd;
 pub mod hdf5_writer;
@@ -9,46 +10,57 @@ pub mod model;
 pub mod parser;
 
 /// Converts an Adams RES result to simulation HDF5 without leaving a partial output on failure.
-pub fn convert_res(source: &Path, output: &Path) -> Result<()> {
+pub fn convert_res(source: &Path, output: &Path, overwrite: bool) -> Result<()> {
     let result = parser::parse_file(source)
         .with_context(|| format!("failed to parse RES file '{}'", source.display()))?;
-    write_atomically(output, |temporary| {
+    write_atomically(output, overwrite, |temporary| {
         hdf5_writer::write_file(temporary, source, &result)
     })
 }
 
 pub(crate) fn write_atomically(
     output: &Path,
+    overwrite: bool,
     write: impl FnOnce(&Path) -> Result<()>,
 ) -> Result<()> {
-    let temporary = temporary_path(output)?;
-    if let Err(error) = write(&temporary) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(error);
-    }
-    if let Err(error) = std::fs::rename(&temporary, output) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(error).with_context(|| {
-            format!(
-                "failed to replace output '{}' with completed HDF5 file",
-                output.display()
-            )
-        });
-    }
-    Ok(())
+    let parent = output.parent().unwrap_or_else(|| Path::new("."));
+    let temporary = NamedTempFile::new_in(parent).with_context(|| {
+        format!(
+            "failed to create temporary output near '{}'",
+            output.display()
+        )
+    })?;
+    let temporary_path = temporary.path().to_path_buf();
+    write(&temporary_path)?;
+    let persist = if overwrite {
+        temporary.persist(output)
+    } else {
+        temporary.persist_noclobber(output)
+    };
+    persist.map(|_| ()).with_context(|| {
+        format!(
+            "failed to publish completed HDF5 file to '{}'",
+            output.display()
+        )
+    })
 }
 
-fn temporary_path(output: &Path) -> Result<std::path::PathBuf> {
-    for attempt in 0..1_000 {
-        let mut name = output.as_os_str().to_os_string();
-        name.push(format!(".tmp-{}-{attempt}", std::process::id()));
-        let temporary = std::path::PathBuf::from(name);
-        if !temporary.exists() {
-            return Ok(temporary);
-        }
+#[cfg(test)]
+mod tests {
+    use super::write_atomically;
+    use std::fs;
+
+    #[test]
+    fn failed_write_preserves_output_and_removes_temporary_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("output.h5");
+        fs::write(&output, "existing output").unwrap();
+
+        let error =
+            write_atomically(&output, true, |_| Err(anyhow::anyhow!("write failed"))).unwrap_err();
+
+        assert!(error.to_string().contains("write failed"));
+        assert_eq!(fs::read_to_string(&output).unwrap(), "existing output");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
-    bail!(
-        "could not allocate temporary output alongside '{}'",
-        output.display()
-    )
 }

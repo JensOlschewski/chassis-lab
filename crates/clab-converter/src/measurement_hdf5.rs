@@ -11,11 +11,15 @@ use crate::acd::{self, AcdMeasurement};
 pub const FORMAT_VERSION: u32 = 1;
 
 /// Imports an ACD measurement into measurement HDF5. The exact `time` channel is sample axis.
-pub fn import_acd(source: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<()> {
+pub fn import_acd(
+    source: impl AsRef<Path>,
+    output: impl AsRef<Path>,
+    overwrite: bool,
+) -> Result<()> {
     let source = source.as_ref();
     let measurement = acd::parse_file(source)
         .with_context(|| format!("failed to parse ACD file '{}'", source.display()))?;
-    crate::write_atomically(output.as_ref(), |temporary| {
+    crate::write_atomically(output.as_ref(), overwrite, |temporary| {
         write_file(temporary, source, &measurement)
     })
 }
