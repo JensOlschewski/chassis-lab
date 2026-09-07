@@ -8,11 +8,11 @@ Its current pipeline is:
 ```text
 Adams .res / Lommel .acd
         ↓
-converter/ — Rust result converter
+         crates/adams-res-converter/ — Rust result converter
         ↓
 HDF5 format 3
         ↓
-src/chassis_lab/ — Python validation
+ py-chassislab/src/chassis_lab/ — Python validation
         ↓
 JSON, CSV, SVG, and run manifests
 ```
@@ -112,15 +112,16 @@ remain compatible until an explicitly versioned contract change.
 
 ## Repository
 
-- `converter/` provides the Rust `.res` parser, HDF5 writer, and compatibility
-  `adams-res` frontend.
+- `crates/adams-res-converter/` provides the Rust `.res` parser, HDF5 writer,
+  and compatibility `adams-res` frontend.
 - Rust workspace crates will own the unified `clab` frontend and application
   core.
-- `src/chassis_lab/` currently owns validation; after migration it contains only
+- `py-chassislab/src/chassis_lab/` currently owns validation; after migration it contains only
   embedded scientific analysis and plotting modules.
 - `configs/` stores commented example configuration and signal-map TOML files.
 - `measures/` stores synthetic examples; real measurement data stays external.
-- `tests/` contains Python, Rust, and cross-language tests.
+- `py-chassislab/tests/` contains Python and cross-language tests; Rust tests
+  live beside their crates.
 - `artifacts/` stores generated results and remains untracked.
 
 ## HDF5 contract
