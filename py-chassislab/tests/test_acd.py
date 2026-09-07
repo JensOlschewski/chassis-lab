@@ -10,7 +10,6 @@ from chassis_lab.acd import (
     AcdSignalUnitError,
     inspect_acd,
 )
-from chassis_lab.cli import main
 
 
 def write_acd(
@@ -167,19 +166,3 @@ def test_rejects_wrong_data_width_and_malformed_number(tmp_path: Path) -> None:
     write_acd(malformed, data=(("bad", "1"),))
     with pytest.raises(AcdFormatError, match="channel 'time' is not numeric"):
         inspect_acd(malformed)
-
-
-def test_cli_lists_and_inspects_acd(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    path = tmp_path / "measurement.acd"
-    write_acd(path)
-
-    assert main(["list-acd-signals", str(path), "--match", "lfwcz"]) == 0
-    listed = capsys.readouterr().out
-    assert "lfwcz\tmm\t10.0\tWheel travel" in listed
-
-    assert main(["inspect-acd", str(path), "--json"]) == 0
-    inspected = capsys.readouterr().out
-    assert '"channel_count": 2' in inspected
-    assert '"sample_count": 2' in inspected

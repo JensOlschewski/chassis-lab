@@ -1,12 +1,12 @@
 # clab-converter
 
 Rust import library for Adams/Car result files (`.res`) and Lommel measurement
-files (`.acd`). The `adams-res` binary remains a RES-only compatibility frontend.
+files (`.acd`) used by the `clab` CLI.
 
 The library also exposes `measurement_hdf5::import_acd` for Lommel ACD files.
 It writes measurement schema version 1, retaining every channel and using the
 channel named exactly `time` as `/measurements/sample_axis`; imports without
-that channel fail clearly. The `adams-res` binary remains RES-only.
+that channel fail clearly.
 
 The parser follows the structure used by the MATLAB `ResImportTool_20160629.m` reader, but it:
 
@@ -100,47 +100,40 @@ cargo test
 cargo build --release
 ```
 
-The executable is then:
-
-```text
-target/release/adams-res
-```
-
-Optionally install it into `~/.cargo/bin`:
-
-```bash
-cargo install --path .
-```
-
 ## Usage
+
+Use the workspace `clab` command to convert raw inputs. Inspect accepts only
+normalized HDF5 output, so convert `.res` and `.acd` before inspecting them.
 
 Convert a file next to the source file:
 
 ```bash
-adams-res BeFlex2upLoa_svc.res
+target/release/clab convert BeFlex2upLoa_svc.res
 ```
 
-This creates `BeFlex2upLoa_svc.h5`.
+This creates `BeFlex2upLoa_svc.simulation.h5`.
 
 Choose another output path:
 
 ```bash
-adams-res BeFlex2upLoa_svc.res --output results/BeFlex2upLoa_svc.h5
+target/release/clab convert BeFlex2upLoa_svc.res --output results/BeFlex2upLoa_svc.h5
 ```
 
 Replace an existing output file:
 
 ```bash
-adams-res BeFlex2upLoa_svc.res --force
+target/release/clab convert BeFlex2upLoa_svc.res --force
 ```
 
-List every available value series without creating an HDF5 file:
+Inspect converted signals:
 
 ```bash
-adams-res BeFlex2upLoa_svc.res --list
+target/release/clab inspect BeFlex2upLoa_svc.simulation.h5 --signals
 ```
 
-The tab-separated output contains the Adams ID, entity path, component name, and unit. The library also exposes `AdamsResult::values()` for iterating over every entity/component pair programmatically.
+The tab-separated output contains the entity path, component name, unit, and
+Adams ID. The library also exposes `AdamsResult::values()` for iterating over
+every entity/component pair programmatically.
 
 Inspect the result:
 

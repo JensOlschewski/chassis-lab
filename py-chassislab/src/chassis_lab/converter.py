@@ -5,14 +5,10 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_BINARY = "adams-res"
+DEFAULT_BINARY = "clab"
 REPOSITORY_BINARIES = (
-    Path(__file__).resolve().parents[3] / "target/release/adams-res",
-    Path(__file__).resolve().parents[3] / "target/debug/adams-res",
-    Path(__file__).resolve().parents[3]
-    / "crates/clab-converter/target/release/adams-res",
-    Path(__file__).resolve().parents[3]
-    / "crates/clab-converter/target/debug/adams-res",
+    Path(__file__).resolve().parents[3] / "target/release/clab",
+    Path(__file__).resolve().parents[3] / "target/debug/clab",
 )
 
 
@@ -36,7 +32,7 @@ def convert_res(
     binary: str = DEFAULT_BINARY,
     force: bool = False,
 ) -> ConversionResult:
-    """Convert an Adams/Car ``.res`` file to HDF5 using ``adams-res``.
+    """Convert an Adams/Car ``.res`` file to HDF5 using ``clab convert``.
 
     The converter command is discovered on ``PATH`` by default; ``binary`` may
     be an absolute path. ``output`` defaults to the input path with an ``.h5``
@@ -59,7 +55,14 @@ def convert_res(
 
     try:
         completed = subprocess.run(
-            [executable, str(res), "-o", str(h5), *(["-f"] if force else [])],
+            [
+                executable,
+                "convert",
+                str(res),
+                "-o",
+                str(h5),
+                *(["--force"] if force else []),
+            ],
             capture_output=True,
             text=True,
             check=False,
