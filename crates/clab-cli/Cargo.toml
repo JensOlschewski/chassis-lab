@@ -12,3 +12,6 @@ clab-converter = { path = "../clab-converter" }
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive"] }
 clab-core = { path = "../clab-core" }
+
+[dev-dependencies]
+tempfile = "3.20"

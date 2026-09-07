@@ -15,7 +15,9 @@ pub fn import_acd(source: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<
     let source = source.as_ref();
     let measurement = acd::parse_file(source)
         .with_context(|| format!("failed to parse ACD file '{}'", source.display()))?;
-    write_file(output.as_ref(), source, &measurement)
+    crate::write_atomically(output.as_ref(), |temporary| {
+        write_file(temporary, source, &measurement)
+    })
 }
 
 pub fn write_file(path: &Path, source: &Path, measurement: &AcdMeasurement) -> Result<()> {
