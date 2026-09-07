@@ -113,7 +113,7 @@ jobs:
             ' < dist/embed-bundle-linux-x86_64.tar.gz
 
       - name: Upload experimental bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: embed-bundle-linux-x86_64
           path: dist/embed-bundle-linux-x86_64.tar.gz*
