@@ -4,6 +4,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 lock="$root/packaging/embedded-runtime-linux-x86_64.lock"
 output=${1:-"$root/dist/embed-bundle-linux-x86_64"}
+output=$(realpath -m "$output")
 download="$output/.wheels"
 
 rm -rf "$output"
@@ -15,10 +16,23 @@ curl --fail --location --silent --show-error "$CPYTHON_URL" --output "$archive"
 printf '%s  %s\n' "$CPYTHON_SHA256" "$archive" | sha256sum --check --status
 tar -xzf "$archive" --strip-components=1 -C "$output"
 
+pyo3_config="$output/pyo3-config"
+cat > "$pyo3_config" <<EOF
+implementation=CPython
+version=3.12
+shared=true
+abi3=false
+lib_name=python3.12
+lib_dir=$output/lib
+executable=$output/bin/python3.12
+pointer_width=64
+EOF
 RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,\$ORIGIN/../lib" \
+    PYO3_CONFIG_FILE="$pyo3_config" \
     PYO3_PYTHON="$output/bin/python3.12" \
     cargo build --release --example embed-smoke --locked
 cp "$root/target/release/examples/embed-smoke" "$output/bin/embed-smoke"
+rm "$pyo3_config"
 
 while read -r kind package filename digest; do
     [ "$kind" = WHEEL ] || continue
