@@ -22,7 +22,7 @@ fn imports_acd_into_measurement_schema_without_normalizing_values() {
     let output = directory.path().join("measurement.h5");
     write_acd(&source, "time\twheel/travel\twheel travel");
 
-    measurement_hdf5::import_acd(&source, &output).unwrap();
+    measurement_hdf5::import_acd(&source, &output, false).unwrap();
 
     let measurement = MeasurementFile::open(&output).unwrap();
     assert_eq!(measurement.summary().format_version, 1);
@@ -57,7 +57,7 @@ fn rejects_acd_without_exact_time_channel() {
     let output = directory.path().join("measurement.h5");
     write_acd(&source, "Time\twheel/travel\twheel travel");
 
-    let error = measurement_hdf5::import_acd(&source, &output).unwrap_err();
+    let error = measurement_hdf5::import_acd(&source, &output, false).unwrap_err();
     assert!(error.to_string().contains("named exactly 'time'"));
 }
 
@@ -69,7 +69,7 @@ fn committed_vertical_examples_are_valid_and_correspond() {
     let directory = tempdir().unwrap();
     let output = directory.path().join("example-vertical.h5");
 
-    measurement_hdf5::import_acd(&source, &output).unwrap();
+    measurement_hdf5::import_acd(&source, &output, false).unwrap();
     let imported = MeasurementFile::open(output).unwrap();
 
     assert_eq!(

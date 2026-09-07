@@ -109,6 +109,7 @@ dependencies = [
  "clab-converter",
  "clab-core",
  "clap",
+ "tempfile",
 ]
 
 [[package]]
