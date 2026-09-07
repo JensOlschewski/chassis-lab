@@ -10,15 +10,16 @@ python3 -m venv .venv
 cargo build --workspace --release
 ```
 
-Convert an Adams result and validate it:
+Convert an Adams result or Lommel measurement and validate it:
 
 ```bash
-.venv/bin/clab convert-res input.res -o result.h5
+target/release/clab convert input.res
+target/release/clab convert measurement.acd -o measurement.h5
 .venv/bin/clab validate-svc examples/example-config.toml
 ```
 
-The converter is discovered from `target/release/`, then `target/debug/`, then
-standalone `crates/clab-converter/target/` paths, then `PATH`.
+Default conversion output is `INPUT.simulation.h5` for `.res` and
+`INPUT.measurement.h5` for `.acd`; use `--force` to replace an existing output.
 
 ## Input
 
