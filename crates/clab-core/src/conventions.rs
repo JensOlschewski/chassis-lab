@@ -2,6 +2,8 @@
 
 use std::{collections::BTreeMap, f64::consts::PI, fmt, str::FromStr};
 
+use thiserror::Error;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Unit {
     Newton,
@@ -148,16 +150,9 @@ pub struct TransformedSignal {
     pub convention: SignalConvention,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("{0}")]
 pub struct ConventionError(pub String);
-
-impl fmt::Display for ConventionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for ConventionError {}
 
 pub fn convert_values(
     values: &[f64],

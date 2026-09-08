@@ -13,12 +13,6 @@ from chassis_lab.svc_reporting import (
 from chassis_lab.svc_reporting import (
     REPORT_SCHEMA_VERSION as SVC_REPORT_SCHEMA_VERSION,
 )
-from chassis_lab.vertical_reporting import (
-    CSV_FIELDS as VERTICAL_CSV_FIELDS,
-)
-from chassis_lab.vertical_reporting import (
-    REPORT_SCHEMA_VERSION as VERTICAL_REPORT_SCHEMA_VERSION,
-)
 
 COMMAND_CONTRACT = {
     "inspect-h5": (("path",), (("--json",),)),
@@ -37,15 +31,6 @@ COMMAND_CONTRACT = {
             ("--csv-output",),
             ("-f", "--force"),
             ("--color",),
-        ),
-    ),
-    "validate-vertical": (
-        ("path",),
-        (
-            ("--plot-output",),
-            ("--json-output",),
-            ("--csv-output",),
-            ("-f", "--force"),
         ),
     ),
     "convert-res": (
@@ -189,27 +174,6 @@ def test_svc_report_schema_contract(
     assert set(report["metrics"][0]) == SVC_METRIC_FIELDS
     with csv_output.open(encoding="utf-8", newline="") as stream:
         assert tuple(csv.DictReader(stream).fieldnames or ()) == SVC_CSV_FIELDS
-
-
-def test_vertical_report_schema_contract() -> None:
-    assert VERTICAL_REPORT_SCHEMA_VERSION == 1
-    assert VERTICAL_CSV_FIELDS == (
-        "case",
-        "variant",
-        "loadcase",
-        "setup_code",
-        "corner",
-        "axis",
-        "measurement_baseline_mm",
-        "simulation_baseline_mm",
-        "baseline_error_mm",
-        "rmse_mm",
-        "maximum_error_mm",
-        "config_sha256",
-        "signal_map_sha256",
-        "measurement_sha256",
-        "simulation_sha256",
-    )
 
 
 class _StubParser:

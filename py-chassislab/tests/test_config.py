@@ -76,7 +76,7 @@ component = "value"
 unit = "mm"
 
 [vertical.inputs]
-measurement_acd = "bounce.acd"
+ measurement_hdf5 = "bounce.h5"
 simulation_hdf5 = "vertical.h5"
 
 [vertical.setup]
@@ -145,7 +145,7 @@ def test_loads_unified_svc_and_vertical_config(tmp_path: Path) -> None:
     assert len(config.signals) == 1
     assert config.vertical is not None
     assert (
-        config.vertical.measurement_acd == (tmp_path / "bounce.acd").resolve()
+        config.vertical.measurement_hdf5 == (tmp_path / "bounce.h5").resolve()
     )
     assert (
         config.vertical.simulation_hdf5 == (tmp_path / "vertical.h5").resolve()

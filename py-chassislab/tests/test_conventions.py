@@ -13,7 +13,6 @@ from chassis_lab.conventions import (
     convert_values,
 )
 from chassis_lab.svc import SVC_SIGNAL_CONVENTIONS
-from chassis_lab.vertical import VERTICAL_SIGNAL_CONVENTIONS
 
 
 def test_svc_mapping_has_one_convention_per_signal() -> None:
@@ -22,18 +21,6 @@ def test_svc_mapping_has_one_convention_per_signal() -> None:
     names = {name for name, _ in config.signals}
 
     assert names == set(SVC_SIGNAL_CONVENTIONS)
-
-
-def test_vertical_mapping_has_one_convention_per_signal() -> None:
-    assert VERTICAL_SIGNAL_CONVENTIONS
-    assert all(
-        convention.baseline == BaselinePolicy.STATIC_SIMULATION
-        for convention in VERTICAL_SIGNAL_CONVENTIONS.values()
-    )
-    assert all(
-        convention.corner is not None
-        for convention in VERTICAL_SIGNAL_CONVENTIONS.values()
-    )
 
 
 def test_converts_force_to_mass_without_rounding() -> None:

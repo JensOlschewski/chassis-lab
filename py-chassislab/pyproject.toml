@@ -20,9 +20,6 @@ dev = [
     "ruff>=0.12,<1",
 ]
 
-[project.scripts]
-clab = "chassis_lab.cli:main"
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/chassis_lab"]
 

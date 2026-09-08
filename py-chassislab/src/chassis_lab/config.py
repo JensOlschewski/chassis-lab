@@ -31,7 +31,7 @@ TOLERANCE_KEYS = {"absolute", "relative_percent"}
 SVC_KEYS = {"inputs", "signals", "validation"}
 VERTICAL_KEYS = {"inputs", "setup", "window", "signals"}
 SIGNAL_MAP_KEYS = {"signals"}
-VERTICAL_INPUT_KEYS = {"signal_map", "measurement_acd", "simulation_hdf5"}
+VERTICAL_INPUT_KEYS = {"signal_map", "measurement_hdf5", "simulation_hdf5"}
 VERTICAL_SETUP_CORE_KEYS = {
     "code",
     "brakes_applied",
@@ -101,7 +101,7 @@ class VerticalWindow:
 
 @dataclass(frozen=True)
 class VerticalConfig:
-    measurement_acd: Path
+    measurement_hdf5: Path
     simulation_hdf5: Path
     setup: VerticalSetup
     window: VerticalWindow
@@ -318,10 +318,10 @@ def _parse_vertical(raw: object, config_path: Path) -> VerticalConfig | None:
             f"{window_where}.minimum_mm must be less than maximum_mm"
         )
     return VerticalConfig(
-        measurement_acd=_resolve_path(
-            inputs["measurement_acd"],
+        measurement_hdf5=_resolve_path(
+            inputs["measurement_hdf5"],
             config_path,
-            "[vertical.inputs].measurement_acd",
+            "[vertical.inputs].measurement_hdf5",
         ),
         simulation_hdf5=_resolve_path(
             inputs["simulation_hdf5"],

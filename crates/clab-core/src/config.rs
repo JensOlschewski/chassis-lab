@@ -6,16 +6,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use thiserror::Error;
 use toml::Value;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Error)]
+#[error("{0}")]
 pub struct ConfigError(pub String);
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl std::error::Error for ConfigError {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SignalRef {
@@ -49,7 +45,7 @@ pub struct VerticalWindow {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalConfig {
-    pub measurement_acd: PathBuf,
+    pub measurement_hdf5: PathBuf,
     pub simulation_hdf5: PathBuf,
     pub setup: VerticalSetup,
     pub window: VerticalWindow,
@@ -236,10 +232,10 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
     )?;
     keys(
         i,
-        &["signal_map", "measurement_acd", "simulation_hdf5"],
+        &["signal_map", "measurement_hdf5", "simulation_hdf5"],
         "[vertical.inputs]",
     )?;
-    require(i, "measurement_acd", "[vertical.inputs]")?;
+    require(i, "measurement_hdf5", "[vertical.inputs]")?;
     require(i, "simulation_hdf5", "[vertical.inputs]")?;
     keys(
         s,
@@ -295,10 +291,10 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
     };
     let source = signal_source(v, path, "[vertical]", Some(i))?;
     Ok(VerticalConfig {
-        measurement_acd: resolve(
-            value(i, "measurement_acd", "[vertical.inputs]")?,
+        measurement_hdf5: resolve(
+            value(i, "measurement_hdf5", "[vertical.inputs]")?,
             path,
-            "measurement_acd",
+            "measurement_hdf5",
         )?,
         simulation_hdf5: resolve(
             value(i, "simulation_hdf5", "[vertical.inputs]")?,

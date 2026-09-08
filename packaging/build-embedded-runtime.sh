@@ -28,13 +28,6 @@ lib_dir=$output/lib
 executable=$output/bin/python3.12
 pointer_width=64
 EOF
-RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,\$ORIGIN/../lib" \
-    PYO3_CONFIG_FILE="$pyo3_config" \
-    PYO3_PYTHON="$output/bin/python3.12" \
-    cargo build --release --example embed-smoke --locked
-cp "$root/target/release/examples/embed-smoke" "$output/bin/embed-smoke"
-rm "$pyo3_config"
-
 while read -r kind package filename digest; do
     [ "$kind" = WHEEL ] || continue
     version=${filename#*-}
@@ -46,6 +39,18 @@ while read -r kind package filename digest; do
     "$python" -m pip install --no-index --no-deps --disable-pip-version-check \
         "$download/$filename"
 done < "$lock"
+
+RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,\$ORIGIN/../lib" \
+    PYO3_CONFIG_FILE="$pyo3_config" \
+    PYO3_PYTHON="$output/bin/python3.12" \
+    cargo build --release --locked -p clab-cli
+RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,\$ORIGIN/../lib" \
+    PYO3_CONFIG_FILE="$pyo3_config" \
+    PYO3_PYTHON="$output/bin/python3.12" \
+    cargo build --release --locked -p clab-converter --example embed-smoke
+cp "$root/target/release/clab" "$output/bin/clab"
+cp "$root/target/release/examples/embed-smoke" "$output/bin/embed-smoke"
+rm "$pyo3_config"
 
 find "$output" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$output" -name direct_url.json -delete
