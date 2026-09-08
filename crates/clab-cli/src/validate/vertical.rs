@@ -15,6 +15,7 @@ use clab_core::{
     measurement_hdf5::MeasurementFile,
     simulation_hdf5::SimulationFile,
 };
+use clap::Args;
 use pyo3::{
     ffi,
     prelude::*,
@@ -58,17 +59,25 @@ struct KernelResponse {
     svg: String,
 }
 
-pub fn validate(
-    config_path: &Path,
-    plot: Option<&Path>,
-    json: Option<&Path>,
-    csv: Option<&Path>,
+#[derive(Debug, Args)]
+pub(crate) struct VerticalArgs {
+    /// TOML case configuration.
+    config: PathBuf,
+    #[arg(long)]
+    plot_output: Option<PathBuf>,
+    #[arg(long)]
+    json_output: Option<PathBuf>,
+    #[arg(long)]
+    csv_output: Option<PathBuf>,
+    #[arg(long)]
     force: bool,
-) -> Result<()> {
-    let config = clab_core::config::load_config(config_path).map_err(|e| {
+}
+
+pub(crate) fn validate(args: VerticalArgs) -> Result<()> {
+    let config = clab_core::config::load_config(&args.config).map_err(|e| {
         anyhow::anyhow!(
             "failed to load configuration '{}': {e}",
-            config_path.display()
+            args.config.display()
         )
     })?;
     let vertical = config
@@ -83,7 +92,13 @@ pub fn validate(
     if let Some(path) = &vertical.signal_map {
         protected.push(path);
     }
-    validate_outputs(plot, json, csv, force, &protected)?;
+    validate_outputs(
+        args.plot_output.as_deref(),
+        args.json_output.as_deref(),
+        args.csv_output.as_deref(),
+        args.force,
+        &protected,
+    )?;
     let measurement = MeasurementFile::open(&vertical.measurement_hdf5).with_context(|| {
         format!(
             "failed to read measurement HDF5 '{}'",
@@ -101,13 +116,13 @@ pub fn validate(
     let response = kernel(&request)?;
     validate_response(&response, &request.grid)?;
     let report = report(&config, &response.comparisons)?;
-    if let Some(path) = json {
+    if let Some(path) = args.json_output.as_deref() {
         publish(path, &(serde_json::to_string_pretty(&report)? + "\n"))?;
     }
-    if let Some(path) = csv {
+    if let Some(path) = args.csv_output.as_deref() {
         publish(path, &csv_text(&config, &response.comparisons)?)?;
     }
-    if let Some(path) = plot {
+    if let Some(path) = args.plot_output.as_deref() {
         publish(path, &response.svg)?;
     }
     println!("Vertical trajectory comparison");
@@ -289,7 +304,7 @@ fn kernel(request: &KernelRequest) -> Result<KernelResponse> {
     initialize_python()?;
     Python::attach(|py| -> Result<_> {
         let source = CString::new(include_str!(
-            "../../../py-chassislab/src/chassis_lab/vertical_kernel.py"
+            "../../../../py-chassislab/src/chassis_lab/vertical_kernel.py"
         ))?;
         let filename = CString::new("chassis_lab.vertical_kernel")?;
         let module_name = CString::new("chassis_lab.vertical_kernel")?;
