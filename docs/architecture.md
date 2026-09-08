@@ -12,7 +12,7 @@ Adams .res / Lommel .acd
         ↓
 simulation HDF5 v3 / measurement HDF5 v1
         ↓
- py-chassislab/src/chassis_lab/ — Python validation
+  Rust `clab validate` — domain validation
         ↓
 JSON, CSV, SVG, and run manifests
 ```
@@ -88,7 +88,7 @@ capabilities:
 | `clab inspect-h5 FILE` | `clab inspect FILE` | HDF5 summary; read-only |
 | `clab list-h5-signals FILE` | `clab inspect FILE --signals` | HDF5 signal catalog; read-only |
 | `clab validate-config CONFIG` | `clab check CONFIG` | Config and referenced-input checks; read-only |
-| `clab validate-svc CONFIG` | `clab validate CONFIG --domain svc` | Console and optional JSON/CSV reports |
+| `clab validate-svc CONFIG` | `clab validate svc CONFIG` | Console and optional JSON/CSV reports |
 | `clab validate vertical CONFIG` | Rust-owned normalized HDF5 validation | Console and optional JSON/CSV/SVG reports |
 
 Vertical migration: `[vertical.inputs].measurement_hdf5` is required. Convert
@@ -173,7 +173,9 @@ baseline policies. The Rust core assumes this ownership for `0.4.0` and passes
 only normalized arrays with explicit units to Python. Missing source units remain
 unverified and cannot be converted implicitly.
 
-SVC evaluators use the final HDF5 sample by default. Vertical evaluation compares
+Rust SVC evaluation uses the final HDF5 sample by default and reads normalized
+simulation files through `SimulationFile`; it does not initialize Python.
+Vertical evaluation compares
 measurement-offset and static-simulation X/Y/Z trajectories for all four corners
 on the configured travel grid. Incomplete coverage and setup mismatches fail.
 

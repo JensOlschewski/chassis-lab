@@ -184,12 +184,48 @@ pub fn apply_convention(
     convention: SignalConvention,
     gravity: f64,
 ) -> Result<TransformedSignal, ConventionError> {
+    if !gravity.is_finite() || gravity <= 0.0 {
+        return Err(ConventionError(
+            "gravity must be finite and positive".into(),
+        ));
+    }
     let factor = conversion_factor(&convention.source_unit, convention.unit, gravity)?;
     let converted = convert_values(values, &convention.source_unit, convention.unit, gravity)?;
     let multiplier = f64::from(convention.sign) * convention.scale;
     let transformed = converted
         .into_iter()
         .map(|value| value * multiplier)
+        .collect();
+    Ok(TransformedSignal {
+        name: name.into(),
+        values: transformed,
+        unit: convention.unit,
+        source: source.into(),
+        original_unit: convention.source_unit.clone(),
+        conversion_factor: factor,
+        convention,
+    })
+}
+
+/// Apply canonical conversion while leaving non-finite non-selected samples intact.
+/// SVC selects and validates only final sample, matching legacy evaluator behavior.
+pub fn apply_convention_for_final_sample(
+    values: &[f64],
+    name: impl Into<String>,
+    source: impl Into<String>,
+    convention: SignalConvention,
+    gravity: f64,
+) -> Result<TransformedSignal, ConventionError> {
+    if !gravity.is_finite() || gravity <= 0.0 {
+        return Err(ConventionError(
+            "gravity must be finite and positive".into(),
+        ));
+    }
+    let factor = conversion_factor(&convention.source_unit, convention.unit, gravity)?;
+    let multiplier = f64::from(convention.sign) * convention.scale;
+    let transformed = values
+        .iter()
+        .map(|value| value * factor * multiplier)
         .collect();
     Ok(TransformedSignal {
         name: name.into(),
@@ -427,6 +463,29 @@ mod tests {
         assert_eq!(signal.values, [-180.0]);
         assert_eq!(signal.original_unit, "rad");
         assert_eq!(signal.convention.corner, Some(Corner::FrontRight));
+    }
+
+    #[test]
+    fn final_sample_conversion_preserves_unselected_nonfinite_values() {
+        let convention = SignalConvention::new(
+            Unit::Kilogram,
+            "newton",
+            1.0,
+            1,
+            Some(Corner::FrontLeft),
+            BaselinePolicy::StaticSimulation,
+        )
+        .unwrap();
+        let signal = apply_convention_for_final_sample(
+            &[f64::NAN, 9.80665],
+            "front_left_wheel_load",
+            "simulation.h5",
+            convention,
+            9.80665,
+        )
+        .unwrap();
+        assert!(signal.values[0].is_nan());
+        assert_eq!(signal.values[1], 1.0);
     }
 
     #[test]

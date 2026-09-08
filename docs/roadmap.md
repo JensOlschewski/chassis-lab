@@ -60,8 +60,9 @@ Migration order:
 7. Complete vertical signal processing behind narrow PyO3 array API. Rust now
    owns normalized HDF5 loading, setup policy, reports, provenance, output
    safety, and `clab validate vertical CONFIG`.
-8. Port remaining SVC provenance, report serialization, and output safety to Rust.
-9. Publish standalone `v0.4.0` after complete command and numerical parity.
+8. Port remaining SVC provenance, report serialization, and output safety to Rust. **Complete: #50**
+9. Migrate remaining Python SVC CLI/report tests and remove legacy Python SVC entry points.
+10. Publish standalone `v0.4.0` after complete command and numerical parity.
 
 Exit criteria:
 
