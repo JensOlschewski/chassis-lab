@@ -89,7 +89,10 @@ capabilities:
 | `clab list-h5-signals FILE` | `clab inspect FILE --signals` | HDF5 signal catalog; read-only |
 | `clab validate-config CONFIG` | `clab check CONFIG` | Config and referenced-input checks; read-only |
 | `clab validate-svc CONFIG` | `clab validate CONFIG --domain svc` | Console and optional JSON/CSV reports |
-| `clab validate-vertical CONFIG` | `clab validate CONFIG --domain vertical` | Console and optional JSON/CSV/SVG reports |
+| `clab validate vertical CONFIG` | Rust-owned normalized HDF5 validation | Console and optional JSON/CSV/SVG reports |
+
+Vertical migration: `[vertical.inputs].measurement_hdf5` is required. Convert
+legacy ACD inputs with `clab convert`; validation never reads raw ACD.
 | `clab convert-res INPUT` | `clab convert INPUT` | Writes normalized HDF5 |
 | `clab create-run CONFIG` | `clab run create CONFIG` | Creates isolated run directory and manifest |
 

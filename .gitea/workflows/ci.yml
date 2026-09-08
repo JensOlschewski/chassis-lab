@@ -90,33 +90,34 @@ jobs:
         run: python3 -m pip install "cmake>=3.26,<4"
 
       - name: Build bundled runtime
-        run: packaging/build-embedded-runtime.sh dist/embed-bundle-linux-x86_64
+        run: packaging/build-embedded-runtime.sh dist/clab-runtime-linux-x86_64
 
       - name: Verify bundle checksum
-        run: sha256sum --check dist/embed-bundle-linux-x86_64.tar.gz.sha256
+        run: sha256sum --check dist/clab-runtime-linux-x86_64.tar.gz.sha256
 
       - name: Smoke test in clean Ubuntu container
         run: |
           docker run --rm --pull=missing -i \
             ubuntu:24.04 \
             bash -ceu '
-              mkdir /tmp/embed-bundle
-              tar -xzf - -C /tmp/embed-bundle
-              bundle=/tmp/embed-bundle/embed-bundle-linux-x86_64
+               mkdir /tmp/clab-runtime
+               tar -xzf - -C /tmp/clab-runtime
+               bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
               env -i \
                 PATH="$bundle/bin:/usr/bin:/bin" \
                 PYTHONHOME=/poisoned \
                 PYTHONPATH=/poisoned \
                 VIRTUAL_ENV=/poisoned \
                 LD_LIBRARY_PATH=/poisoned \
-                "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
-            ' < dist/embed-bundle-linux-x86_64.tar.gz
+                 "$bundle/bin/clab" --version
+               "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
+             ' < dist/clab-runtime-linux-x86_64.tar.gz
 
       - name: Upload experimental bundle
         uses: actions/upload-artifact@v3
         with:
-          name: embed-bundle-linux-x86_64
-          path: dist/embed-bundle-linux-x86_64.tar.gz*
+          name: clab-runtime-linux-x86_64
+          path: dist/clab-runtime-linux-x86_64.tar.gz*
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -182,10 +183,11 @@ jobs:
       - name: Build Rust workspace
         run: cargo build --workspace --release --locked
 
+      - name: Build bundled clab runtime
+        run: packaging/build-embedded-runtime.sh "dist/clab-runtime-${GITHUB_REF_NAME}-linux-x86_64"
+
       - name: Package release artifacts
         run: |
-          tar -czf "dist/clab-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
-            -C target/release clab
           (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS)
 
       - name: Publish Gitea release
@@ -196,6 +198,7 @@ jobs:
           body: |
             ChassisLab ${{ github.ref_name }}.
 
-            Includes Python wheel and Linux x86_64 `clab` binary.
+            Includes Python wheel and self-contained Linux x86_64 `clab` runtime
+            archive with bundled CPython and numerical dependencies.
           files: |
             dist/*

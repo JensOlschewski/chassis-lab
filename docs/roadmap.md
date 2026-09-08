@@ -55,10 +55,12 @@ Migration order:
 3. Add staged runner checks without disabling current CI or releases.
 4. Port configuration, domain types, units, conventions, HDF5, and ACD handling
    to Rust.
-5. Replace the Python CLI with the unified Rust `clab` command hierarchy.
+5. Replace Python CLI entry points with the unified Rust `clab` command hierarchy.
 6. Port stable SVC computation and reporting to Rust.
-7. Isolate vertical signal processing and plotting behind a narrow PyO3 API.
-8. Port provenance, report serialization, and output safety to Rust.
+7. Complete vertical signal processing behind narrow PyO3 array API. Rust now
+   owns normalized HDF5 loading, setup policy, reports, provenance, output
+   safety, and `clab validate vertical CONFIG`.
+8. Port remaining SVC provenance, report serialization, and output safety to Rust.
 9. Publish standalone `v0.4.0` after complete command and numerical parity.
 
 Exit criteria:

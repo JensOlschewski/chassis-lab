@@ -12,11 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from chassis_lab import __version__
-from chassis_lab.acd import inspect_acd
 from chassis_lab.config import CaseConfig, load_config
 from chassis_lab.converter import converter_provenance
 from chassis_lab.hdf5 import AdamsHdf5
-from chassis_lab.vertical import validate_vertical_measurement
 
 
 class RunError(RuntimeError):
@@ -49,10 +47,6 @@ def create_run(
         raise FileNotFoundError(
             f"simulation HDF5 file does not exist: {simulation_hdf5}"
         )
-    if domain == "vertical":
-        measurement = domain_inputs["measurement_acd"]
-        validate_vertical_measurement(config.vertical)
-        inspect_acd(measurement)
     with AdamsHdf5(simulation_hdf5) as result:
         hdf5_summary = result.summary.as_dict()
 
@@ -118,8 +112,8 @@ def _build_manifest(
             for canonical, ref in signals
         ],
     }
-    if "measurement_acd" in domain_inputs:
-        config_data["measurement_acd"] = str(domain_inputs["measurement_acd"])
+    if "measurement_hdf5" in domain_inputs:
+        config_data["measurement_hdf5"] = str(domain_inputs["measurement_hdf5"])
     if domain == "vertical" and config.vertical is not None:
         config_data["setup"] = {
             "code": config.vertical.setup.code,
@@ -184,7 +178,7 @@ def _domain_inputs(
         simulation = config.vertical.simulation_hdf5
         inputs = {
             "simulation_hdf5": simulation,
-            "measurement_acd": config.vertical.measurement_acd,
+            "measurement_hdf5": config.vertical.measurement_hdf5,
         }
         if config.vertical.signal_map is not None:
             inputs["signal_map"] = config.vertical.signal_map

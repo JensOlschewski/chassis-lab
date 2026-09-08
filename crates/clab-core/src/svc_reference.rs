@@ -1,30 +1,30 @@
 //! Typed parser for reviewed SVC reference JSON files.
-use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Clone, PartialEq)]
+use serde_json::Value;
+use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Error)]
+#[error("{0}")]
 pub struct SvcReferenceError(pub String);
-impl std::fmt::Display for SvcReferenceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl std::error::Error for SvcReferenceError {}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SvcReferenceCase {
     pub name: String,
     pub variant: String,
     pub loadcase: String,
 }
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SvcCoordinateSystem {
     pub cg_x_origin: String,
     pub cg_x_positive: String,
 }
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SvcReferenceSource {
     pub file: String,
@@ -32,6 +32,7 @@ pub struct SvcReferenceSource {
     pub result: String,
     pub test_date: Option<String>,
 }
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SvcReference {
     pub path: PathBuf,
@@ -41,6 +42,7 @@ pub struct SvcReference {
     pub sources: Vec<SvcReferenceSource>,
     pub values: BTreeMap<String, f64>,
 }
+
 pub fn load_svc_reference(
     path: impl AsRef<Path>,
 ) -> Result<SvcReference, Box<dyn std::error::Error>> {
@@ -49,13 +51,16 @@ pub fn load_svc_reference(
     } else {
         std::env::current_dir()?.join(path.as_ref())
     };
+
     if !path.is_file() {
         return Err(format!("SVC reference file does not exist: {}", path.display()).into());
     };
+
     let path = path.canonicalize()?;
     let raw: Value = serde_json::from_str(&fs::read_to_string(&path)?)
         .map_err(|e| SvcReferenceError(format!("invalid JSON in {}: {e}", path.display())))?;
     let root = obj(&raw, "SVC reference")?;
+
     exact(
         root,
         &[
@@ -67,6 +72,7 @@ pub fn load_svc_reference(
         ],
         "SVC reference",
     )?;
+
     let version = num(root, "schema_version")?;
     if version != 1 {
         return Err(SvcReferenceError(format!(
@@ -74,10 +80,12 @@ pub fn load_svc_reference(
         ))
         .into());
     };
+
     let c = parse_case(root.get("case").unwrap())?;
     let co = parse_coordinates(root.get("coordinate_system").unwrap())?;
     let sources = parse_sources(root.get("sources").unwrap())?;
     let values = parse_values(root.get("values").unwrap())?;
+
     consistency(&values)?;
     Ok(SvcReference {
         path,
@@ -88,6 +96,7 @@ pub fn load_svc_reference(
         values,
     })
 }
+
 fn parse_case(v: &Value) -> Result<SvcReferenceCase, Box<dyn std::error::Error>> {
     let t = obj(v, "case")?;
     exact(t, &["name", "variant", "loadcase"], "case")?;
@@ -97,19 +106,23 @@ fn parse_case(v: &Value) -> Result<SvcReferenceCase, Box<dyn std::error::Error>>
         loadcase: nonempty(t, "loadcase", "case")?,
     })
 }
+
 fn parse_coordinates(v: &Value) -> Result<SvcCoordinateSystem, Box<dyn std::error::Error>> {
     let t = obj(v, "coordinate_system")?;
     exact(t, &["cg_x_origin", "cg_x_positive"], "coordinate_system")?;
     let o = nonempty(t, "cg_x_origin", "coordinate_system")?;
     let p = nonempty(t, "cg_x_positive", "coordinate_system")?;
+
     if o != "front_axle_wheel_center" || p != "rearward" {
         return Err(SvcReferenceError("SVC CG-X coordinates must use front_axle_wheel_center origin and rearward-positive direction".into()).into());
     };
+
     Ok(SvcCoordinateSystem {
         cg_x_origin: o,
         cg_x_positive: p,
     })
 }
+
 fn parse_sources(v: &Value) -> Result<Vec<SvcReferenceSource>, Box<dyn std::error::Error>> {
     let a = v
         .as_array()
@@ -117,6 +130,7 @@ fn parse_sources(v: &Value) -> Result<Vec<SvcReferenceSource>, Box<dyn std::erro
         .ok_or_else(|| SvcReferenceError("sources must be a non-empty array".into()))?;
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
+
     for (i, v) in a.iter().enumerate() {
         let t = obj(v, &format!("sources[{i}]"))?;
         reject(
@@ -124,16 +138,21 @@ fn parse_sources(v: &Value) -> Result<Vec<SvcReferenceSource>, Box<dyn std::erro
             &["file", "sha256", "test_date", "result"],
             &format!("sources[{i}]"),
         )?;
+
         for k in ["file", "sha256", "result"] {
             if !t.contains_key(k) {
                 return Err(SvcReferenceError(format!("sources[{i}] missing key(s): {k}")).into());
             }
         }
+
         let file = nonempty(t, "file", &format!("sources[{i}]"))?;
+
         if !seen.insert(file.clone()) {
             return Err(SvcReferenceError(format!("duplicate reference source: {file}")).into());
         };
+
         let sha = nonempty(t, "sha256", &format!("sources[{i}]"))?;
+
         if sha.len() != 64
             || !sha
                 .chars()
@@ -144,10 +163,12 @@ fn parse_sources(v: &Value) -> Result<Vec<SvcReferenceSource>, Box<dyn std::erro
             ))
             .into());
         };
+
         let date = t
             .get("test_date")
             .map(|v| nonempty_value(v, &format!("sources[{i}].test_date")))
             .transpose()?;
+
         if let Some(d) = &date {
             let parts: Vec<_> = d.split('-').collect();
             let valid = parts.len() == 3
@@ -158,6 +179,7 @@ fn parse_sources(v: &Value) -> Result<Vec<SvcReferenceSource>, Box<dyn std::erro
                     .iter()
                     .all(|part| part.chars().all(|c| c.is_ascii_digit()))
                 && valid_calendar_date(&parts);
+
             if !valid {
                 return Err(SvcReferenceError(format!(
                     "sources[{i}].test_date must use YYYY-MM-DD"
@@ -165,6 +187,7 @@ fn parse_sources(v: &Value) -> Result<Vec<SvcReferenceSource>, Box<dyn std::erro
                 .into());
             }
         }
+
         out.push(SvcReferenceSource {
             file,
             sha256: sha,
@@ -172,6 +195,7 @@ fn parse_sources(v: &Value) -> Result<Vec<SvcReferenceSource>, Box<dyn std::erro
             test_date: date,
         })
     }
+
     Ok(out)
 }
 
@@ -179,12 +203,15 @@ fn valid_calendar_date(parts: &[&str]) -> bool {
     let Ok(year) = parts[0].parse::<u32>() else {
         return false;
     };
+
     let Ok(month) = parts[1].parse::<u32>() else {
         return false;
     };
+
     let Ok(day) = parts[2].parse::<u32>() else {
         return false;
     };
+
     let days = match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
@@ -192,13 +219,17 @@ fn valid_calendar_date(parts: &[&str]) -> bool {
         2 => 28,
         _ => return false,
     };
+
     (1..=days).contains(&day)
 }
+
 fn parse_values(v: &Value) -> Result<BTreeMap<String, f64>, Box<dyn std::error::Error>> {
     let t = obj(v, "values")?;
+
     if t.is_empty() {
         return Err(SvcReferenceError("values must define at least one metric".into()).into());
     };
+
     let allowed = [
         "front_left_mass_kg",
         "front_right_mass_kg",
@@ -230,11 +261,14 @@ fn parse_values(v: &Value) -> Result<BTreeMap<String, f64>, Box<dyn std::error::
         "camber_rear_left_deg",
         "camber_rear_right_deg",
     ];
+
     reject(t, &allowed, "SVC reference metric")?;
+
     t.iter()
         .map(|(k, v)| Ok((k.clone(), finite(v, &format!("reference metric '{k}'"))?)))
         .collect()
 }
+
 fn consistency(v: &BTreeMap<String, f64>) -> Result<(), Box<dyn std::error::Error>> {
     check(
         v,
@@ -242,16 +276,20 @@ fn consistency(v: &BTreeMap<String, f64>) -> Result<(), Box<dyn std::error::Erro
         "front_mass_kg",
         1e-6,
     )?;
+
     check(
         v,
         &["rear_left_mass_kg", "rear_right_mass_kg"],
         "rear_mass_kg",
         1e-6,
     )?;
+
     check(v, &["front_mass_kg", "rear_mass_kg"], "total_mass_kg", 1e-6)?;
+
     if v.contains_key("total_mass_kg") && v["total_mass_kg"] <= 0.0 {
         return Err(SvcReferenceError("total_mass_kg must be positive".into()).into());
     };
+
     if [
         "front_mass_kg",
         "rear_mass_kg",
@@ -275,6 +313,7 @@ fn consistency(v: &BTreeMap<String, f64>) -> Result<(), Box<dyn std::error::Erro
             }
         }
     }
+
     if [
         "rear_mass_kg",
         "total_mass_kg",
@@ -293,8 +332,10 @@ fn consistency(v: &BTreeMap<String, f64>) -> Result<(), Box<dyn std::error::Erro
         )
         .into());
     }
+
     Ok(())
 }
+
 fn check(
     v: &BTreeMap<String, f64>,
     parts: &[&str],
@@ -309,6 +350,7 @@ fn check(
     }
     Ok(())
 }
+
 fn obj<'a>(
     v: &'a Value,
     w: &str,
@@ -322,11 +364,13 @@ fn exact(
     w: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     reject(t, keys, w)?;
+
     for k in keys {
         if !t.contains_key(*k) {
             return Err(SvcReferenceError(format!("{w} missing key(s): {k}")).into());
         }
     }
+
     Ok(())
 }
 fn reject(
@@ -337,6 +381,7 @@ fn reject(
     if let Some(k) = t.keys().find(|k| !keys.contains(&k.as_str())) {
         return Err(SvcReferenceError(format!("unknown {w} key(s): {k}")).into());
     }
+
     Ok(())
 }
 fn nonempty(
@@ -346,23 +391,28 @@ fn nonempty(
 ) -> Result<String, Box<dyn std::error::Error>> {
     nonempty_value(t.get(k).unwrap(), &format!("{w}.{k}"))
 }
+
 fn nonempty_value(v: &Value, w: &str) -> Result<String, Box<dyn std::error::Error>> {
     v.as_str()
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .ok_or_else(|| SvcReferenceError(format!("{w} must be a non-empty string")).into())
 }
+
 fn num(t: &serde_json::Map<String, Value>, k: &str) -> Result<i64, Box<dyn std::error::Error>> {
     t[k].as_i64()
         .ok_or_else(|| SvcReferenceError("schema_version must be integer".into()).into())
 }
+
 fn finite(v: &Value, w: &str) -> Result<f64, Box<dyn std::error::Error>> {
     let n = v
         .as_f64()
         .ok_or_else(|| SvcReferenceError(format!("{w} must be numeric")))?;
+
     if !n.is_finite() {
         return Err(SvcReferenceError(format!("{w} must be finite")).into());
     }
+
     Ok(n)
 }
 

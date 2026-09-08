@@ -115,7 +115,7 @@ def test_create_vertical_run_records_measurement_provenance(
     tmp_path: Path,
 ) -> None:
     config_path = write_inputs(tmp_path)
-    measurement = tmp_path / "measurement.acd"
+    measurement = tmp_path / "measurement.h5"
     names = [
         f"{prefix}{suffix}"
         for prefix in ("lf", "rf", "lr", "rr")
@@ -160,7 +160,7 @@ entity = "entity"
 component = "value"
 unit = "mm"
 [vertical.inputs]
-measurement_acd = "measurement.acd"
+ measurement_hdf5 = "measurement.h5"
 simulation_hdf5 = "result.h5"
 [vertical.setup]
 code = "b1e0f1"
@@ -199,6 +199,6 @@ unit = "mm"
         "maximum_mm": 1,
         "step_mm": 1,
     }
-    assert manifest["inputs"]["measurement_acd"]["sha256"] == sha256_file(
+    assert manifest["inputs"]["measurement_hdf5"]["sha256"] == sha256_file(
         measurement
     )

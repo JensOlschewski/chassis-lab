@@ -7,7 +7,6 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from chassis_lab.acd import AcdError
 from chassis_lab.config import CaseConfig, ConfigError, load_config
 from chassis_lab.converter import ConversionError, convert_res
 from chassis_lab.hdf5 import (
@@ -26,17 +25,6 @@ from chassis_lab.svc_reporting import (
     write_svc_outputs,
 )
 from chassis_lab.svc_validation import SvcValidationError, validate_svc
-from chassis_lab.vertical import (
-    VerticalEvaluationError,
-    evaluate_vertical,
-    validate_vertical_measurement,
-)
-from chassis_lab.vertical_reporting import (
-    VerticalReportError,
-    build_vertical_report,
-    render_vertical_console,
-    write_vertical_outputs,
-)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -108,30 +96,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_svc_parser.set_defaults(handler=_validate_svc)
 
-    validate_vertical_parser = subparsers.add_parser(
-        "validate-vertical",
-        help="compare vertical wheel-center trajectories",
-    )
-    validate_vertical_parser.add_argument(
-        "path", type=Path, help="unified TOML config file"
-    )
-    validate_vertical_parser.add_argument(
-        "--plot-output", type=Path, help="write deterministic SVG plot"
-    )
-    validate_vertical_parser.add_argument(
-        "--json-output", type=Path, help="write detailed JSON report"
-    )
-    validate_vertical_parser.add_argument(
-        "--csv-output", type=Path, help="write metric CSV report"
-    )
-    validate_vertical_parser.add_argument(
-        "-f",
-        "--force",
-        action="store_true",
-        help="replace existing report outputs",
-    )
-    validate_vertical_parser.set_defaults(handler=_validate_vertical)
-
     convert_parser = subparsers.add_parser(
         "convert-res",
         help="convert an Adams/Car .res result file to HDF5",
@@ -175,7 +139,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(args.handler(args))
     except (
         FileNotFoundError,
-        AcdError,
         ConfigError,
         ConversionError,
         Hdf5FormatError,
@@ -185,8 +148,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         SvcReferenceError,
         SvcReportError,
         SvcValidationError,
-        VerticalEvaluationError,
-        VerticalReportError,
         OSError,
     ) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -243,7 +204,7 @@ def _validate_config(args: argparse.Namespace) -> int:
         print(f"Signals: {len(config.signals)}")
         _check_signals(config, strict_units=args.strict_units)
         if config.vertical is not None:
-            print(f"Vertical measurement: {config.vertical.measurement_acd}")
+            print(f"Vertical measurement: {config.vertical.measurement_hdf5}")
             print(f"Vertical simulation: {config.vertical.simulation_hdf5}")
             if config.vertical.signal_map is not None:
                 print(f"Vertical signal map: {config.vertical.signal_map}")
@@ -271,21 +232,6 @@ def _validate_svc(args: argparse.Namespace) -> int:
     return 0 if report.passed else 1
 
 
-def _validate_vertical(args: argparse.Namespace) -> int:
-    config = load_config(args.path)
-    result = evaluate_vertical(config)
-    report = build_vertical_report(config, result)
-    write_vertical_outputs(
-        report,
-        plot_path=args.plot_output,
-        json_path=args.json_output,
-        csv_path=args.csv_output,
-        force=args.force,
-    )
-    print(render_vertical_console(report), end="")
-    return 0
-
-
 def _config_as_dict(config: CaseConfig) -> dict[str, object]:
     output: dict[str, object] = {
         "name": config.name,
@@ -308,7 +254,7 @@ def _config_as_dict(config: CaseConfig) -> dict[str, object]:
         output["svc_signal_map"] = str(config.svc_signal_map)
     if config.vertical is not None:
         output["vertical"] = {
-            "measurement_acd": str(config.vertical.measurement_acd),
+            "measurement_hdf5": str(config.vertical.measurement_hdf5),
             "simulation_hdf5": str(config.vertical.simulation_hdf5),
             "setup": {
                 "code": config.vertical.setup.code,
@@ -404,13 +350,6 @@ def _check_vertical_signals(
     vertical = config.vertical
     if vertical is None:
         return
-    if vertical.measurement_acd.is_file():
-        validate_vertical_measurement(vertical)
-    elif not quiet:
-        print(
-            "Note: vertical measurement ACD not present; skipped cross-check "
-            f"({vertical.measurement_acd})"
-        )
     if not vertical.simulation_hdf5.is_file():
         if not quiet:
             print(

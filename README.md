@@ -1,6 +1,6 @@
 # ChassisLab
 
-Python CLI for validating Adams vehicle simulation results.
+Vehicle simulation validation with a Rust `clab` CLI and embedded Python kernels.
 
 ## Quick start
 
@@ -32,8 +32,18 @@ Default conversion output is `INPUT.simulation.h5` for `.res` and
 See [`examples/example-config.toml`](examples/example-config.toml) and
 [`examples/example-signals.toml`](examples/example-signals.toml). Both use
 synthetic names and values as templates for private vehicle data.
-`crates/clab-converter/examples/example-vertical.acd` and its matching HDF5
-file are a small synthetic vertical measurement pair.
+`crates/clab-converter/examples/example-vertical.acd` converts to a matching
+HDF5 file; together they are a small synthetic vertical measurement pair.
+
+Vertical validation consumes normalized inputs only:
+
+```text
+clab validate vertical case.toml --plot-output trajectories.svg
+```
+
+Vertical configs now use `[vertical.inputs].measurement_hdf5`. Replace legacy
+`measurement_acd` entries by converting the ACD first with `clab convert`; raw
+ACD is not accepted by validation.
 
 ## Output
 

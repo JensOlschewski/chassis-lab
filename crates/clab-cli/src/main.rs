@@ -4,6 +4,8 @@ use anyhow::{Context, Result, bail};
 use clab_core::input_hdf5::{Hdf5Input, open_hdf5_input};
 use clap::{Parser, Subcommand};
 
+mod vertical;
+
 #[derive(Debug, Parser)]
 #[command(name = "clab", version, about = "ChassisLab vehicle analysis CLI")]
 struct Cli {
@@ -13,6 +15,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Validate a configured analysis domain.
+    Validate {
+        #[command(subcommand)]
+        domain: ValidateDomain,
+    },
     /// Validate configuration and its referenced inputs.
     Check {
         /// TOML case configuration.
@@ -42,6 +49,23 @@ enum Command {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum ValidateDomain {
+    /// Compare normalized vertical measurement and simulation trajectories.
+    Vertical {
+        /// TOML case configuration.
+        config: PathBuf,
+        #[arg(long)]
+        plot_output: Option<PathBuf>,
+        #[arg(long)]
+        json_output: Option<PathBuf>,
+        #[arg(long)]
+        csv_output: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+}
+
 fn main() {
     if let Err(error) = run(Cli::parse()) {
         eprintln!("error: {error:#}");
@@ -51,6 +75,21 @@ fn main() {
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Command::Validate { domain } => match domain {
+            ValidateDomain::Vertical {
+                config,
+                plot_output,
+                json_output,
+                csv_output,
+                force,
+            } => vertical::validate(
+                &config,
+                plot_output.as_deref(),
+                json_output.as_deref(),
+                csv_output.as_deref(),
+                force,
+            ),
+        },
         Command::Check { config } => check(&config),
         Command::Inspect {
             file,
@@ -174,7 +213,7 @@ fn check(path: &Path) -> Result<()> {
         })?;
     }
     if let Some(vertical) = &config.vertical {
-        for path in [&vertical.measurement_acd, &vertical.simulation_hdf5] {
+        for path in [&vertical.measurement_hdf5, &vertical.simulation_hdf5] {
             if !path.is_file() {
                 bail!("vertical input does not exist: {}", path.display());
             }

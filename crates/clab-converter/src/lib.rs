@@ -18,7 +18,7 @@ pub fn convert_res(source: &Path, output: &Path, overwrite: bool) -> Result<()> 
     })
 }
 
-pub(crate) fn write_atomically(
+pub fn write_atomically(
     output: &Path,
     overwrite: bool,
     write: impl FnOnce(&Path) -> Result<()>,

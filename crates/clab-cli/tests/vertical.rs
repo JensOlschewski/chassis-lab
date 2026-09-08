@@ -1,0 +1,232 @@
+use std::{fs, process::Command, str::FromStr};
+
+use hdf5::types::VarLenUnicode;
+use hdf5::{File, Group, Location};
+use tempfile::tempdir;
+
+fn string(location: &Location, name: &str, value: &str) {
+    location
+        .new_attr::<VarLenUnicode>()
+        .shape(())
+        .create(name)
+        .unwrap()
+        .write_scalar(&VarLenUnicode::from_str(value).unwrap())
+        .unwrap();
+}
+fn scalar<T: hdf5::H5Type>(location: &Location, name: &str, value: T) {
+    location
+        .new_attr::<T>()
+        .create(name)
+        .unwrap()
+        .write_scalar(&value)
+        .unwrap();
+}
+fn simulation(path: &std::path::Path) {
+    let file = File::create(path).unwrap();
+    scalar(&file, "format_version", 3_u32);
+    scalar(&file, "sample_count", 5_u64);
+    scalar(&file, "signal_count", 16_u64);
+    string(&file, "source_file", "fixture.res");
+    let results = file.create_group("results").unwrap();
+    for corner in ["front_left", "front_right", "rear_left", "rear_right"] {
+        let group = results.create_group(corner).unwrap();
+        string(&group, "source_path", corner);
+        group
+            .new_dataset::<f64>()
+            .shape((5, 4))
+            .create("values")
+            .unwrap()
+            .write_raw(&[
+                0., 100., 200., 300., -1., 98., 197., 299., 0., 100., 200., 300., 1., 102., 203.,
+                301., 1., 102., 203., 301.,
+            ])
+            .unwrap();
+        let strings = |values: &[&str]| {
+            values
+                .iter()
+                .map(|v| VarLenUnicode::from_str(v).unwrap())
+                .collect::<Vec<_>>()
+        };
+        group
+            .new_dataset_builder()
+            .with_data(&strings(&["travel", "x", "y", "z"]))
+            .create("component_names")
+            .unwrap();
+        group
+            .new_dataset_builder()
+            .with_data(&strings(&["mm", "mm", "mm", "mm"]))
+            .create("units")
+            .unwrap();
+        group
+            .new_dataset_builder()
+            .with_data(&[1_u64, 2, 3, 4])
+            .create("adams_ids")
+            .unwrap();
+    }
+}
+fn channel(channels: &Group, name: &str, values: &[f64], offset: f64) {
+    let group = channels.create_group(name).unwrap();
+    group
+        .new_dataset_builder()
+        .with_data(values)
+        .create("values")
+        .unwrap();
+    string(&group, "original_name", name);
+    string(&group, "description", name);
+    string(
+        &group,
+        "unit",
+        if name.ends_with("slope") { "" } else { "mm" },
+    );
+    scalar(&group, "offset", offset);
+    scalar(&group, "column", 0_u64);
+}
+fn measurement(path: &std::path::Path) {
+    let file = File::create(path).unwrap();
+    scalar(&file, "format_version", 1_u32);
+    scalar(&file, "sample_count", 6_u64);
+    scalar(&file, "channel_count", 16_u64);
+    string(&file, "source_kind", "measurement");
+    string(&file, "source_file", "fixture.acd");
+    let measurements = file.create_group("measurements").unwrap();
+    measurements
+        .new_dataset_builder()
+        .with_data(&[0.; 6])
+        .create("sample_axis")
+        .unwrap();
+    let channels = measurements.create_group("channels").unwrap();
+    for prefix in ["lf", "rf", "lr", "rr"] {
+        channel(
+            &channels,
+            &format!("{prefix}slope"),
+            &[2., 2., 2., 3., 3., 3.],
+            0.,
+        );
+        channel(
+            &channels,
+            &format!("{prefix}wcx"),
+            &[98., 100., 102., 102., 100., 98.],
+            100.,
+        );
+        channel(
+            &channels,
+            &format!("{prefix}wcy"),
+            &[197., 200., 203., 203., 200., 197.],
+            200.,
+        );
+        channel(
+            &channels,
+            &format!("{prefix}wcz"),
+            &[299., 300., 301., 301., 300., 299.],
+            300.,
+        );
+    }
+    let info = measurements.create_group("test_info").unwrap();
+    for (name, value) in [
+        ("testtype", "vert"),
+        ("brakeson", "1"),
+        ("engineon", "0"),
+        ("farbon", "1"),
+        ("rarbon", "unconfigured-and-ignored"),
+    ] {
+        let group = info.create_group(name).unwrap();
+        for key in ["name", "description", "data_type", "unit"] {
+            string(&group, key, "");
+        }
+        string(&group, "value", value);
+    }
+}
+fn config(path: &std::path::Path, measurement: &str, omit: bool) {
+    let mut signals = String::new();
+    for corner in ["front_left", "front_right", "rear_left", "rear_right"] {
+        for (name, component) in [
+            ("travel", "travel"),
+            ("wheel_center_x", "x"),
+            ("wheel_center_y", "y"),
+            ("wheel_center_z", "z"),
+        ] {
+            if omit && corner == "front_left" && name == "travel" {
+                continue;
+            }
+            signals.push_str(&format!("[vertical.signals.{corner}_{name}]\nentity = \"{corner}\"\ncomponent = \"{component}\"\nunit = \"mm\"\n"));
+        }
+    }
+    fs::write(path,format!("[case]\nname=\"fixture\"\nvariant=\"V\"\nloadcase=\"L\"\n[physics]\ngravity=9.80665\n[svc.inputs]\nsimulation_hdf5=\"simulation.h5\"\n[svc.signals.s]\nentity=\"x\"\ncomponent=\"x\"\nunit=\"mm\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
+}
+fn command(config: &std::path::Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
+    command.args(["validate", "vertical"]).arg(config);
+    command
+}
+
+#[test]
+fn validates_normalized_hdf5_with_embedded_python_and_safe_outputs() {
+    let directory = tempdir().unwrap();
+    let simulation_path = directory.path().join("simulation.h5");
+    let measurement_path = directory.path().join("measurement.h5");
+    simulation(&simulation_path);
+    measurement(&measurement_path);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, "measurement.h5", false);
+    let json = directory.path().join("report.json");
+    let csv = directory.path().join("report.csv");
+    let svg = directory.path().join("plot.svg");
+    let success = command(&config_path)
+        .arg("--json-output")
+        .arg(&json)
+        .arg("--csv-output")
+        .arg(&csv)
+        .arg("--plot-output")
+        .arg(&svg)
+        .output()
+        .unwrap();
+    assert!(
+        success.status.success(),
+        "{}",
+        String::from_utf8_lossy(&success.stderr)
+    );
+    assert!(json.is_file() && csv.is_file() && svg.is_file());
+    assert!(
+        fs::read_to_string(&json)
+            .unwrap()
+            .contains("measurement_hdf5")
+    );
+    let rejected = command(&config_path)
+        .arg("--json-output")
+        .arg(&json)
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("already exists"));
+    assert!(
+        command(&config_path)
+            .arg("--json-output")
+            .arg(&json)
+            .arg("--force")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let raw = directory.path().join("raw.toml");
+    config(&raw, "measurement.acd", false);
+    fs::write(
+        &raw,
+        fs::read_to_string(&raw)
+            .unwrap()
+            .replace("measurement_hdf5", "measurement_acd"),
+    )
+    .unwrap();
+    fs::write(directory.path().join("measurement.acd"), "raw").unwrap();
+    let raw_result = command(&raw).output().unwrap();
+    assert_eq!(raw_result.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&raw_result.stderr)
+            .contains("unknown [vertical.inputs] key: measurement_acd")
+    );
+    let missing = directory.path().join("missing.toml");
+    config(&missing, "measurement.h5", true);
+    let missing_result = command(&missing).output().unwrap();
+    assert_eq!(missing_result.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&missing_result.stderr).contains("mapping missing"));
+}
