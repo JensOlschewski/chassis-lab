@@ -28,7 +28,16 @@ enum Command {
 fn main() {
     if let Err(error) = run(Cli::parse()) {
         eprintln!("error: {error:#}");
-        std::process::exit(2);
+        std::process::exit(
+            if error
+                .downcast_ref::<validate::svc::ToleranceFailure>()
+                .is_some()
+            {
+                1
+            } else {
+                2
+            },
+        );
     }
 }
 

@@ -15,7 +15,7 @@ Convert an Adams result or Lommel measurement and validate it:
 ```bash
 target/release/clab convert input.res
 target/release/clab convert measurement.acd -o measurement.h5
-.venv/bin/clab validate-svc examples/example-config.toml
+target/release/clab validate svc examples/example-config.toml
 ```
 
 Default conversion output is `INPUT.simulation.h5` for `.res` and
@@ -40,6 +40,18 @@ Vertical validation consumes normalized inputs only:
 ```text
 clab validate vertical case.toml --plot-output trajectories.svg
 ```
+
+SVC validation consumes simulation HDF5 v3 and reviewed reference JSON only:
+
+```text
+clab validate svc case.toml --json-output svc-report.json --csv-output svc-report.csv
+```
+
+SVC evaluation, tolerance comparison, reporting, provenance, and output safety
+are Rust-owned. Final simulation sample is selected by default. Exit codes are
+0 for pass, 1 for tolerance failure, and 2 for operational or configuration
+errors. Existing Python `validate-svc` remains legacy until its Python-specific
+tests and entry point are migrated.
 
 Vertical configs now use `[vertical.inputs].measurement_hdf5`. Replace legacy
 `measurement_acd` entries by converting the ACD first with `clab convert`; raw
