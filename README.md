@@ -15,7 +15,7 @@ Convert an Adams result or Lommel measurement and validate it:
 ```bash
 target/release/clab convert input.res
 target/release/clab convert measurement.acd -o measurement.h5
-target/release/clab validate svc examples/example-config.toml
+target/release/clab validate examples/example-config.toml
 ```
 
 Default conversion output is `INPUT.simulation.h5` for `.res` and
@@ -38,14 +38,19 @@ HDF5 file; together they are a small synthetic vertical measurement pair.
 Vertical validation consumes normalized inputs only:
 
 ```text
-clab validate vertical case.toml --plot-output trajectories.svg
+clab validate case.toml -t vertical --output-dir reports
 ```
 
 SVC validation consumes simulation HDF5 v3 and reviewed reference JSON only:
 
 ```text
-clab validate svc case.toml --json-output svc-report.json --csv-output svc-report.csv
+clab validate case.toml -d svc --output-dir reports
 ```
+
+Without `-d`, `validate` runs every configured domain. `-d svc` and `-d knc`
+select domains; `-t vertical` selects KnC vertical validation. `--output-dir`
+creates `svc.json`, `svc.csv`, `knc-vertical.json`, `knc-vertical.csv`, and
+`knc-vertical.svg` for selected domains.
 
 SVC evaluation, tolerance comparison, reporting, provenance, and output safety
 are Rust-owned. Final simulation sample is selected by default. Exit codes are

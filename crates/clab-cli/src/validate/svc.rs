@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     fs,
-    io::{IsTerminal, Write},
+    io::IsTerminal,
     path::{Path, PathBuf},
 };
 
@@ -12,10 +12,8 @@ use clab_core::{
     simulation_hdf5::SimulationFile,
     svc_reference::{SvcReference, load_svc_reference},
 };
-use clap::Args;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use thiserror::Error;
 
 const WHEEL_LOADS: [&str; 4] = [
     "front_left_wheel_load",
@@ -46,30 +44,12 @@ const GEOMETRY: [&str; 20] = [
     "rear_right_camber",
 ];
 
-#[derive(Debug, Args)]
-pub(crate) struct SvcArgs {
-    /// TOML case configuration.
-    config: PathBuf,
-    #[arg(long)]
-    json_output: Option<PathBuf>,
-    #[arg(long)]
-    csv_output: Option<PathBuf>,
-    #[arg(short, long)]
-    force: bool,
-    #[arg(long, value_enum, default_value_t = Color::Auto)]
-    color: Color,
-}
-
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
-enum Color {
+pub(crate) enum Color {
     Auto,
     Always,
     Never,
 }
-
-#[derive(Debug, Error)]
-#[error("SVC tolerance validation failed")]
-pub(crate) struct ToleranceFailure;
 
 #[derive(Debug, Serialize)]
 struct Metric {
@@ -90,50 +70,39 @@ struct Provenance {
     sha256: String,
 }
 
-pub(crate) fn validate(args: SvcArgs) -> Result<()> {
-    let config = clab_core::config::load_config(&args.config).map_err(|e| {
-        anyhow::anyhow!(
-            "failed to load configuration '{}': {e}",
-            args.config.display()
-        )
-    })?;
-    if !matches!(config.domain.as_str(), "svc" | "multi") {
-        bail!(
-            "SVC evaluator requires domain 'svc', found '{}'",
-            config.domain
-        );
-    }
+pub(crate) struct Reports {
+    pub json: String,
+    pub csv: String,
+}
+
+pub(crate) fn validate(config: &CaseConfig, color: Color) -> Result<(Reports, bool)> {
     let validation = config.validation.as_ref().ok_or_else(|| {
         anyhow::anyhow!("case '{}' has no [validation] configuration", config.name)
     })?;
-    let mut protected = vec![
-        config.path.as_path(),
-        config.simulation_hdf5.as_path(),
-        validation.reference.as_path(),
-    ];
-    if let Some(path) = &config.svc_signal_map {
-        protected.push(path);
-    }
-    validate_outputs(
-        args.json_output.as_deref(),
-        args.csv_output.as_deref(),
-        args.force,
-        &protected,
-    )?;
-
     let simulation = SimulationFile::open(&config.simulation_hdf5).with_context(|| {
         format!(
             "failed to read simulation HDF5 '{}'",
             config.simulation_hdf5.display()
         )
     })?;
-    let actual = evaluate(&config, &simulation)?;
+    let actual = evaluate(config, &simulation)?;
     let reference = load_svc_reference(&validation.reference).map_err(|e| {
         anyhow::anyhow!(
             "failed to load SVC reference '{}': {e}",
             validation.reference.display()
         )
     })?;
+    validate_identity(config, &reference)?;
+    let metrics = compare(&actual, &reference, &validation.tolerances)?;
+    let reports = Reports {
+        json: report_json(config, &reference, &metrics)?,
+        csv: report_csv(config, &reference, &metrics)?,
+    };
+    print_console(config, &reference, &metrics, color_enabled(color));
+    Ok((reports, metrics.iter().any(|metric| !metric.passed)))
+}
+
+fn validate_identity(config: &CaseConfig, reference: &SvcReference) -> Result<()> {
     if (
         reference.case.name.as_str(),
         reference.case.variant.as_str(),
@@ -153,21 +122,42 @@ pub(crate) fn validate(args: SvcArgs) -> Result<()> {
             reference.case.loadcase
         );
     }
-    let metrics = compare(&actual, &reference, &validation.tolerances)?;
-    let json = report_json(&config, &reference, &metrics)?;
-    let mut reports = Vec::new();
-    if let Some(path) = args.json_output.as_deref() {
-        reports.push((path, json));
+    Ok(())
+}
+
+pub(crate) fn preflight(config: &CaseConfig) -> Result<()> {
+    let validation = config.validation.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("case '{}' has no [validation] configuration", config.name)
+    })?;
+    let simulation = SimulationFile::open(&config.simulation_hdf5).with_context(|| {
+        format!(
+            "failed to read simulation HDF5 '{}'",
+            config.simulation_hdf5.display()
+        )
+    })?;
+    for (name, reference) in &config.signals {
+        let signal = simulation.read_signal(
+            &reference.entity,
+            &reference.component,
+            Some(&reference.unit),
+        )?;
+        let value = signal
+            .values
+            .last()
+            .ok_or_else(|| anyhow::anyhow!("SVC signal '{name}' contains no values"))?;
+        if !value.is_finite() {
+            bail!("SVC signal '{name}' at final sample must be finite, found {value}");
+        }
     }
-    if let Some(path) = args.csv_output.as_deref() {
-        reports.push((path, report_csv(&config, &reference, &metrics)?));
-    }
-    let staged = stage_reports(&reports)?;
-    publish_staged(staged, args.force)?;
-    print_console(&config, &reference, &metrics, color_enabled(args.color));
-    if metrics.iter().any(|metric| !metric.passed) {
-        return Err(ToleranceFailure.into());
-    }
+    let actual = evaluate(config, &simulation)?;
+    let reference = load_svc_reference(&validation.reference).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to load SVC reference '{}': {e}",
+            validation.reference.display()
+        )
+    })?;
+    validate_identity(config, &reference)?;
+    compare(&actual, &reference, &validation.tolerances)?;
     Ok(())
 }
 
@@ -477,55 +467,6 @@ fn print_console(config: &CaseConfig, reference: &SvcReference, metrics: &[Metri
     );
 }
 
-fn validate_outputs(
-    json: Option<&Path>,
-    csv: Option<&Path>,
-    force: bool,
-    inputs: &[&Path],
-) -> Result<()> {
-    let outputs: Vec<_> = [json, csv].into_iter().flatten().collect();
-    let mut unique = std::collections::BTreeSet::new();
-    for path in outputs {
-        let parent = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "failed to create output parent directory: {}",
-                parent.display()
-            )
-        })?;
-        if path.is_dir() {
-            bail!("report output path is a directory: {}", path.display());
-        }
-        let parent = parent.canonicalize()?;
-        let canonical = if path.exists() {
-            path.canonicalize()?
-        } else {
-            parent.join(path.file_name().unwrap())
-        };
-        if !unique.insert(canonical.clone()) {
-            bail!("JSON and CSV output paths must be different");
-        }
-        for input in inputs {
-            if input.exists() && input.canonicalize()? == canonical {
-                bail!(
-                    "report output must not replace an input: {}",
-                    path.display()
-                );
-            }
-        }
-        if path.exists() && !force {
-            bail!(
-                "report output already exists: {}; pass --force to replace it",
-                path.display()
-            );
-        }
-    }
-    Ok(())
-}
-
 fn color_enabled(color: Color) -> bool {
     color_enabled_for(
         color,
@@ -542,52 +483,10 @@ fn color_enabled_for(color: Color, terminal: bool, no_color: bool) -> bool {
     }
 }
 
-fn stage_reports<'a>(
-    reports: &[(&'a Path, String)],
-) -> Result<Vec<(&'a Path, tempfile::NamedTempFile)>> {
-    reports
-        .iter()
-        .map(|(path, content)| {
-            let parent = path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-                .unwrap_or(Path::new("."));
-            let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-            temporary.write_all(content.as_bytes())?;
-            temporary.flush()?;
-            Ok((*path, temporary))
-        })
-        .collect()
-}
-
-fn publish_staged(staged: Vec<(&Path, tempfile::NamedTempFile)>, force: bool) -> Result<()> {
-    for (path, temporary) in staged {
-        let result = if force {
-            temporary.persist(path).map(|_| ())
-        } else {
-            temporary.persist_noclobber(path).map(|_| ())
-        };
-        result.map_err(|error| error.error)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::Color;
-    use super::{color_enabled_for, stage_reports};
-    use std::fs;
-
-    #[test]
-    fn no_force_staging_does_not_replace_existing_file() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("report.json");
-        fs::write(&path, "old").unwrap();
-
-        let staged = stage_reports(&[(&path, "new".into())]).unwrap();
-        assert!(staged[0].0.exists());
-        assert_eq!(fs::read_to_string(path).unwrap(), "old");
-    }
+    use super::color_enabled_for;
 
     #[test]
     fn color_modes_respect_terminal_and_no_color() {
@@ -596,17 +495,5 @@ mod tests {
         assert!(color_enabled_for(Color::Auto, true, false));
         assert!(!color_enabled_for(Color::Auto, true, true));
         assert!(!color_enabled_for(Color::Auto, false, false));
-    }
-
-    #[test]
-    fn staging_failure_leaves_outputs_untouched() {
-        let directory = tempfile::tempdir().unwrap();
-        let first = directory.path().join("first.json");
-        let bad_parent = directory.path().join("not-a-directory");
-        fs::write(&bad_parent, "file").unwrap();
-        let second = bad_parent.join("second.csv");
-
-        assert!(stage_reports(&[(&first, "new".into()), (&second, "new".into())]).is_err());
-        assert!(!first.exists());
     }
 }

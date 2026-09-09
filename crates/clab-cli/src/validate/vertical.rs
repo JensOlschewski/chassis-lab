@@ -15,7 +15,6 @@ use clab_core::{
     measurement_hdf5::MeasurementFile,
     simulation_hdf5::SimulationFile,
 };
-use clap::Args;
 use pyo3::{
     ffi,
     prelude::*,
@@ -59,46 +58,17 @@ struct KernelResponse {
     svg: String,
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct VerticalArgs {
-    /// TOML case configuration.
-    config: PathBuf,
-    #[arg(long)]
-    plot_output: Option<PathBuf>,
-    #[arg(long)]
-    json_output: Option<PathBuf>,
-    #[arg(long)]
-    csv_output: Option<PathBuf>,
-    #[arg(long)]
-    force: bool,
+pub(crate) struct Reports {
+    pub json: String,
+    pub csv: String,
+    pub svg: String,
 }
 
-pub(crate) fn validate(args: VerticalArgs) -> Result<()> {
-    let config = clab_core::config::load_config(&args.config).map_err(|e| {
-        anyhow::anyhow!(
-            "failed to load configuration '{}': {e}",
-            args.config.display()
-        )
-    })?;
+pub(crate) fn validate(config: &CaseConfig) -> Result<Reports> {
     let vertical = config
         .vertical
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("case '{}' has no [vertical] configuration", config.name))?;
-    let mut protected = vec![
-        config.path.as_path(),
-        vertical.measurement_hdf5.as_path(),
-        vertical.simulation_hdf5.as_path(),
-    ];
-    if let Some(path) = &vertical.signal_map {
-        protected.push(path);
-    }
-    validate_outputs(
-        args.plot_output.as_deref(),
-        args.json_output.as_deref(),
-        args.csv_output.as_deref(),
-        args.force,
-        &protected,
-    )?;
     let measurement = MeasurementFile::open(&vertical.measurement_hdf5).with_context(|| {
         format!(
             "failed to read measurement HDF5 '{}'",
@@ -111,20 +81,11 @@ pub(crate) fn validate(args: VerticalArgs) -> Result<()> {
             vertical.simulation_hdf5.display()
         )
     })?;
-    validate_setup(&measurement, &config)?;
-    let request = request(&config, &measurement, &simulation)?;
+    validate_setup(&measurement, config)?;
+    let request = request(config, &measurement, &simulation)?;
     let response = kernel(&request)?;
     validate_response(&response, &request.grid)?;
-    let report = report(&config, &response.comparisons)?;
-    if let Some(path) = args.json_output.as_deref() {
-        publish(path, &(serde_json::to_string_pretty(&report)? + "\n"))?;
-    }
-    if let Some(path) = args.csv_output.as_deref() {
-        publish(path, &csv_text(&config, &response.comparisons)?)?;
-    }
-    if let Some(path) = args.plot_output.as_deref() {
-        publish(path, &response.svg)?;
-    }
+    let report = report(config, &response.comparisons)?;
     println!("Vertical trajectory comparison");
     println!(
         "case: {} ({}, {}, {})",
@@ -142,6 +103,32 @@ pub(crate) fn validate(args: VerticalArgs) -> Result<()> {
         );
     }
     println!("validation result: informational (no vertical tolerances configured)");
+    Ok(Reports {
+        json: serde_json::to_string_pretty(&report)? + "\n",
+        csv: csv_text(config, &response.comparisons)?,
+        svg: response.svg,
+    })
+}
+
+pub(crate) fn preflight(config: &CaseConfig) -> Result<()> {
+    let vertical = config
+        .vertical
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("case '{}' has no [vertical] configuration", config.name))?;
+    let measurement = MeasurementFile::open(&vertical.measurement_hdf5).with_context(|| {
+        format!(
+            "failed to read measurement HDF5 '{}'",
+            vertical.measurement_hdf5.display()
+        )
+    })?;
+    let simulation = SimulationFile::open(&vertical.simulation_hdf5).with_context(|| {
+        format!(
+            "failed to read simulation HDF5 '{}'",
+            vertical.simulation_hdf5.display()
+        )
+    })?;
+    validate_setup(&measurement, config)?;
+    request(config, &measurement, &simulation)?;
     Ok(())
 }
 
@@ -510,65 +497,6 @@ fn safe_cell(value: &str) -> String {
     } else {
         value.into()
     }
-}
-fn validate_outputs(
-    plot: Option<&Path>,
-    json: Option<&Path>,
-    csv: Option<&Path>,
-    force: bool,
-    inputs: &[&Path],
-) -> Result<()> {
-    let paths: Vec<_> = [plot, json, csv].into_iter().flatten().collect();
-    if let Some(path) = plot
-        && path
-            .extension()
-            .and_then(|x| x.to_str())
-            .is_none_or(|x| !x.eq_ignore_ascii_case("svg"))
-    {
-        bail!("vertical plot output must use .svg extension");
-    }
-    let inputs: Result<Vec<_>> = inputs.iter().map(|path| Ok(path.canonicalize()?)).collect();
-    let inputs = inputs?;
-    let mut unique = std::collections::BTreeSet::new();
-    for path in paths {
-        let parent = path.parent().unwrap_or(Path::new("."));
-        if !parent.is_dir() {
-            bail!(
-                "output parent directory does not exist: {}",
-                parent.display()
-            );
-        }
-        let parent = parent.canonicalize()?;
-        let canonical = if path.exists() {
-            path.canonicalize()?
-        } else {
-            parent.join(path.file_name().unwrap())
-        };
-        if !unique.insert(canonical.clone()) {
-            bail!("vertical output paths must be different");
-        }
-        if inputs.iter().any(|input| input == &canonical) {
-            bail!(
-                "vertical output path must not replace an input: {}",
-                path.display()
-            );
-        }
-        if path.exists() && !force {
-            bail!(
-                "report output already exists: {}; pass --force to replace it",
-                path.display()
-            );
-        }
-    }
-    Ok(())
-}
-fn publish(path: &Path, content: &str) -> Result<()> {
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    use std::io::Write;
-    temporary.write_all(content.as_bytes())?;
-    temporary.persist(path).map_err(|error| error.error)?;
-    Ok(())
 }
 
 #[cfg(test)]

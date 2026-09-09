@@ -52,6 +52,11 @@ pub struct VerticalConfig {
     pub signals: BTreeMap<String, SignalRef>,
     pub signal_map: Option<PathBuf>,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Domain {
+    Svc,
+    Knc,
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaseConfig {
     pub path: PathBuf,
@@ -65,6 +70,18 @@ pub struct CaseConfig {
     pub validation: Option<ValidationConfig>,
     pub vertical: Option<VerticalConfig>,
     pub svc_signal_map: Option<PathBuf>,
+}
+impl CaseConfig {
+    pub fn configured_domains(&self) -> Vec<Domain> {
+        let mut domains = Vec::new();
+        if !self.simulation_hdf5.as_os_str().is_empty() {
+            domains.push(Domain::Svc);
+        }
+        if self.vertical.is_some() {
+            domains.push(Domain::Knc);
+        }
+        domains
+    }
 }
 type SignalSource = (Option<PathBuf>, BTreeMap<String, SignalRef>);
 
@@ -111,17 +128,17 @@ fn parse_legacy(
             .ok_or_else(|| ConfigError("missing required [inputs] table".into()))?,
         "[inputs]",
     )?;
-    let physics = table(
-        root.get("physics")
-            .ok_or_else(|| ConfigError("missing required [physics] table".into()))?,
-        "[physics]",
-    )?;
     keys(case, &["name", "domain", "variant", "loadcase"], "[case]")?;
     for k in ["name", "domain", "variant", "loadcase"] {
         require(case, k, "[case]")?
     }
     keys(inputs, &["simulation_hdf5"], "[inputs]")?;
     require(inputs, "simulation_hdf5", "[inputs]")?;
+    let physics = table(
+        root.get("physics")
+            .ok_or_else(|| ConfigError("missing required [physics] table".into()))?,
+        "[physics]",
+    )?;
     keys(physics, &["gravity"], "[physics]")?;
     require(physics, "gravity", "[physics]")?;
     let signal_map = signal_source(root, path, "top level", None)?;
@@ -155,41 +172,65 @@ fn parse_unified(
             .ok_or_else(|| ConfigError("missing required [case] table".into()))?,
         "[case]",
     )?;
-    let physics = table(
-        root.get("physics")
-            .ok_or_else(|| ConfigError("missing required [physics] table".into()))?,
-        "[physics]",
-    )?;
-    let svc = table(
-        root.get("svc")
-            .ok_or_else(|| ConfigError("missing required [svc] table".into()))?,
-        "[svc]",
-    )?;
+    let physics = root
+        .get("physics")
+        .map(|value| table(value, "[physics]"))
+        .transpose()?;
     keys(case, &["name", "variant", "loadcase"], "[case]")?;
     for k in ["name", "variant", "loadcase"] {
         require(case, k, "[case]")?
     }
-    keys(physics, &["gravity"], "[physics]")?;
-    require(physics, "gravity", "[physics]")?;
-    keys(svc, &["inputs", "signals", "validation"], "[svc]")?;
-    let inputs = table(
-        svc.get("inputs")
-            .ok_or_else(|| ConfigError("missing required [inputs] table".into()))?,
-        "[svc.inputs]",
-    )?;
-    keys(
-        inputs,
-        &["signal_map", "simulation_hdf5", "measurement_reference"],
-        "[svc.inputs]",
-    )?;
-    require(inputs, "simulation_hdf5", "[svc.inputs]")?;
-    let source = signal_source(svc, path, "[svc]", Some(inputs))?;
-    let validation = parse_validation(
-        svc.get("validation"),
-        path,
-        inputs.get("measurement_reference"),
-        "[svc.validation]",
-    )?;
+    let svc = root
+        .get("svc")
+        .map(|value| table(value, "[svc]"))
+        .transpose()?;
+    let gravity = if svc.is_some() {
+        let physics =
+            physics.ok_or_else(|| ConfigError("missing required [physics] table".into()))?;
+        keys(physics, &["gravity"], "[physics]")?;
+        positive(value(physics, "gravity", "[physics]")?, "[physics].gravity")?
+    } else if let Some(physics) = physics {
+        keys(physics, &["gravity"], "[physics]")?;
+        physics
+            .get("gravity")
+            .map(|value| positive(value, "[physics].gravity"))
+            .transpose()?
+            .unwrap_or(9.80665)
+    } else {
+        9.80665
+    };
+    let (simulation_hdf5, signals, validation, svc_signal_map) = if let Some(svc) = svc {
+        keys(svc, &["inputs", "signals", "validation"], "[svc]")?;
+        let inputs = table(
+            svc.get("inputs")
+                .ok_or_else(|| ConfigError("missing required [inputs] table".into()))?,
+            "[svc.inputs]",
+        )?;
+        keys(
+            inputs,
+            &["signal_map", "simulation_hdf5", "measurement_reference"],
+            "[svc.inputs]",
+        )?;
+        require(inputs, "simulation_hdf5", "[svc.inputs]")?;
+        let source = signal_source(svc, path, "[svc]", Some(inputs))?;
+        (
+            resolve(
+                value(inputs, "simulation_hdf5", "[svc.inputs]")?,
+                path,
+                "[svc.inputs].simulation_hdf5",
+            )?,
+            source.1,
+            parse_validation(
+                svc.get("validation"),
+                path,
+                inputs.get("measurement_reference"),
+                "[svc.validation]",
+            )?,
+            source.0,
+        )
+    } else {
+        (PathBuf::new(), BTreeMap::new(), None, None)
+    };
     let vertical = root
         .get("vertical")
         .map(|v| parse_vertical(v, path))
@@ -197,23 +238,21 @@ fn parse_unified(
     Ok(CaseConfig {
         path: path.to_path_buf(),
         name: string(case, "name", "[case]")?,
-        domain: if vertical.is_some() {
+        domain: if vertical.is_some() && !simulation_hdf5.as_os_str().is_empty() {
             "multi".into()
+        } else if vertical.is_some() {
+            "knc".into()
         } else {
             "svc".into()
         },
         variant: string(case, "variant", "[case]")?,
         loadcase: string(case, "loadcase", "[case]")?,
-        simulation_hdf5: resolve(
-            value(inputs, "simulation_hdf5", "[svc.inputs]")?,
-            path,
-            "[svc.inputs].simulation_hdf5",
-        )?,
-        gravity: positive(value(physics, "gravity", "[physics]")?, "[physics].gravity")?,
-        signals: source.1,
+        simulation_hdf5,
+        gravity,
+        signals,
         validation,
         vertical,
-        svc_signal_map: source.0,
+        svc_signal_map,
     })
 }
 
@@ -613,5 +652,13 @@ mod tests {
         let p = d.path().join("case.toml");
         fs::write(&p,"[case]\nname='n'\ndomain='svc'\nvariant='v'\nloadcase='l'\nextra=1\n[inputs]\nsimulation_hdf5='x'\n[physics]\ngravity=9.8\n").unwrap();
         assert!(load_config(&p).unwrap_err().to_string().contains("unknown"));
+    }
+    #[test]
+    fn parses_vertical_only_unified_config() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(&p, "[case]\nname='n'\nvariant='v'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\ncode='x'\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
+        let config = load_config(&p).unwrap();
+        assert_eq!(config.configured_domains(), vec![Domain::Knc]);
     }
 }

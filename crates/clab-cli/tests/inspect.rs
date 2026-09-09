@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 use std::str::FromStr;
+use std::{fs, path::PathBuf};
 
 use hdf5::File;
 use hdf5::types::VarLenUnicode;
@@ -61,13 +62,16 @@ fn rejects_invalid_hdf5_and_unsupported_source_kind() {
     );
 
     let unsupported = directory.path().join("unsupported.hdf5");
-    let file = File::create(&unsupported).unwrap();
+    let staging = PathBuf::from(format!("{}.fixture", unsupported.display()));
+    let file = File::create(&staging).unwrap();
     file.new_attr::<VarLenUnicode>()
         .create("source_kind")
         .unwrap()
         .write_scalar(&VarLenUnicode::from_str("other").unwrap())
         .unwrap();
-    drop(file);
+    file.close().unwrap();
+    fs::copy(&staging, &unsupported).unwrap();
+    fs::remove_file(staging).unwrap();
     let output = inspect(&unsupported, &[]);
     assert_eq!(output.status.code(), Some(2));
     assert!(
