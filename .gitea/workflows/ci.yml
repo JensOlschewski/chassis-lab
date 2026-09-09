@@ -9,7 +9,7 @@ on:
   pull_request:
 
 jobs:
-  checks:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -25,16 +25,16 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache Rust build
+      - name: Cache Rust quality build
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-quality-cargo-${{ hashFiles('**/Cargo.lock', '.gitea/workflows/ci.yml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-quality-cargo-
 
       - name: Install Rust build tools
         run: python -m pip install "cmake>=3.26,<4"
@@ -60,8 +60,8 @@ jobs:
       - name: Test Python and integration
         run: cd py-chassislab && pytest -q
 
-  bundle-runtime:
-    needs: checks
+  linux-runtime:
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -75,130 +75,106 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Cache Rust build
+      - name: Cache Linux runtime build
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-linux-runtime-cargo-${{ hashFiles('**/Cargo.lock', 'packaging/embedded-runtime-linux-x86_64.lock', 'packaging/build-embedded-runtime.sh', '.gitea/workflows/ci.yml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-linux-runtime-cargo-
 
       - name: Install Rust build tools
         run: python3 -m pip install "cmake>=3.26,<4"
 
-      - name: Build bundled runtime
+      - name: Build Linux runtime archive
         run: packaging/build-embedded-runtime.sh dist/clab-runtime-linux-x86_64
 
-      - name: Verify bundle checksum
+      - name: Verify Linux runtime checksum
         run: sha256sum --check dist/clab-runtime-linux-x86_64.tar.gz.sha256
 
-      - name: Smoke test in clean Ubuntu container
+      - name: Smoke test Linux runtime in clean Ubuntu container
         run: |
+          smoke_input="$(mktemp)"
+          trap 'rm -f "$smoke_input"' EXIT
+          tar -czf "$smoke_input" \
+            dist/clab-runtime-linux-x86_64.tar.gz \
+            crates/clab-converter/examples/example-svc.res \
+            crates/clab-converter/examples/example-vertical.res \
+            crates/clab-converter/examples/runtime-vertical.acd \
+            examples/runtime-smoke.toml \
+            examples/example-signals.toml \
+            examples/example-measures.json
+          test -s "$smoke_input"
           docker run --rm --pull=missing -i \
             ubuntu:24.04 \
             bash -ceu '
-               mkdir /tmp/clab-runtime
-               tar -xzf - -C /tmp/clab-runtime
-               bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
+              mkdir /tmp/input /tmp/clab-runtime /tmp/smoke
+              tar -xzf - -C /tmp/input
+              tar -xzf /tmp/input/dist/clab-runtime-linux-x86_64.tar.gz -C /tmp/clab-runtime
+              bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
+              cp /tmp/input/crates/clab-converter/examples/example-svc.res /tmp/smoke/
+              cp /tmp/input/crates/clab-converter/examples/example-vertical.res /tmp/smoke/
+              cp /tmp/input/crates/clab-converter/examples/runtime-vertical.acd /tmp/smoke/
+              cp /tmp/input/examples/runtime-smoke.toml /tmp/smoke/
+              cp /tmp/input/examples/example-signals.toml /tmp/smoke/
+              cp /tmp/input/examples/example-measures.json /tmp/smoke/
+              cd /tmp/smoke
               env -i \
                 PATH="$bundle/bin:/usr/bin:/bin" \
                 PYTHONHOME=/poisoned \
                 PYTHONPATH=/poisoned \
                 VIRTUAL_ENV=/poisoned \
                 LD_LIBRARY_PATH=/poisoned \
-                 "$bundle/bin/clab" --version
-               "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
-             ' < dist/clab-runtime-linux-x86_64.tar.gz
+                "$bundle/bin/clab" --version
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/clab" convert example-svc.res -o svc.simulation.h5
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/clab" convert example-vertical.res -o vertical.simulation.h5
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/clab" convert runtime-vertical.acd -o vertical.measurement.h5
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/clab" validate runtime-smoke.toml --output-dir reports
+              test -s reports/svc.json
+              test -s reports/svc.csv
+              test -s reports/knc-vertical.json
+              test -s reports/knc-vertical.csv
+              test -s reports/knc-vertical.svg
+            ' < "$smoke_input"
 
-      - name: Upload experimental bundle
+      - name: Upload Linux runtime artifact
         uses: actions/upload-artifact@v3
         with:
-          name: clab-runtime-linux-x86_64
-          path: dist/clab-runtime-linux-x86_64.tar.gz*
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [checks, bundle-runtime]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Rust build tools
-        run: python -m pip install "cmake>=3.26,<4"
-
-      - name: Validate release tag
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          python - <<'PY'
-          import os
-          import re
-          import sys
-          from pathlib import Path
-
-          tag = os.environ["RELEASE_TAG"]
-          if not re.fullmatch(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", tag):
-              print(f"invalid release tag: {tag}", file=sys.stderr)
-              raise SystemExit(1)
-
-          expected = tag[1:]
-          python_version = re.search(
-              r'^version = "([^"]+)"',
-              Path("py-chassislab/pyproject.toml").read_text(),
-              re.MULTILINE,
-          ).group(1)
-          rust_version = re.search(
-              r'^version = "([^"]+)"',
-              Path("Cargo.toml").read_text(),
-              re.MULTILINE,
-          ).group(1)
-          if {python_version, rust_version} != {expected}:
-              print(
-                  f"tag {tag} does not match Python {python_version} "
-                  f"and Rust {rust_version}",
-                  file=sys.stderr,
-              )
-              raise SystemExit(1)
-          PY
-
-      - name: Build Python wheel
-        run: |
-          python -m pip install build
-          python -m build --wheel --outdir dist py-chassislab
-
-      - name: Build Rust workspace
-        run: cargo build --workspace --release --locked
-
-      - name: Build bundled clab runtime
-        run: packaging/build-embedded-runtime.sh "dist/clab-runtime-${GITHUB_REF_NAME}-linux-x86_64"
-
-      - name: Package release artifacts
-        run: |
-          (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS)
-
-      - name: Publish Gitea release
-        uses: https://gitea.com/actions/gitea-release-action@5a83c90484ef4355121df5eb60558c8ce66e81ac
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ChassisLab ${{ github.ref_name }}
-          body: |
-            ChassisLab ${{ github.ref_name }}.
-
-            Includes Python wheel and self-contained Linux x86_64 `clab` runtime
-            archive with bundled CPython and numerical dependencies.
-          files: |
-            dist/*
+          name: linux-clab-runtime
+          path: |
+            dist/clab-runtime-linux-x86_64.tar.gz
+            dist/clab-runtime-linux-x86_64.tar.gz.sha256

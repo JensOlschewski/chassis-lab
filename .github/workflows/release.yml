@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: clab-linux-x86_64.tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: clab-windows-x86_64.zip
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+            archive: clab-macos-x86_64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate release tag
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          test "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)" = "${RELEASE_TAG#v}"
+          test "$(sed -n 's/^version = "\([^"]*\)"/\1/p' py-chassislab/pyproject.toml | head -n 1)" = "${RELEASE_TAG#v}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock', '.github/workflows/release.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-release-
+
+      - name: Install build tools
+        run: python -m pip install "cmake>=3.26,<4"
+
+      - name: Select installed Visual Studio generator
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV 'CMAKE_GENERATOR=Visual Studio 17 2022'
+
+      - name: Build CLI
+        run: cargo build -p clab-cli --release --locked --target "${{ matrix.target }}"
+
+      - name: Package Unix CLI
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -czf "${{ matrix.archive }}" -C "target/${{ matrix.target }}/release" clab
+
+      - name: Package Windows CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "target/${{ matrix.target }}/release/clab.exe" -DestinationPath "${{ matrix.archive }}"
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target }}
+          path: ${{ matrix.archive }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create checksums
+        run: sha256sum dist/* > dist/SHA256SUMS
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  publish-gitea:
+    if: vars.PUBLISH_TO_GITEA == 'true'
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release and assets to Gitea
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_URL: ${{ vars.GITEA_URL }}
+          GITEA_REPOSITORY: ${{ vars.GITEA_REPOSITORY }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          api="$GITEA_URL/api/v1/repos/$GITEA_REPOSITORY"
+          auth=(-H "Authorization: token $GITEA_TOKEN")
+
+          if ! release=$(curl -fsS "${auth[@]}" "$api/releases/tags/$RELEASE_TAG"); then
+            release=$(curl -fsS -X POST "${auth[@]}" \
+              -H 'Content-Type: application/json' \
+              "$api/releases" \
+              -d "$(jq -n --arg tag "$RELEASE_TAG" '{tag_name: $tag, name: ("ChassisLab " + $tag), body: "Built by GitHub Actions."}')")
+          fi
+
+          release_id=$(jq -r '.id' <<< "$release")
+          assets=$(curl -fsS "${auth[@]}" "$api/releases/$release_id/assets")
+          for asset in dist/*; do
+            name=$(basename "$asset")
+            existing_id=$(jq -r --arg name "$name" '.[] | select(.name == $name) | .id' <<< "$assets")
+            if [ -n "$existing_id" ]; then
+              curl -fsS -X DELETE "${auth[@]}" "$api/releases/$release_id/assets/$existing_id"
+            fi
+            curl -fsS -X POST "${auth[@]}" \
+              -H 'Content-Type: application/octet-stream' \
+              --data-binary "@$asset" \
+              "$api/releases/$release_id/assets?name=$name" >/dev/null
+          done

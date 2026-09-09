@@ -1,0 +1,17 @@
+FileInfo:	filetype	FileType	File Type	string		ASCII3
+TestInfo:	testtype	TestType	Test type	string		vert
+TestInfo:	brakeson	BrakesOn	Brakes applied	integer		0
+TestInfo:	engineon	EngineOn	Engine running	integer		0
+TestInfo:	farbon	FrontArbOn	Front ARB connected	integer		1
+TestInfo:	rarbon	RearArbOn	Rear ARB connected	integer		1
+Time	Front left cycle	Front left X	Front left Y	Front left Z	Front right cycle	Front right X	Front right Y	Front right Z	Rear left cycle	Rear left X	Rear left Y	Rear left Z	Rear right cycle	Rear right X	Rear right Y	Rear right Z	string	Description
+0	0	0	0	300	0	0	0	300	0	0	0	300	0	0	0	300	float	Offset
+time	lfslope	lfwcx	lfwcy	lfwcz	rfslope	rfwcx	rfwcy	rfwcz	lrslope	lrwcx	lrwcy	lrwcz	rrslope	rrwcx	rrwcy	rrwcz	string	Name
+s		mm	mm	mm		mm	mm	mm		mm	mm	mm		mm	mm	mm	string	Units
+NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	NaN	string	KPoly
+0	2	1199.8	749.9	299	2	1199.8	-750.1	299	2	-1200.2	729.9	299	2	-1200.2	-730.1	299
+1	2	1200	750	300	2	1200	-750	300	2	-1200	730	300	2	-1200	-730	300
+2	2	1200.2	750.1	301	2	1200.2	-749.9	301	2	-1199.8	730.1	301	2	-1199.8	-729.9	301
+3	3	1200.2	750.1	301	3	1200.2	-749.9	301	3	-1199.8	730.1	301	3	-1199.8	-729.9	301
+4	3	1200	750	300	3	1200	-750	300	3	-1200	730	300	3	-1200	-730	300
+5	3	1199.8	749.9	299	3	1199.8	-750.1	299	3	-1200.2	729.9	299	3	-1200.2	-730.1	299
