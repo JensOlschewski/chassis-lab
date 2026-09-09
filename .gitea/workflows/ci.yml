@@ -97,15 +97,18 @@ jobs:
 
       - name: Smoke test Linux runtime in clean Ubuntu container
         run: |
-          tar -czf - \
+          smoke_input="$(mktemp)"
+          trap 'rm -f "$smoke_input"' EXIT
+          tar -czf "$smoke_input" \
             dist/clab-runtime-linux-x86_64.tar.gz \
             crates/clab-converter/examples/example-svc.res \
             crates/clab-converter/examples/example-vertical.res \
             crates/clab-converter/examples/runtime-vertical.acd \
             examples/runtime-smoke.toml \
             examples/example-signals.toml \
-            examples/example-measures.json \
-          | docker run --rm --pull=missing -i \
+            examples/example-measures.json
+          test -s "$smoke_input"
+          docker run --rm --pull=missing -i \
             ubuntu:24.04 \
             bash -ceu '
               mkdir /tmp/input /tmp/clab-runtime /tmp/smoke
@@ -166,7 +169,7 @@ jobs:
               test -s reports/knc-vertical.json
               test -s reports/knc-vertical.csv
               test -s reports/knc-vertical.svg
-            ' < dist/clab-runtime-linux-x86_64.tar.gz
+            ' < "$smoke_input"
 
       - name: Upload Linux runtime artifact
         uses: actions/upload-artifact@v3
