@@ -104,3 +104,47 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+
+  publish-gitea:
+    if: vars.PUBLISH_TO_GITEA == 'true'
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release and assets to Gitea
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_URL: ${{ vars.GITEA_URL }}
+          GITEA_REPOSITORY: ${{ vars.GITEA_REPOSITORY }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          api="$GITEA_URL/api/v1/repos/$GITEA_REPOSITORY"
+          auth=(-H "Authorization: token $GITEA_TOKEN")
+
+          if ! release=$(curl -fsS "${auth[@]}" "$api/releases/tags/$RELEASE_TAG"); then
+            release=$(curl -fsS -X POST "${auth[@]}" \
+              -H 'Content-Type: application/json' \
+              "$api/releases" \
+              -d "$(jq -n --arg tag "$RELEASE_TAG" '{tag_name: $tag, name: ("ChassisLab " + $tag), body: "Built by GitHub Actions."}')")
+          fi
+
+          release_id=$(jq -r '.id' <<< "$release")
+          assets=$(curl -fsS "${auth[@]}" "$api/releases/$release_id/assets")
+          for asset in dist/*; do
+            name=$(basename "$asset")
+            existing_id=$(jq -r --arg name "$name" '.[] | select(.name == $name) | .id' <<< "$assets")
+            if [ -n "$existing_id" ]; then
+              curl -fsS -X DELETE "${auth[@]}" "$api/releases/$release_id/assets/$existing_id"
+            fi
+            curl -fsS -X POST "${auth[@]}" \
+              -H 'Content-Type: application/octet-stream' \
+              --data-binary "@$asset" \
+              "$api/releases/$release_id/assets?name=$name" >/dev/null
+          done
