@@ -9,7 +9,7 @@ on:
   pull_request:
 
 jobs:
-  checks:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -25,16 +25,16 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache Rust build
+      - name: Cache Rust quality build
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-quality-cargo-${{ hashFiles('**/Cargo.lock', '.gitea/workflows/ci.yml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-quality-cargo-
 
       - name: Install Rust build tools
         run: python -m pip install "cmake>=3.26,<4"
@@ -60,8 +60,8 @@ jobs:
       - name: Test Python and integration
         run: cd py-chassislab && pytest -q
 
-  bundle-runtime:
-    needs: checks
+  linux-runtime:
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -75,53 +75,146 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Cache Rust build
+      - name: Cache Linux runtime build
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-linux-runtime-cargo-${{ hashFiles('**/Cargo.lock', 'packaging/embedded-runtime-linux-x86_64.lock', 'packaging/build-embedded-runtime.sh', '.gitea/workflows/ci.yml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-linux-runtime-cargo-
 
       - name: Install Rust build tools
         run: python3 -m pip install "cmake>=3.26,<4"
 
-      - name: Build bundled runtime
+      - name: Build Linux runtime archive
         run: packaging/build-embedded-runtime.sh dist/clab-runtime-linux-x86_64
 
-      - name: Verify bundle checksum
+      - name: Verify Linux runtime checksum
         run: sha256sum --check dist/clab-runtime-linux-x86_64.tar.gz.sha256
 
-      - name: Smoke test in clean Ubuntu container
+      - name: Smoke test Linux runtime in clean Ubuntu container
         run: |
           docker run --rm --pull=missing -i \
+            -v "$GITHUB_WORKSPACE:/fixtures:ro" \
             ubuntu:24.04 \
             bash -ceu '
-               mkdir /tmp/clab-runtime
-               tar -xzf - -C /tmp/clab-runtime
-               bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
+              mkdir /tmp/clab-runtime /tmp/smoke
+              tar -xzf - -C /tmp/clab-runtime
+              bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
+              cp /fixtures/crates/clab-converter/examples/example-svc.res /tmp/smoke/
+              cp /fixtures/crates/clab-converter/examples/example-vertical.res /tmp/smoke/
+              cp /fixtures/crates/clab-converter/examples/runtime-vertical.acd /tmp/smoke/
+              cp /fixtures/examples/runtime-smoke.toml /tmp/smoke/
+              cp /fixtures/examples/example-signals.toml /tmp/smoke/
+              cp /fixtures/examples/example-measures.json /tmp/smoke/
+              cd /tmp/smoke
               env -i \
                 PATH="$bundle/bin:/usr/bin:/bin" \
                 PYTHONHOME=/poisoned \
                 PYTHONPATH=/poisoned \
                 VIRTUAL_ENV=/poisoned \
                 LD_LIBRARY_PATH=/poisoned \
-                 "$bundle/bin/clab" --version
-               "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
-             ' < dist/clab-runtime-linux-x86_64.tar.gz
+                "$bundle/bin/clab" --version
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/clab" convert example-svc.res -o svc.simulation.h5
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/clab" convert example-vertical.res -o vertical.simulation.h5
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/clab" convert runtime-vertical.acd -o vertical.measurement.h5
+              env -i \
+                PATH="$bundle/bin:/usr/bin:/bin" \
+                PYTHONHOME=/poisoned \
+                PYTHONPATH=/poisoned \
+                VIRTUAL_ENV=/poisoned \
+                LD_LIBRARY_PATH=/poisoned \
+                "$bundle/bin/clab" validate runtime-smoke.toml --output-dir reports
+              test -s reports/svc.json
+              test -s reports/svc.csv
+              test -s reports/knc-vertical.json
+              test -s reports/knc-vertical.csv
+              test -s reports/knc-vertical.svg
+            ' < dist/clab-runtime-linux-x86_64.tar.gz
 
-      - name: Upload experimental bundle
+      - name: Upload Linux runtime artifact
         uses: actions/upload-artifact@v3
         with:
-          name: clab-runtime-linux-x86_64
-          path: dist/clab-runtime-linux-x86_64.tar.gz*
+          name: linux-clab-runtime
+          path: |
+            dist/clab-runtime-linux-x86_64.tar.gz
+            dist/clab-runtime-linux-x86_64.tar.gz.sha256
+
+  windows-host-build:
+    if: vars.ENABLE_HOST_PLATFORM_BUILDS == 'true'
+    needs: quality
+    runs-on: windows-x86_64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust build tools
+        run: python -m pip install "cmake>=3.26,<4"
+
+      - name: Build Windows host target
+        run: cargo build --workspace --release --locked
+
+  macos-host-build:
+    if: vars.ENABLE_HOST_PLATFORM_BUILDS == 'true'
+    needs: quality
+    runs-on: macos-x86_64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust build tools
+        run: python -m pip install "cmake>=3.26,<4"
+
+      - name: Build macOS host target
+        run: cargo build --workspace --release --locked
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [checks, bundle-runtime]
+    needs: [quality, linux-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -136,6 +229,17 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-release-cargo-${{ hashFiles('**/Cargo.lock', '.gitea/workflows/ci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-release-cargo-
 
       - name: Install Rust build tools
         run: python -m pip install "cmake>=3.26,<4"
@@ -183,8 +287,14 @@ jobs:
       - name: Build Rust workspace
         run: cargo build --workspace --release --locked
 
-      - name: Build bundled clab runtime
-        run: packaging/build-embedded-runtime.sh "dist/clab-runtime-${GITHUB_REF_NAME}-linux-x86_64"
+      - name: Download verified Linux runtime artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: linux-clab-runtime
+          path: dist
+
+      - name: Verify downloaded Linux runtime checksum
+        run: sha256sum --check dist/clab-runtime-linux-x86_64.tar.gz.sha256
 
       - name: Package release artifacts
         run: |
