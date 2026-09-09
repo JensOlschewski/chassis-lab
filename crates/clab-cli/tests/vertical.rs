@@ -63,6 +63,8 @@ fn simulation(path: &std::path::Path) {
             .create("adams_ids")
             .unwrap();
     }
+    drop(results);
+    file.close().unwrap();
 }
 fn channel(channels: &Group, name: &str, values: &[f64], offset: f64) {
     let group = channels.create_group(name).unwrap();
@@ -135,6 +137,16 @@ fn measurement(path: &std::path::Path) {
         }
         string(&group, "value", value);
     }
+    drop(info);
+    drop(channels);
+    drop(measurements);
+    file.close().unwrap();
+}
+fn closed_fixture(path: &std::path::Path, write: fn(&std::path::Path)) {
+    let staging = path.with_extension("fixture.h5");
+    write(&staging);
+    fs::copy(&staging, path).unwrap();
+    fs::remove_file(staging).unwrap();
 }
 fn config(path: &std::path::Path, measurement: &str, omit: bool) {
     let mut signals = String::new();
@@ -151,11 +163,11 @@ fn config(path: &std::path::Path, measurement: &str, omit: bool) {
             signals.push_str(&format!("[vertical.signals.{corner}_{name}]\nentity = \"{corner}\"\ncomponent = \"{component}\"\nunit = \"mm\"\n"));
         }
     }
-    fs::write(path,format!("[case]\nname=\"fixture\"\nvariant=\"V\"\nloadcase=\"L\"\n[physics]\ngravity=9.80665\n[svc.inputs]\nsimulation_hdf5=\"simulation.h5\"\n[svc.signals.s]\nentity=\"x\"\ncomponent=\"x\"\nunit=\"mm\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
+    fs::write(path,format!("[case]\nname=\"fixture\"\nvariant=\"V\"\nloadcase=\"L\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
 }
 fn command(config: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
-    command.args(["validate", "vertical"]).arg(config);
+    command.args(["validate", "-t", "vertical"]).arg(config);
     command
 }
 
@@ -164,20 +176,48 @@ fn validates_normalized_hdf5_with_embedded_python_and_safe_outputs() {
     let directory = tempdir().unwrap();
     let simulation_path = directory.path().join("simulation.h5");
     let measurement_path = directory.path().join("measurement.h5");
-    simulation(&simulation_path);
-    measurement(&measurement_path);
+    closed_fixture(&simulation_path, simulation);
+    closed_fixture(&measurement_path, measurement);
     let config_path = directory.path().join("case.toml");
     config(&config_path, "measurement.h5", false);
-    let json = directory.path().join("report.json");
-    let csv = directory.path().join("report.csv");
-    let svg = directory.path().join("plot.svg");
+    let check = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args(["check", config_path.to_str().unwrap()])
+        .env("PYTHONHOME", "/path/that/does/not/exist")
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(!directory.path().join("reports").exists());
+    let vertical_output = directory.path().join("vertical-reports");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "validate",
+            config_path.to_str().unwrap(),
+            "-t",
+            "vertical",
+            "--output-dir",
+            vertical_output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(vertical_output.join("knc-vertical.json").is_file());
+    assert!(!vertical_output.join("svc.json").exists());
+
+    let output = directory.path().join("reports");
+    let json = output.join("knc-vertical.json");
+    let csv = output.join("knc-vertical.csv");
+    let svg = output.join("knc-vertical.svg");
     let success = command(&config_path)
-        .arg("--json-output")
-        .arg(&json)
-        .arg("--csv-output")
-        .arg(&csv)
-        .arg("--plot-output")
-        .arg(&svg)
+        .arg("--output-dir")
+        .arg(&output)
         .output()
         .unwrap();
     assert!(
@@ -192,16 +232,16 @@ fn validates_normalized_hdf5_with_embedded_python_and_safe_outputs() {
             .contains("measurement_hdf5")
     );
     let rejected = command(&config_path)
-        .arg("--json-output")
-        .arg(&json)
+        .arg("--output-dir")
+        .arg(&output)
         .output()
         .unwrap();
     assert_eq!(rejected.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("already exists"));
     assert!(
         command(&config_path)
-            .arg("--json-output")
-            .arg(&json)
+            .arg("--output-dir")
+            .arg(&output)
             .arg("--force")
             .output()
             .unwrap()
@@ -229,4 +269,77 @@ fn validates_normalized_hdf5_with_embedded_python_and_safe_outputs() {
     let missing_result = command(&missing).output().unwrap();
     assert_eq!(missing_result.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&missing_result.stderr).contains("mapping missing"));
+}
+
+#[test]
+fn defaults_to_all_configured_domains() {
+    let directory = tempdir().unwrap();
+    closed_fixture(&directory.path().join("simulation.h5"), simulation);
+    closed_fixture(&directory.path().join("measurement.h5"), measurement);
+    let vertical_path = directory.path().join("vertical.toml");
+    config(&vertical_path, "measurement.h5", false);
+    let vertical = fs::read_to_string(&vertical_path).unwrap();
+    let vertical = &vertical[vertical.find("[vertical.inputs]").unwrap()..];
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let svc_simulation = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../clab-converter/examples/example-svc.h5");
+    let svc = fs::read_to_string(examples.join("example-config.toml"))
+        .unwrap()
+        .replace(
+            "\"example-signals.toml\"",
+            &format!("\"{}\"", examples.join("example-signals.toml").display()),
+        )
+        .replace(
+            "\"example-measures.json\"",
+            &format!("\"{}\"", examples.join("example-measures.json").display()),
+        )
+        .replace(
+            "\"../crates/clab-converter/examples/example-svc.h5\"",
+            &format!("\"{}\"", svc_simulation.display()),
+        );
+    let case = directory.path().join("case.toml");
+    fs::write(&case, format!("{svc}\n{vertical}")).unwrap();
+    let vertical_output = directory.path().join("vertical-reports");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "validate",
+            case.to_str().unwrap(),
+            "-t",
+            "vertical",
+            "--output-dir",
+            vertical_output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(vertical_output.join("knc-vertical.json").is_file());
+    assert!(!vertical_output.join("svc.json").exists());
+    let output = directory.path().join("reports");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "validate",
+            case.to_str().unwrap(),
+            "--output-dir",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    for name in [
+        "svc.json",
+        "svc.csv",
+        "knc-vertical.json",
+        "knc-vertical.csv",
+        "knc-vertical.svg",
+    ] {
+        assert!(output.join(name).is_file(), "missing {name}");
+    }
 }

@@ -1,5 +1,6 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{Shell, generate};
 
 mod check;
 mod convert;
@@ -23,16 +24,15 @@ enum Command {
     Inspect(inspect::InspectArgs),
     /// Convert a supported input to HDF5.
     Convert(convert::ConvertArgs),
+    /// Generate shell completion scripts.
+    Completion { shell: Shell },
 }
 
 fn main() {
     if let Err(error) = run(Cli::parse()) {
         eprintln!("error: {error:#}");
         std::process::exit(
-            if error
-                .downcast_ref::<validate::svc::ToleranceFailure>()
-                .is_some()
-            {
+            if error.downcast_ref::<validate::ToleranceFailure>().is_some() {
                 1
             } else {
                 2
@@ -47,5 +47,9 @@ fn run(cli: Cli) -> Result<()> {
         Command::Check(args) => check::check(args),
         Command::Inspect(args) => inspect::inspect(args),
         Command::Convert(args) => convert::convert(args),
+        Command::Completion { shell } => {
+            generate(shell, &mut Cli::command(), "clab", &mut std::io::stdout());
+            Ok(())
+        }
     }
 }
