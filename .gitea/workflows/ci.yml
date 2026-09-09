@@ -97,19 +97,27 @@ jobs:
 
       - name: Smoke test Linux runtime in clean Ubuntu container
         run: |
-          docker run --rm --pull=missing -i \
-            -v "$GITHUB_WORKSPACE:/fixtures:ro" \
+          tar -czf - \
+            dist/clab-runtime-linux-x86_64.tar.gz \
+            crates/clab-converter/examples/example-svc.res \
+            crates/clab-converter/examples/example-vertical.res \
+            crates/clab-converter/examples/runtime-vertical.acd \
+            examples/runtime-smoke.toml \
+            examples/example-signals.toml \
+            examples/example-measures.json \
+          | docker run --rm --pull=missing -i \
             ubuntu:24.04 \
             bash -ceu '
-              mkdir /tmp/clab-runtime /tmp/smoke
-              tar -xzf - -C /tmp/clab-runtime
+              mkdir /tmp/input /tmp/clab-runtime /tmp/smoke
+              tar -xzf - -C /tmp/input
+              tar -xzf /tmp/input/dist/clab-runtime-linux-x86_64.tar.gz -C /tmp/clab-runtime
               bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
-              cp /fixtures/crates/clab-converter/examples/example-svc.res /tmp/smoke/
-              cp /fixtures/crates/clab-converter/examples/example-vertical.res /tmp/smoke/
-              cp /fixtures/crates/clab-converter/examples/runtime-vertical.acd /tmp/smoke/
-              cp /fixtures/examples/runtime-smoke.toml /tmp/smoke/
-              cp /fixtures/examples/example-signals.toml /tmp/smoke/
-              cp /fixtures/examples/example-measures.json /tmp/smoke/
+              cp /tmp/input/crates/clab-converter/examples/example-svc.res /tmp/smoke/
+              cp /tmp/input/crates/clab-converter/examples/example-vertical.res /tmp/smoke/
+              cp /tmp/input/crates/clab-converter/examples/runtime-vertical.acd /tmp/smoke/
+              cp /tmp/input/examples/runtime-smoke.toml /tmp/smoke/
+              cp /tmp/input/examples/example-signals.toml /tmp/smoke/
+              cp /tmp/input/examples/example-measures.json /tmp/smoke/
               cd /tmp/smoke
               env -i \
                 PATH="$bundle/bin:/usr/bin:/bin" \
