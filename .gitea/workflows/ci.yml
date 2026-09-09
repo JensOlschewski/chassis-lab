@@ -176,9 +176,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Build Windows host target
         run: cargo build --workspace --release --locked
 
@@ -189,9 +186,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
 
       - name: Build macOS host target
         run: cargo build --workspace --release --locked
