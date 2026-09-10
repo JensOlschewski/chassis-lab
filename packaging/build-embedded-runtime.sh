@@ -6,6 +6,9 @@ lock="$root/packaging/embedded-runtime-linux-x86_64.lock"
 output=${1:-"$root/dist/embed-bundle-linux-x86_64"}
 output=$(realpath -m "$output")
 download="$output/.wheels"
+package_version=$(awk -F'"' '/^version = / { print $2; exit }' "$root/Cargo.toml")
+source_revision=$(git -C "$root" rev-parse HEAD 2>/dev/null || printf 'unknown')
+lock_sha256=$(sha256sum "$lock" | awk '{print $1}')
 
 rm -rf "$output"
 mkdir -p "$output/bin" "$output/licenses" "$download"
@@ -59,6 +62,36 @@ rm -f "$output/bin/f2py" "$output/bin/fonttools" "$output/bin/numpy-config" \
     "$output/bin/pyftmerge" "$output/bin/pyftsubset" "$output/bin/ttx"
 
 python="$output/bin/python3.12"
+"$python" - "$output/manifest.json" "$package_version" "$source_revision" \
+    "$lock_sha256" "$lock" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest_path = pathlib.Path(sys.argv[1])
+manifest = {
+    "schema_version": 1,
+    "product": "clab",
+    "product_version": sys.argv[2],
+    "target": "x86_64-unknown-linux-gnu",
+    "platform": "linux-x86_64",
+    "build_profile": "release",
+    "source_revision": sys.argv[3],
+    "runtime": {
+        "implementation": "CPython",
+        "version": "3.12",
+        "lock_file": pathlib.Path(sys.argv[5]).name,
+        "lock_sha256": sys.argv[4],
+    },
+    "layout": {
+        "executable": "bin/clab",
+        "embedded_python": "bin/python3.12",
+        "licenses": "licenses/",
+        "checksums": "checksums.sha256",
+    },
+}
+manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+PY
 "$python" - <<'PY' "$output/licenses"
 import pathlib
 import shutil
@@ -74,6 +107,8 @@ for source in pathlib.Path(sys.prefix).rglob("*.dist-info"):
 PY
 
 rm -rf "$download"
+(cd "$output" && find . -type f ! -name checksums.sha256 -print0 | sort -z | xargs -0 sha256sum) \
+    > "$output/checksums.sha256"
 tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
     -cf - -C "$(dirname "$output")" "$(basename "$output")" | gzip -n > "$output.tar.gz"
 sha256sum "$output.tar.gz" > "$output.tar.gz.sha256"
