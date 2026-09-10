@@ -26,7 +26,7 @@ fn inspects_svc_json_and_filters_signals() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("example-simulation-svc.res"));
     assert!(stdout.contains("format version: 1"));
-    assert!(stdout.contains("samples: 1\nsignals: 25"));
+    assert!(stdout.contains("samples: 1\nsignals: 26"));
     assert!(stdout.contains("ENTITY\tCOMPONENT\tUNIT\tADAMS ID"));
     assert!(stdout.contains("example.geometry\twheelbase\tmm\t5"));
     assert_eq!(stdout.lines().filter(|line| line.contains('\t')).count(), 2);

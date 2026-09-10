@@ -227,10 +227,25 @@
       "name": "toe_camber",
       "object_id": null,
       "source_path": "example.toe_camber"
+    },
+    {
+      "components": [
+        {
+          "adams_id": 26,
+          "name": "metadata_marker",
+          "units": "none",
+          "values": [
+            0.0
+          ]
+        }
+      ],
+      "name": "svc_output",
+      "object_id": null,
+      "source_path": "example.svc_output"
     }
   ],
   "sample_count": 1,
   "schema_version": 1,
   "source_file": "examples/example-simulation-svc.res",
-  "values_per_sample": 25
+  "values_per_sample": 26
 }
