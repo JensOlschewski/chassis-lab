@@ -2,7 +2,7 @@
 
 ## Current and target pipeline
 
-Version `0.3.1` is the observable parity baseline during the Rust CLI rewrite.
+Version `0.3.1` remains the observable parity baseline for the Rust CLI rewrite.
 Its current pipeline is:
 
 ```text
@@ -80,8 +80,8 @@ Public exit semantics remain:
 
 ## CLI parity contract
 
-The Rust CLI replaces the Python entry point without dropping `0.3.1`
-capabilities:
+The Rust CLI replaces the Python entry point while preserving the `0.3.1`
+capability baseline:
 
 | `0.3.1` command | Target command | Output and side effects |
 |---|---|---|
@@ -94,7 +94,6 @@ capabilities:
 Vertical migration: `[vertical.inputs].measurement_hdf5` is required. Convert
 legacy ACD inputs with `clab convert`; validation never reads raw ACD.
 | `clab convert-res INPUT` | `clab convert INPUT` | Writes normalized HDF5 |
-| `clab create-run CONFIG` | `clab run create CONFIG` | Creates isolated run directory and manifest |
 
 `clab inspect FILE` accepts normalized simulation or measurement HDF5 files
 (`.h5` or `.hdf5`) only. Convert raw `.res` or `.acd` inputs first with
