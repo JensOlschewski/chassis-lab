@@ -234,3 +234,84 @@ jobs:
           path: |
             dist/embed-bundle-windows-x86_64.zip
             dist/embed-bundle-windows-x86_64.zip.sha256
+
+  macos-runtime:
+    needs: quality
+    runs-on: macos-26-intel
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Cache Rust runtime build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-macos-runtime-cargo-${{ hashFiles('**/Cargo.lock', 'packaging/embedded-runtime-macos-x86_64.lock', 'packaging/build-embedded-runtime-macos.sh', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-macos-runtime-cargo-
+
+      - name: Install Rust build tools
+        run: python3 -m pip install "cmake>=3.26,<4"
+
+      - name: Build Intel macOS runtime archive
+        run: packaging/build-embedded-runtime-macos.sh dist/embed-bundle-macos-x86_64
+
+      - name: Verify macOS runtime checksum
+        run: shasum -a 256 --check dist/embed-bundle-macos-x86_64.tar.gz.sha256
+
+      - name: Smoke test macOS runtime from clean extraction
+        shell: bash
+        run: |
+          smoke="$RUNNER_TEMP/clab-macos-smoke"
+          rm -rf "$smoke"
+          mkdir -p "$smoke"
+          tar -xzf dist/embed-bundle-macos-x86_64.tar.gz -C "$smoke"
+          bundle="$smoke/embed-bundle-macos-x86_64"
+          env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" \
+            PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned \
+            DYLD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
+          env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" \
+            PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned \
+            DYLD_LIBRARY_PATH=/poisoned "$bundle/bin/embed-smoke" "$smoke/embed-smoke.svg"
+          cp crates/clab-converter/examples/example-svc.res "$smoke/"
+          cp crates/clab-converter/examples/example-vertical.res "$smoke/"
+          cp crates/clab-converter/examples/runtime-vertical.acd "$smoke/"
+          cp examples/runtime-smoke.toml "$smoke/"
+          cp examples/example-signals.toml "$smoke/"
+          cp examples/example-measures.json "$smoke/"
+          cd "$smoke"
+          env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" \
+            PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned \
+            DYLD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-svc.res -o svc.simulation.h5
+          env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" \
+            PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned \
+            DYLD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-vertical.res -o vertical.simulation.h5
+          env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" \
+            PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned \
+            DYLD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert runtime-vertical.acd -o vertical.measurement.h5
+          env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" \
+            PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned \
+            DYLD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" validate runtime-smoke.toml --output-dir reports
+          test -s reports/svc.json
+          test -s reports/knc-vertical.json
+
+      - name: Upload macOS runtime artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-clab-runtime
+          path: |
+            dist/embed-bundle-macos-x86_64.tar.gz
+            dist/embed-bundle-macos-x86_64.tar.gz.sha256
