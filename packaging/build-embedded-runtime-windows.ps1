@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot ".."))
 $lock = Join-Path $root "packaging/embedded-runtime-windows-x86_64.lock"
