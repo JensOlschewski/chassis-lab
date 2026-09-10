@@ -1,0 +1,13 @@
+CPYTHON_URL=https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz
+CPYTHON_SHA256=7c45c9622400d578709a9b2cddbe8124cc21d382409d9f13406d706d28e31b14
+WHEEL numpy numpy-2.5.1-cp312-cp312-win_amd64.whl f7d60026c0bdb1380e83bfa7a0419c4577ee4b9a08880afcb6dadeb74c649fa2
+WHEEL matplotlib matplotlib-3.11.1-cp312-cp312-win_amd64.whl 88a2a27dd9691ae448dfae4b26f59036be90c3c28757edd3553a29559d00859f
+WHEEL contourpy contourpy-1.3.3-cp312-cp312-win_amd64.whl 8153b8bfc11e1e4d75bcb0bff1db232f9e10b274e0929de9d608027e0d34ff8b
+WHEEL cycler cycler-0.12.1-py3-none-any.whl 85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30
+WHEEL fonttools fonttools-4.64.0-cp312-cp312-win_amd64.whl 06b6409b868494556a831ae33b2d9a090476c37516b38d70f45a9720b460d423
+WHEEL kiwisolver kiwisolver-1.5.1-cp312-cp312-win_amd64.whl 06a6917674de9e0fe3f66f5430787f59a9f2ddb64af9b714eaec547e29ef5c19
+WHEEL packaging packaging-26.3-py3-none-any.whl d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+WHEEL pillow pillow-12.3.0-cp312-cp312-win_amd64.whl a2b55dd6b2a4c4b7d87ffa56bdb33fdc5fdb9a462173861a7bc097f17d91cb09
+WHEEL pyparsing pyparsing-3.3.2-py3-none-any.whl 850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d
+WHEEL python-dateutil python_dateutil-2.9.0.post0-py2.py3-none-any.whl a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+WHEEL six six-1.17.0-py2.py3-none-any.whl 4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
