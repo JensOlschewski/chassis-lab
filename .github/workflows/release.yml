@@ -61,6 +61,17 @@ jobs:
       - name: Install build tools
         run: python -m pip install "cmake>=3.26,<4"
 
+      - name: Set up MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Select Windows CMake generator
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV 'CMAKE_GENERATOR=Ninja'
+
       - name: Build CLI
         run: cargo build -p clab-cli --release --locked --target "${{ matrix.target }}"
 

@@ -176,6 +176,15 @@ jobs:
       - name: Install Rust build tools
         run: python -m pip install "cmake>=3.26,<4"
 
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Select Windows CMake generator
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV 'CMAKE_GENERATOR=Ninja'
+
       - name: Build Windows runtime archive
         shell: pwsh
         run: .\packaging\build-embedded-runtime-windows.ps1 dist\embed-bundle-windows-x86_64
