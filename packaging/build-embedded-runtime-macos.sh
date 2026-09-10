@@ -4,7 +4,9 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 lock="$root/packaging/embedded-runtime-macos-x86_64.lock"
 output=${1:-"$root/dist/embed-bundle-macos-x86_64"}
-output=$(realpath -m "$output")
+if [[ "$output" != /* ]]; then
+    output="$PWD/$output"
+fi
 download="$output/.wheels"
 package_version=$(awk -F'"' '/^version = / { print $2; exit }' "$root/Cargo.toml")
 source_revision=$(git -C "$root" rev-parse HEAD 2>/dev/null || printf 'unknown')
