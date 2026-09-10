@@ -40,7 +40,9 @@ while read -r kind package filename digest; do
     version=${filename#*-}
     version=${version%%-*}
     python="$output/bin/python3.12"
-    "$python" -m pip download --only-binary=:all: --no-deps --dest "$download" "$package==$version"
+    "$python" -m pip download --only-binary=:all: --no-deps \
+        --platform macosx_10_13_x86_64 --python-version 3.12 \
+        --implementation cp --abi cp312 --dest "$download" "$package==$version"
     printf '%s  %s\n' "$digest" "$download/$filename" | shasum -a 256 -c --status
     "$python" -m pip install --no-index --no-deps --disable-pip-version-check \
         "$download/$filename"
