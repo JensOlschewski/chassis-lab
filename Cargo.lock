@@ -139,6 +139,7 @@ dependencies = [
  "encoding_rs",
  "hdf5-metno",
  "pyo3",
+ "serde_json",
  "tempfile",
  "thiserror",
 ]
@@ -148,6 +149,7 @@ name = "clab-core"
 version = "0.4.0"
 dependencies = [
  "hdf5-metno",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

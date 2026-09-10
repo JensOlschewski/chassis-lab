@@ -282,7 +282,7 @@ fn defaults_to_all_configured_domains() {
     let vertical = &vertical[vertical.find("[vertical.inputs]").unwrap()..];
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let svc_simulation = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../clab-converter/examples/example-svc.h5");
+        .join("../../examples/example-simulation-svc.json");
     let svc = fs::read_to_string(examples.join("example-config.toml"))
         .unwrap()
         .replace(
@@ -290,11 +290,14 @@ fn defaults_to_all_configured_domains() {
             &format!("\"{}\"", examples.join("example-signals.toml").display()),
         )
         .replace(
-            "\"example-measures.json\"",
-            &format!("\"{}\"", examples.join("example-measures.json").display()),
+            "\"example-measurement-svc.json\"",
+            &format!(
+                "\"{}\"",
+                examples.join("example-measurement-svc.json").display()
+            ),
         )
         .replace(
-            "\"../crates/clab-converter/examples/example-svc.h5\"",
+            "\"example-simulation-svc.json\"",
             &format!("\"{}\"", svc_simulation.display()),
         );
     let case = directory.path().join("case.toml");

@@ -157,7 +157,7 @@ domain configurations can add vertical inputs using the same structure:
 ```toml
 [svc.inputs]
 signal_map = "example-signals.toml"
-simulation_hdf5 = "..."
+simulation_json = "..."
 measurement_reference = "...json"
 ```
 

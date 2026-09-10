@@ -5,9 +5,10 @@ use clap::Args;
 
 #[derive(Debug, Args)]
 pub(crate) struct ConvertArgs {
-    /// RES simulation result or ACD measurement input.
+    /// SVC RES, vertical RES, or ACD measurement input.
     input: PathBuf,
-    /// Output file. Defaults to INPUT.simulation.h5 or INPUT.measurement.h5.
+    /// Output file. Defaults to INPUT.json for SVC RES, INPUT.simulation.h5 for
+    /// vertical RES, or INPUT.measurement.h5 for ACD.
     #[arg(short, long, value_name = "OUTPUT")]
     output: Option<PathBuf>,
     /// Replace an existing output file.
@@ -17,6 +18,7 @@ pub(crate) struct ConvertArgs {
 
 #[derive(Clone, Copy)]
 enum InputKind {
+    SvcRes,
     Res,
     Acd,
 }
@@ -36,7 +38,16 @@ impl InputKind {
             anyhow::anyhow!("input file extension is not valid UTF-8; expected .res or .acd")
         })?;
         if extension.eq_ignore_ascii_case("res") {
-            Ok(Self::Res)
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or_default();
+            let stem = stem.to_ascii_lowercase();
+            if stem == "svc" || stem.ends_with("_svc") || stem.ends_with("-svc") {
+                Ok(Self::SvcRes)
+            } else {
+                Ok(Self::Res)
+            }
         } else if extension.eq_ignore_ascii_case("acd") {
             Ok(Self::Acd)
         } else {
@@ -46,6 +57,7 @@ impl InputKind {
 
     fn default_output(self, input: &Path) -> PathBuf {
         match self {
+            Self::SvcRes => input.with_extension("json"),
             Self::Res => input.with_extension("simulation.h5"),
             Self::Acd => input.with_extension("measurement.h5"),
         }
@@ -53,6 +65,7 @@ impl InputKind {
 
     fn output_type(self) -> &'static str {
         match self {
+            Self::SvcRes => "SVC JSON",
             Self::Res => "simulation HDF5",
             Self::Acd => "measurement HDF5",
         }
@@ -64,9 +77,21 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     let output = args
         .output
         .unwrap_or_else(|| kind.default_output(&args.input));
+    if matches!(kind, InputKind::SvcRes)
+        && !output
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+    {
+        bail!(
+            "SVC RES output must use .json extension: {}",
+            output.display()
+        );
+    }
     validate_output(&args.input, &output, args.force)?;
 
     match kind {
+        InputKind::SvcRes => clab_converter::convert_svc_res(&args.input, &output, args.force),
         InputKind::Res => clab_converter::convert_res(&args.input, &output, args.force),
         InputKind::Acd => {
             clab_converter::measurement_hdf5::import_acd(&args.input, &output, args.force)

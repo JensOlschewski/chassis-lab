@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 hdf5 = { package = "hdf5-metno", version = "0.13", features = ["static"] }
 serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
 toml = "0.9"
 
