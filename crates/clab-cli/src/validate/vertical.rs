@@ -324,7 +324,13 @@ fn initialize_python_once() -> Result<()> {
         .parent()
         .and_then(Path::parent)
         .filter(|root| root.join("lib/python3.12").is_dir())
-        .map(PathBuf::from);
+        .map(|root| {
+            if cfg!(windows) {
+                root.join("lib/python3.12")
+            } else {
+                PathBuf::from(root)
+            }
+        });
     let Some(runtime) = runtime else {
         Python::initialize();
         return Ok(());
