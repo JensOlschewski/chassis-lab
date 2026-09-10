@@ -144,3 +144,85 @@ jobs:
           path: |
             dist/clab-runtime-linux-x86_64.tar.gz
             dist/clab-runtime-linux-x86_64.tar.gz.sha256
+
+  windows-runtime:
+    needs: quality
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Cache Rust runtime build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~\.cargo\registry
+            ~\.cargo\git
+            target
+          key: ${{ runner.os }}-windows-runtime-cargo-${{ hashFiles('**/Cargo.lock', 'packaging/embedded-runtime-windows-x86_64.lock', 'packaging/build-embedded-runtime-windows.ps1', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-windows-runtime-cargo-
+
+      - name: Install Rust build tools
+        run: python -m pip install "cmake>=3.26,<4"
+
+      - name: Select installed Visual Studio generator
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV 'CMAKE_GENERATOR=Visual Studio 17 2022'
+
+      - name: Build Windows runtime archive
+        shell: pwsh
+        run: .\packaging\build-embedded-runtime-windows.ps1 dist\embed-bundle-windows-x86_64
+
+      - name: Verify Windows runtime checksum
+        shell: pwsh
+        run: |
+          $expected = (Get-Content dist\embed-bundle-windows-x86_64.zip.sha256).Split()[0]
+          $actual = (Get-FileHash dist\embed-bundle-windows-x86_64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expected -ne $actual) { throw "Windows archive checksum mismatch" }
+
+      - name: Smoke test Windows runtime from clean extraction
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP "clab-windows-smoke"
+          Remove-Item $smoke -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive dist\embed-bundle-windows-x86_64.zip -DestinationPath $smoke
+          $bundle = Join-Path $smoke "embed-bundle-windows-x86_64"
+          $env:Path = "$(Join-Path $bundle 'bin');$env:SystemRoot\System32;$env:SystemRoot"
+          $env:PYTHONHOME = "C:\poisoned"
+          $env:PYTHONPATH = "C:\poisoned"
+          $env:VIRTUAL_ENV = "C:\poisoned"
+          & (Join-Path $bundle "bin\clab.exe") --version
+          & (Join-Path $bundle "bin\embed-smoke.exe") (Join-Path $env:RUNNER_TEMP "embed-smoke.svg")
+          Copy-Item crates\clab-converter\examples\example-svc.res $smoke
+          Copy-Item crates\clab-converter\examples\example-vertical.res $smoke
+          Copy-Item crates\clab-converter\examples\runtime-vertical.acd $smoke
+          Copy-Item examples\runtime-smoke.toml $smoke
+          Copy-Item examples\example-signals.toml $smoke
+          Copy-Item examples\example-measures.json $smoke
+          Push-Location $smoke
+          & (Join-Path $bundle "bin\clab.exe") convert example-svc.res -o svc.simulation.h5
+          & (Join-Path $bundle "bin\clab.exe") convert example-vertical.res -o vertical.simulation.h5
+          & (Join-Path $bundle "bin\clab.exe") convert runtime-vertical.acd -o vertical.measurement.h5
+          & (Join-Path $bundle "bin\clab.exe") validate runtime-smoke.toml --output-dir reports
+          if (-not (Test-Path reports\svc.json)) { throw "missing SVC JSON report" }
+          if (-not (Test-Path reports\knc-vertical.json)) { throw "missing vertical JSON report" }
+          Pop-Location
+
+      - name: Upload Windows runtime artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-clab-runtime
+          path: |
+            dist/embed-bundle-windows-x86_64.zip
+            dist/embed-bundle-windows-x86_64.zip.sha256
