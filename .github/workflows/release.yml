@@ -26,7 +26,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate release tag
         if: github.event_name == 'push'
@@ -38,7 +38,7 @@ jobs:
           test "$(sed -n 's/^version = "\([^"]*\)"/\1/p' py-chassislab/pyproject.toml | head -n 1)" = "${RELEASE_TAG#v}"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -48,7 +48,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -80,7 +80,7 @@ jobs:
         run: Compress-Archive -Path "target/${{ matrix.target }}/release/clab.exe" -DestinationPath "${{ matrix.archive }}"
 
       - name: Upload release package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-${{ matrix.target }}
           path: ${{ matrix.archive }}
@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download release packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: package-*
           path: dist
@@ -111,7 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download release packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: package-*
           path: dist
