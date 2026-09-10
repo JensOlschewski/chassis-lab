@@ -6,6 +6,13 @@ pub struct AdamsResult {
 }
 
 impl AdamsResult {
+    /// SVC result files contain a dedicated `svc_output` request entity.
+    pub fn is_svc(&self) -> bool {
+        self.entities
+            .iter()
+            .any(|entity| entity.name.eq_ignore_ascii_case("svc_output"))
+    }
+
     /// Iterates over every value series and its owning entity.
     pub fn values(&self) -> impl Iterator<Item = (&Entity, &Component)> {
         self.entities.iter().flat_map(|entity| {

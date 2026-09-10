@@ -21,6 +21,20 @@ const MINIMAL_RES: &str = r#"<Result>
 </Result>
 "#;
 
+const MINIMAL_VERTICAL_RES: &str = r#"<Result>
+  <Entity type="request" name="ride_heights" entity="vehicle.ride_heights" objectId="42">
+    <Component name="front_left" unitsValue="mm" id="2" />
+    <Component name="front_right" unitsValue="mm" id="1" />
+  </Entity>
+  <Step type="input">
+    360.0 361.0
+  </Step>
+  <Step type="input">
+    359.5 360.5
+  </Step>
+</Result>
+"#;
+
 const MINIMAL_ACD: &str = "FileInfo: ASCII3\nTime\tWheel\tstring\tDescription\n0\t10\tfloat\tOffset\ntime\ttravel\tstring\tName\ns\tmm\tstring\tUnits\nNaN\tNaN\tstring\tKPoly\n0\t1\n";
 
 fn convert(input: &Path) -> Command {
@@ -33,7 +47,7 @@ fn convert(input: &Path) -> Command {
 fn converts_res_to_default_simulation_hdf5() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("shared.res");
-    fs::write(&input, MINIMAL_RES).unwrap();
+    fs::write(&input, MINIMAL_VERTICAL_RES).unwrap();
 
     let result = convert(&input).output().unwrap();
 
@@ -49,13 +63,13 @@ fn converts_res_to_default_simulation_hdf5() {
 #[test]
 fn converts_svc_res_to_default_json() {
     let directory = tempdir().unwrap();
-    let input = directory.path().join("shared_svc.res");
+    let input = directory.path().join("shared.res");
     fs::write(&input, MINIMAL_RES).unwrap();
 
     let result = convert(&input).output().unwrap();
 
     assert!(result.status.success());
-    let output = directory.path().join("shared_svc.json");
+    let output = directory.path().join("shared.json");
     assert!(output.is_file());
     let document: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
@@ -89,7 +103,7 @@ fn uses_explicit_output() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("input.res");
     let output = directory.path().join("chosen.data");
-    fs::write(&input, MINIMAL_RES).unwrap();
+    fs::write(&input, MINIMAL_VERTICAL_RES).unwrap();
 
     let result = convert(&input).arg("-o").arg(&output).output().unwrap();
 
@@ -103,7 +117,7 @@ fn requires_force_to_replace_output() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("input.res");
     let output = directory.path().join("output.h5");
-    fs::write(&input, MINIMAL_RES).unwrap();
+    fs::write(&input, MINIMAL_VERTICAL_RES).unwrap();
     fs::write(&output, "preserve me").unwrap();
 
     let rejected = convert(&input).arg("-o").arg(&output).output().unwrap();
@@ -155,7 +169,7 @@ fn rejects_missing_input_and_output_parent() {
     );
 
     let input = directory.path().join("input.res");
-    fs::write(&input, MINIMAL_RES).unwrap();
+    fs::write(&input, MINIMAL_VERTICAL_RES).unwrap();
     let missing_parent = convert(&input)
         .arg("-o")
         .arg(directory.path().join("missing/output.h5"))
@@ -173,7 +187,7 @@ fn rejects_missing_input_and_output_parent() {
 fn rejects_input_as_output_even_with_force() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("input.res");
-    fs::write(&input, MINIMAL_RES).unwrap();
+    fs::write(&input, MINIMAL_VERTICAL_RES).unwrap();
 
     let result = convert(&input)
         .arg("-o")
@@ -188,7 +202,7 @@ fn rejects_input_as_output_even_with_force() {
             .unwrap()
             .contains("must not be the same as input")
     );
-    assert_eq!(fs::read_to_string(input).unwrap(), MINIMAL_RES);
+    assert_eq!(fs::read_to_string(input).unwrap(), MINIMAL_VERTICAL_RES);
 }
 
 #[cfg(unix)]

@@ -38,12 +38,9 @@ impl InputKind {
             anyhow::anyhow!("input file extension is not valid UTF-8; expected .res or .acd")
         })?;
         if extension.eq_ignore_ascii_case("res") {
-            let stem = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or_default();
-            let stem = stem.to_ascii_lowercase();
-            if stem == "svc" || stem.ends_with("_svc") || stem.ends_with("-svc") {
+            let result = clab_converter::parser::parse_file(path)
+                .with_context(|| format!("failed to inspect RES file '{}'", path.display()))?;
+            if result.is_svc() {
                 Ok(Self::SvcRes)
             } else {
                 Ok(Self::Res)
