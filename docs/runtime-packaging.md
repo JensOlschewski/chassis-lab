@@ -9,8 +9,8 @@ clab-vVERSION-PLATFORM/
 ├── bin/
 │   ├── clab                 # clab.exe on Windows
 │   ├── embed-smoke
-│   └── python3.12           # platform-specific Python launcher
-├── lib/                     # embedded Python and native libraries
+│   └── python3.12           # platform-specific Python launcher when exposed
+├── lib/python3.12/          # embedded Python and native libraries
 ├── licenses/                # dependency license inventory
 ├── manifest.json             # build and runtime provenance
 └── checksums.sha256          # files inside archive
@@ -21,7 +21,9 @@ clab-vVERSION-PLATFORM/
 Every archive must contain:
 
 - `bin/clab` or `bin/clab.exe`.
-- Embedded CPython and all required scientific wheels/native libraries.
+- Embedded CPython and all required scientific wheels/native libraries. Windows
+  keeps Python under `lib/python3.12/` and copies its load-time DLLs beside
+  `bin/clab.exe`.
 - `licenses/` with dependency license files.
 - `manifest.json` with schema version, product version, target triple, source
   revision, runtime version, lock-file name and SHA-256.
