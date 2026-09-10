@@ -5,11 +5,17 @@ use tempfile::tempdir;
 
 fn fixture_case(directory: &std::path::Path, failing: bool) -> std::path::PathBuf {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    let config = fs::read_to_string(root.join("example-config.toml")).unwrap();
-    let reference = fs::read_to_string(root.join("example-measures.json")).unwrap();
+    let config = fs::read_to_string(root.join("example-config.toml"))
+        .unwrap()
+        .split("\n[vertical.inputs]")
+        .next()
+        .unwrap()
+        .to_owned();
+    let reference = fs::read_to_string(root.join("example-measurement-svc.json")).unwrap();
     let simulation = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../clab-converter/examples/example-svc.h5");
+        .join("../../examples/example-simulation-svc.json");
     let signals = root.join("example-signals.toml");
+    let tolerances = root.join("example-svc-tolerances.toml");
     let reference = if failing {
         reference.replace("\"front_track_mm\": 1500.0", "\"front_track_mm\": 1490.0")
     } else {
@@ -19,7 +25,7 @@ fn fixture_case(directory: &std::path::Path, failing: bool) -> std::path::PathBu
     fs::write(&reference_path, reference).unwrap();
     let config = config
         .replace(
-            "\"../crates/clab-converter/examples/example-svc.h5\"",
+            "\"example-simulation-svc.json\"",
             &format!("\"{}\"", simulation.display()),
         )
         .replace(
@@ -27,7 +33,11 @@ fn fixture_case(directory: &std::path::Path, failing: bool) -> std::path::PathBu
             &format!("\"{}\"", signals.display()),
         )
         .replace(
-            "\"example-measures.json\"",
+            "\"example-svc-tolerances.toml\"",
+            &format!("\"{}\"", tolerances.display()),
+        )
+        .replace(
+            "\"example-measurement-svc.json\"",
             &format!("\"{}\"", reference_path.display()),
         );
     let path = directory.join("case.toml");
@@ -72,7 +82,7 @@ fn validates_svc_and_writes_deterministic_reports_without_python() {
     assert!(
         fs::read_to_string(&csv)
             .unwrap()
-            .starts_with("case,variant,loadcase,metric,unit")
+            .starts_with("case,loadcase,metric,unit")
     );
 
     let rejected = command(&config)

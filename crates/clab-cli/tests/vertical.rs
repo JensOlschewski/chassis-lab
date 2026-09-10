@@ -163,7 +163,7 @@ fn config(path: &std::path::Path, measurement: &str, omit: bool) {
             signals.push_str(&format!("[vertical.signals.{corner}_{name}]\nentity = \"{corner}\"\ncomponent = \"{component}\"\nunit = \"mm\"\n"));
         }
     }
-    fs::write(path,format!("[case]\nname=\"fixture\"\nvariant=\"V\"\nloadcase=\"L\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
+    fs::write(path,format!("[case]\nname=\"fixture\"\nloadcase=\"L\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
 }
 fn command(config: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
@@ -282,7 +282,7 @@ fn defaults_to_all_configured_domains() {
     let vertical = &vertical[vertical.find("[vertical.inputs]").unwrap()..];
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let svc_simulation = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../clab-converter/examples/example-svc.h5");
+        .join("../../examples/example-simulation-svc.json");
     let svc = fs::read_to_string(examples.join("example-config.toml"))
         .unwrap()
         .replace(
@@ -290,13 +290,24 @@ fn defaults_to_all_configured_domains() {
             &format!("\"{}\"", examples.join("example-signals.toml").display()),
         )
         .replace(
-            "\"example-measures.json\"",
-            &format!("\"{}\"", examples.join("example-measures.json").display()),
+            "\"example-measurement-svc.json\"",
+            &format!(
+                "\"{}\"",
+                examples.join("example-measurement-svc.json").display()
+            ),
         )
         .replace(
-            "\"../crates/clab-converter/examples/example-svc.h5\"",
+            "\"example-svc-tolerances.toml\"",
+            &format!(
+                "\"{}\"",
+                examples.join("example-svc-tolerances.toml").display()
+            ),
+        )
+        .replace(
+            "\"example-simulation-svc.json\"",
             &format!("\"{}\"", svc_simulation.display()),
         );
+    let svc = &svc[..svc.find("[vertical.inputs]").unwrap()];
     let case = directory.path().join("case.toml");
     fs::write(&case, format!("{svc}\n{vertical}")).unwrap();
     let vertical_output = directory.path().join("vertical-reports");

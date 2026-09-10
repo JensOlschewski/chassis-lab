@@ -1,5 +1,5 @@
 # Synthetic signal map used by example-config.toml.
-# Entity and component names must match converted HDF5 metadata exactly.
+# Entity and component names must match converted SVC JSON metadata exactly.
 
 [signals.front_left_wheel_load]
 entity = "example.wheel_loads"

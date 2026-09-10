@@ -17,16 +17,16 @@ fn inspect(path: &Path, arguments: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn inspects_simulation_hdf5_and_filters_signals() {
+fn inspects_svc_json_and_filters_signals() {
     let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../clab-converter/examples/example-svc.h5");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/example-simulation-svc.json");
     let output = inspect(&path, &["--match", "wheelbase"]);
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("source file: converter/examples/example-svc.res"));
-    assert!(stdout.contains("format version: 3"));
-    assert!(stdout.contains("samples: 1\nsignals: 25\nentities: 4"));
+    assert!(stdout.contains("example-simulation-svc.res"));
+    assert!(stdout.contains("format version: 1"));
+    assert!(stdout.contains("samples: 1\nsignals: 25"));
     assert!(stdout.contains("ENTITY\tCOMPONENT\tUNIT\tADAMS ID"));
     assert!(stdout.contains("example.geometry\twheelbase\tmm\t5"));
     assert_eq!(stdout.lines().filter(|line| line.contains('\t')).count(), 2);
@@ -35,12 +35,12 @@ fn inspects_simulation_hdf5_and_filters_signals() {
 #[test]
 fn inspects_measurement_hdf5_and_lists_channels() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../clab-converter/examples/example-vertical.h5");
+        .join("../../examples/example-measurement-vertical.h5");
     let output = inspect(&path, &["--signals"]);
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("source file: example-vertical.acd"));
+    assert!(stdout.contains("example-measurement-vertical.acd"));
     assert!(stdout.contains("format version: 1"));
     assert!(stdout.contains("samples: 6\nchannels: 17\ntest metadata: 5"));
     assert!(stdout.contains("encoding: utf-8-sig\ndialect: ascii3"));
@@ -90,8 +90,10 @@ fn rejects_raw_and_unsupported_extensions() {
         let output = inspect(&path, &[]);
 
         assert_eq!(output.status.code(), Some(2));
-        assert!(String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("clab inspect accepts only .h5 or .hdf5; convert raw .res or .acd inputs first with clab convert"));
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("clab inspect accepts .json, .h5, or .hdf5")
+        );
     }
 }

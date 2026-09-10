@@ -88,8 +88,8 @@ pub(crate) fn validate(config: &CaseConfig) -> Result<Reports> {
     let report = report(config, &response.comparisons)?;
     println!("Vertical trajectory comparison");
     println!(
-        "case: {} ({}, {}, {})",
-        config.name, config.variant, config.loadcase, vertical.setup.code
+        "case: {} ({}, {})",
+        config.name, config.loadcase, vertical.setup.code
     );
     for comparison in &response.comparisons {
         println!(
@@ -324,7 +324,13 @@ fn initialize_python_once() -> Result<()> {
         .parent()
         .and_then(Path::parent)
         .filter(|root| root.join("lib/python3.12").is_dir())
-        .map(PathBuf::from);
+        .map(|root| {
+            if cfg!(windows) {
+                root.join("lib/python3.12")
+            } else {
+                PathBuf::from(root)
+            }
+        });
     let Some(runtime) = runtime else {
         Python::initialize();
         return Ok(());
@@ -425,7 +431,7 @@ fn report(config: &CaseConfig, comparisons: &[Comparison]) -> Result<serde_json:
         inputs["signal_map"] = record(path)?;
     }
     Ok(
-        serde_json::json!({"schema_version": 1, "case": config.name, "variant": config.variant, "loadcase": config.loadcase, "setup_code": v.setup.code, "metrics": comparisons, "inputs": inputs, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}}),
+        serde_json::json!({"schema_version": 1, "case": config.name, "loadcase": config.loadcase, "setup_code": v.setup.code, "metrics": comparisons, "inputs": inputs, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}}),
     )
 }
 fn record(path: &Path) -> Result<serde_json::Value> {
@@ -439,7 +445,6 @@ fn csv_text(config: &CaseConfig, comparisons: &[Comparison]) -> Result<String> {
     let mut writer = csv::WriterBuilder::new().from_writer(Vec::new());
     writer.write_record([
         "case",
-        "variant",
         "loadcase",
         "setup_code",
         "corner",
@@ -463,7 +468,6 @@ fn csv_text(config: &CaseConfig, comparisons: &[Comparison]) -> Result<String> {
     for c in comparisons {
         writer.write_record([
             safe_cell(&config.name),
-            safe_cell(&config.variant),
             safe_cell(&config.loadcase),
             safe_cell(&v.setup.code),
             safe_cell(&c.corner),
