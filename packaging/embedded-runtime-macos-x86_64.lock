@@ -1,0 +1,13 @@
+CPYTHON_URL=https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-apple-darwin-install_only_stripped.tar.gz
+CPYTHON_SHA256=65b195c9cedc1fef6767f044f9822069adbd1bd9204d424ece4628776fdc04bb
+WHEEL numpy numpy-2.5.3-cp312-cp312-macosx_10_13_x86_64.whl cb189f09db39283b26bfd061ec16189e14f71c6755207f72a0f7540867afe5b9
+WHEEL matplotlib matplotlib-3.11.1-cp312-cp312-macosx_10_13_x86_64.whl e15ef41507f3d525f46154ac9e3ae785dacde9f20e593a25de8986267892ef74
+WHEEL contourpy contourpy-1.3.3-cp312-cp312-macosx_10_13_x86_64.whl b08a32ea2f8e42cf1d4be3169a98dd4be32bafe4f22b6c4cb4ba810fa9e5d2cb
+WHEEL cycler cycler-0.12.1-py3-none-any.whl 85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30
+WHEEL fonttools fonttools-4.64.0-cp312-cp312-macosx_10_13_x86_64.whl a8c631303bb1fd7be3067c47536a30ff1fcb4846d6008c112bc52a03f7cd6965
+WHEEL kiwisolver kiwisolver-1.5.1-cp312-cp312-macosx_10_13_x86_64.whl 0ebdef3eae5336568147c39a55be6a2036ffde53faa9ca2d978989ae7c2da12c
+WHEEL packaging packaging-26.3-py3-none-any.whl d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+WHEEL pillow pillow-12.3.0-cp312-cp312-macosx_10_13_x86_64.whl ba09209fbe443b4acccebe845d8a138b89a8f4fbaeedd44953490b5315d5e965
+WHEEL pyparsing pyparsing-3.3.2-py3-none-any.whl 850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d
+WHEEL python-dateutil python_dateutil-2.9.0.post0-py2.py3-none-any.whl a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+WHEEL six six-1.17.0-py2.py3-none-any.whl 4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
