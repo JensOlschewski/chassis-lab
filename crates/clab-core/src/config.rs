@@ -24,6 +24,7 @@ pub struct ValidationTolerances {
     pub absolute: BTreeMap<String, f64>,
     pub relative_percent: BTreeMap<String, f64>,
 }
+type ToleranceMaps = (BTreeMap<String, f64>, BTreeMap<String, f64>);
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidationConfig {
     pub reference: PathBuf,
@@ -408,15 +409,13 @@ fn signal_source(
         .map(|value| table(value, &format!("{where_}.mappings")))
         .transpose()?;
     let mappings_file = mappings_table.and_then(|table| table.get("file"));
-    let mappings_inline = mappings_table
-        .map(|table| {
-            if table.contains_key("file") {
-                None
-            } else {
-                Some(mappings.expect("mappings table exists"))
-            }
-        })
-        .flatten();
+    let mappings_inline = mappings_table.and_then(|table| {
+        if table.contains_key("file") {
+            None
+        } else {
+            Some(mappings.expect("mappings table exists"))
+        }
+    });
     let inline = mappings_inline
         .or_else(|| container.get("signal_mappings"))
         .or_else(|| container.get("signals"));
@@ -593,7 +592,7 @@ fn parse_validation(
 fn parse_tolerance_table(
     tol: &toml::map::Map<String, Value>,
     where_: &str,
-) -> Result<(BTreeMap<String, f64>, BTreeMap<String, f64>), Box<dyn std::error::Error>> {
+) -> Result<ToleranceMaps, Box<dyn std::error::Error>> {
     keys(tol, &["absolute", "relative_percent"], where_)?;
     let absolute = parse_tolerances(tol.get("absolute"), "absolute")?;
     let relative_percent = parse_tolerances(tol.get("relative_percent"), "relative_percent")?;
