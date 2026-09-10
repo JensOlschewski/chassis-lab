@@ -29,10 +29,11 @@ replace an existing output.
 - Converted vertical simulation HDF5 files use format version 3.
 - Converted measurement HDF5 files use schema version 1.
 - Lommel `.acd` files provide physical measurements for conversion.
-- TOML files define cases, inputs, signal maps, setup, and tolerances.
+- TOML files define combined cases, inputs, signal mappings, setup, and tolerances.
 
-See [`examples/example-config.toml`](examples/example-config.toml) and
-[`examples/example-signals.toml`](examples/example-signals.toml). Both use
+See [`examples/example-config.toml`](examples/example-config.toml) and its
+modular mapping/tolerance files. It configures SVC and vertical validation
+together; comments show equivalent inline configuration. All files use
 synthetic names and values as templates for private vehicle data.
 `examples/example-measurement-vertical.acd` converts to a matching
 HDF5 file; together they are a small synthetic vertical measurement pair.
@@ -43,7 +44,7 @@ Vertical validation consumes normalized inputs only:
 clab validate case.toml -t vertical --output-dir reports
 ```
 
-SVC validation consumes simulation HDF5 v3 and reviewed reference JSON only:
+SVC validation consumes readable simulation JSON and reviewed reference JSON:
 
 ```text
 clab validate case.toml -d svc --output-dir reports

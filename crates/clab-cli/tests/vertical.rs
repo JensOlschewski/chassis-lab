@@ -163,7 +163,7 @@ fn config(path: &std::path::Path, measurement: &str, omit: bool) {
             signals.push_str(&format!("[vertical.signals.{corner}_{name}]\nentity = \"{corner}\"\ncomponent = \"{component}\"\nunit = \"mm\"\n"));
         }
     }
-    fs::write(path,format!("[case]\nname=\"fixture\"\nvariant=\"V\"\nloadcase=\"L\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
+    fs::write(path,format!("[case]\nname=\"fixture\"\nloadcase=\"L\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
 }
 fn command(config: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
@@ -297,9 +297,17 @@ fn defaults_to_all_configured_domains() {
             ),
         )
         .replace(
+            "\"example-svc-tolerances.toml\"",
+            &format!(
+                "\"{}\"",
+                examples.join("example-svc-tolerances.toml").display()
+            ),
+        )
+        .replace(
             "\"example-simulation-svc.json\"",
             &format!("\"{}\"", svc_simulation.display()),
         );
+    let svc = &svc[..svc.find("[vertical.inputs]").unwrap()];
     let case = directory.path().join("case.toml");
     fs::write(&case, format!("{svc}\n{vertical}")).unwrap();
     let vertical_output = directory.path().join("vertical-reports");

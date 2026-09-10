@@ -3,7 +3,6 @@
 
 [case]
 name = "example-config"
-variant = "EXAMPLE"
 loadcase = "2UP"
 
 [physics]

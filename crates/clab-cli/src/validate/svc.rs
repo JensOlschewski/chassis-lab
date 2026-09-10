@@ -105,20 +105,14 @@ pub(crate) fn validate(config: &CaseConfig, color: Color) -> Result<(Reports, bo
 fn validate_identity(config: &CaseConfig, reference: &SvcReference) -> Result<()> {
     if (
         reference.case.name.as_str(),
-        reference.case.variant.as_str(),
         reference.case.loadcase.as_str(),
-    ) != (
-        config.name.as_str(),
-        config.variant.as_str(),
-        config.loadcase.as_str(),
-    ) {
+    ) != (config.name.as_str(), config.loadcase.as_str())
+    {
         bail!(
-            "reference case identity does not match configuration: expected ({:?}, {:?}, {:?}), found ({:?}, {:?}, {:?})",
+            "reference case identity does not match configuration: expected ({:?}, {:?}), found ({:?}, {:?})",
             config.name,
-            config.variant,
             config.loadcase,
             reference.case.name,
-            reference.case.variant,
             reference.case.loadcase
         );
     }
@@ -352,7 +346,7 @@ fn report_json(
     }
     let sources: Vec<_> = reference.sources.iter().map(|source| serde_json::json!({"file": source.file, "sha256": source.sha256, "test_date": source.test_date, "result": source.result})).collect();
     Ok(serde_json::to_string_pretty(
-        &serde_json::json!({"schema_version": 2, "case": {"name": config.name, "variant": config.variant, "loadcase": config.loadcase}, "sample_index": -1, "passed": metrics.iter().all(|m| m.passed), "failed_count": metrics.iter().filter(|m| !m.passed).count(), "inputs": inputs, "reference_sources": sources, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}, "metrics": metrics}),
+        &serde_json::json!({"schema_version": 2, "case": {"name": config.name, "loadcase": config.loadcase}, "sample_index": -1, "passed": metrics.iter().all(|m| m.passed), "failed_count": metrics.iter().filter(|m| !m.passed).count(), "inputs": inputs, "reference_sources": sources, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}, "metrics": metrics}),
     )? + "\n")
 }
 
@@ -360,7 +354,6 @@ fn report_csv(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric])
     let mut writer = csv::WriterBuilder::new().from_writer(Vec::new());
     writer.write_record([
         "case",
-        "variant",
         "loadcase",
         "metric",
         "unit",
@@ -389,7 +382,6 @@ fn report_csv(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric])
     for metric in metrics {
         let row = [
             config.name.clone(),
-            config.variant.clone(),
             config.loadcase.clone(),
             metric.name.clone(),
             metric.unit.clone(),
@@ -422,9 +414,8 @@ fn report_csv(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric])
 
 fn print_console(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric], color: bool) {
     println!(
-        "SVC validation\ncase: {} ({}, {})\nsimulation: {}\nreference: {}\n\nrunning {} metrics",
+        "SVC validation\ncase: {} ({})\nsimulation: {}\nreference: {}\n\nrunning {} metrics",
         config.name,
-        config.variant,
         config.loadcase,
         config.simulation_json.display(),
         reference.path.display(),

@@ -35,7 +35,7 @@ fn inspects_svc_json_and_filters_signals() {
 #[test]
 fn inspects_measurement_hdf5_and_lists_channels() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../clab-converter/examples/example-vertical.h5");
+        .join("../../examples/example-measurement-vertical.h5");
     let output = inspect(&path, &["--signals"]);
 
     assert!(output.status.success());

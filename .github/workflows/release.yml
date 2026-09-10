@@ -98,7 +98,7 @@ jobs:
             dist/embed-bundle-linux-x86_64.tar.gz \
             examples/example-simulation-svc.res \
             examples/example-simulation-vertical.res \
-            tests/fixtures/runtime-measurement-vertical.acd \
+            examples/example-measurement-vertical.acd \
             tests/fixtures/runtime-smoke.toml examples/example-signals.toml examples/example-measurement-svc.json
           docker run --rm --pull=missing -i ubuntu:24.04 bash -ceu '
             mkdir /tmp/input /tmp/bundle /tmp/smoke
@@ -107,7 +107,7 @@ jobs:
             bundle=/tmp/bundle/embed-bundle-linux-x86_64
             cp /tmp/input/examples/example-simulation-svc.res /tmp/smoke/
             cp /tmp/input/examples/example-simulation-vertical.res /tmp/smoke/
-            cp /tmp/input/tests/fixtures/runtime-measurement-vertical.acd /tmp/smoke/
+            cp /tmp/input/examples/example-measurement-vertical.acd /tmp/smoke/
             cp /tmp/input/tests/fixtures/runtime-smoke.toml /tmp/smoke/
             cp /tmp/input/examples/example-signals.toml /tmp/smoke/
             cp /tmp/input/examples/example-measurement-svc.json /tmp/smoke/
@@ -116,7 +116,7 @@ jobs:
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.json
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-vertical.res -o vertical.simulation.h5
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert runtime-measurement-vertical.acd -o vertical.measurement.h5
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-vertical.acd -o vertical.measurement.h5
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" validate runtime-smoke.toml --output-dir reports
             test -s reports/svc.json && test -s reports/knc-vertical.json
           ' < "$smoke_input"
@@ -137,14 +137,14 @@ jobs:
           & "$bundle\bin\embed-smoke.exe" "$smoke\embed-smoke.svg"
           Copy-Item examples\example-simulation-svc.res $smoke
           Copy-Item examples\example-simulation-vertical.res $smoke
-           Copy-Item tests\fixtures\runtime-measurement-vertical.acd $smoke
+           Copy-Item examples\example-measurement-vertical.acd $smoke
            Copy-Item tests\fixtures\runtime-smoke.toml $smoke
           Copy-Item examples\example-signals.toml $smoke
            Copy-Item examples\example-measurement-svc.json $smoke
           Push-Location $smoke
           & "$bundle\bin\clab.exe" convert example-simulation-svc.res -o svc.simulation.json
           & "$bundle\bin\clab.exe" convert example-simulation-vertical.res -o vertical.simulation.h5
-          & "$bundle\bin\clab.exe" convert runtime-measurement-vertical.acd -o vertical.measurement.h5
+           & "$bundle\bin\clab.exe" convert example-measurement-vertical.acd -o vertical.measurement.h5
           & "$bundle\bin\clab.exe" validate runtime-smoke.toml --output-dir reports
           if (-not (Test-Path reports\svc.json)) { throw "missing SVC report" }
           if (-not (Test-Path reports\knc-vertical.json)) { throw "missing vertical report" }
@@ -163,12 +163,12 @@ jobs:
           "${clean_env[@]}" "$bundle/bin/embed-smoke" "$smoke/embed-smoke.svg"
            cp examples/example-simulation-svc.res "$smoke/"
            cp examples/example-simulation-vertical.res "$smoke/"
-           cp tests/fixtures/runtime-measurement-vertical.acd "$smoke/"
+           cp examples/example-measurement-vertical.acd "$smoke/"
            cp tests/fixtures/runtime-smoke.toml examples/example-signals.toml examples/example-measurement-svc.json "$smoke/"
           cd "$smoke"
            "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.json
            "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-vertical.res -o vertical.simulation.h5
-           "${clean_env[@]}" "$bundle/bin/clab" convert runtime-measurement-vertical.acd -o vertical.measurement.h5
+           "${clean_env[@]}" "$bundle/bin/clab" convert example-measurement-vertical.acd -o vertical.measurement.h5
           "${clean_env[@]}" "$bundle/bin/clab" validate runtime-smoke.toml --output-dir reports
           test -s reports/svc.json && test -s reports/knc-vertical.json
 

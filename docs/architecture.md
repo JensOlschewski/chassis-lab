@@ -151,19 +151,32 @@ using channel name exactly `time` for sample axis and retaining that channel.
 
 ## Configuration
 
-`examples/example-config.toml` defines vehicle metadata and SVC inputs. Private
-domain configurations can add vertical inputs using the same structure:
+`examples/example-config.toml` defines combined SVC and vertical validation.
+Configuration supports modular files and equivalent inline tables:
 
 ```toml
 [svc.inputs]
-signal_map = "example-signals.toml"
 simulation_json = "..."
 measurement_reference = "...json"
+
+[svc.mappings]
+file = "example-signals.toml"
+
+[svc.validation]
+tolerances = "example-svc-tolerances.toml"
+
+[vertical.inputs]
+measurement_hdf5 = "..."
+simulation_hdf5 = "..."
+
+[vertical.mappings]
+file = "example-vertical-signals.toml"
 ```
 
 `[vertical.setup]` contains setup flags and `window_*_mm` bounds. Signal maps
-contain canonical names, HDF5 entities, components, and units. Inline mappings
-remain available for isolated fixtures, but cannot be combined with `signal_map`.
+contain canonical names, entities, components, and units. Inline mappings and
+tolerances remain available; defining inline and modular versions together is
+rejected. Paths resolve relative to config file.
 
 ## Conventions
 

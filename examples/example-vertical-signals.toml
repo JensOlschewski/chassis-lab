@@ -1,0 +1,81 @@
+# Vertical signal mappings for example-config.toml.
+
+[signals.front_left_travel]
+entity = "front_left"
+component = "travel"
+unit = "mm"
+
+[signals.front_left_wheel_center_x]
+entity = "front_left"
+component = "x"
+unit = "mm"
+
+[signals.front_left_wheel_center_y]
+entity = "front_left"
+component = "y"
+unit = "mm"
+
+[signals.front_left_wheel_center_z]
+entity = "front_left"
+component = "z"
+unit = "mm"
+
+[signals.front_right_travel]
+entity = "front_right"
+component = "travel"
+unit = "mm"
+
+[signals.front_right_wheel_center_x]
+entity = "front_right"
+component = "x"
+unit = "mm"
+
+[signals.front_right_wheel_center_y]
+entity = "front_right"
+component = "y"
+unit = "mm"
+
+[signals.front_right_wheel_center_z]
+entity = "front_right"
+component = "z"
+unit = "mm"
+
+[signals.rear_left_travel]
+entity = "rear_left"
+component = "travel"
+unit = "mm"
+
+[signals.rear_left_wheel_center_x]
+entity = "rear_left"
+component = "x"
+unit = "mm"
+
+[signals.rear_left_wheel_center_y]
+entity = "rear_left"
+component = "y"
+unit = "mm"
+
+[signals.rear_left_wheel_center_z]
+entity = "rear_left"
+component = "z"
+unit = "mm"
+
+[signals.rear_right_travel]
+entity = "rear_right"
+component = "travel"
+unit = "mm"
+
+[signals.rear_right_wheel_center_x]
+entity = "rear_right"
+component = "x"
+unit = "mm"
+
+[signals.rear_right_wheel_center_y]
+entity = "rear_right"
+component = "y"
+unit = "mm"
+
+[signals.rear_right_wheel_center_z]
+entity = "rear_right"
+component = "z"
+unit = "mm"
