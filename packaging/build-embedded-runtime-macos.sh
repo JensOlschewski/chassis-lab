@@ -15,7 +15,8 @@ lock_sha256=$(shasum -a 256 "$lock" | awk '{print $1}')
 rm -rf "$output"
 mkdir -p "$output/bin" "$output/licenses" "$download"
 
-source <(awk -F= '/^(CPYTHON_URL|CPYTHON_SHA256)=/{print}' "$lock")
+CPYTHON_URL=$(sed -n 's/^CPYTHON_URL=//p' "$lock")
+CPYTHON_SHA256=$(sed -n 's/^CPYTHON_SHA256=//p' "$lock")
 archive="$download/cpython.tar.gz"
 curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
     --retry-delay 2 "$CPYTHON_URL" --output "$archive"
