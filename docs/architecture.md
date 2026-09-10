@@ -94,7 +94,6 @@ capabilities:
 Vertical migration: `[vertical.inputs].measurement_hdf5` is required. Convert
 legacy ACD inputs with `clab convert`; validation never reads raw ACD.
 | `clab convert-res INPUT` | `clab convert INPUT` | Writes normalized HDF5 |
-| `clab create-run CONFIG` | `clab run create CONFIG` | Creates isolated run directory and manifest |
 
 `clab inspect FILE` accepts normalized simulation or measurement HDF5 files
 (`.h5` or `.hdf5`) only. Convert raw `.res` or `.acd` inputs first with
@@ -158,7 +157,7 @@ domain configurations can add vertical inputs using the same structure:
 ```toml
 [svc.inputs]
 signal_map = "example-signals.toml"
-simulation_hdf5 = "..."
+simulation_json = "..."
 measurement_reference = "...json"
 ```
 

@@ -18,13 +18,15 @@ target/release/clab convert measurement.acd -o measurement.h5
 target/release/clab validate examples/example-config.toml
 ```
 
-Default conversion output is `INPUT.simulation.h5` for `.res` and
-`INPUT.measurement.h5` for `.acd`; use `--force` to replace an existing output.
+Default conversion output is `INPUT.json` for SVC `.res`, `INPUT.simulation.h5`
+for vertical `.res`, and `INPUT.measurement.h5` for `.acd`; use `--force` to
+replace an existing output.
 
 ## Input
 
 - Adams `.res` files are converted by `crates/clab-converter/`.
-- Converted simulation HDF5 files use format version 3.
+- Converted SVC simulation JSON files use format version 1.
+- Converted vertical simulation HDF5 files use format version 3.
 - Converted measurement HDF5 files use schema version 1.
 - Lommel `.acd` files provide physical measurements for conversion.
 - TOML files define cases, inputs, signal maps, setup, and tolerances.
@@ -32,7 +34,7 @@ Default conversion output is `INPUT.simulation.h5` for `.res` and
 See [`examples/example-config.toml`](examples/example-config.toml) and
 [`examples/example-signals.toml`](examples/example-signals.toml). Both use
 synthetic names and values as templates for private vehicle data.
-`crates/clab-converter/examples/example-vertical.acd` converts to a matching
+`examples/example-measurement-vertical.acd` converts to a matching
 HDF5 file; together they are a small synthetic vertical measurement pair.
 
 Vertical validation consumes normalized inputs only:
@@ -53,10 +55,9 @@ creates `svc.json`, `svc.csv`, `knc-vertical.json`, `knc-vertical.csv`, and
 `knc-vertical.svg` for selected domains.
 
 SVC evaluation, tolerance comparison, reporting, provenance, and output safety
-are Rust-owned. Final simulation sample is selected by default. Exit codes are
-0 for pass, 1 for tolerance failure, and 2 for operational or configuration
-errors. Existing Python `validate-svc` remains legacy until its Python-specific
-tests and entry point are migrated.
+are Rust-owned. Final simulation sample is selected by default. Embedded Python
+is used only as a scientific kernel through the Rust CLI. Exit codes are 0 for
+pass, 1 for tolerance failure, and 2 for operational or configuration errors.
 
 Vertical configs now use `[vertical.inputs].measurement_hdf5`. Replace legacy
 `measurement_acd` entries by converting the ACD first with `clab convert`; raw
@@ -75,9 +76,14 @@ Raw measurements and generated artifacts are not committed.
 
 ## Releases
 
-Trusted `vMAJOR.MINOR.PATCH` tags publish matching Python and Rust versions as
-Gitea Release assets. Releases include a Python wheel, Linux x86_64 `clab`
-archive, and `SHA256SUMS`.
+Trusted `vMAJOR.MINOR.PATCH` tags publish standalone archives through GitHub
+Releases for Linux x86_64, Windows x86_64, and Intel macOS x86_64. Each archive
+contains `clab`, embedded CPython, scientific dependencies, licenses, build
+provenance, and checksums. No user-managed Python, pip, virtual environment, or
+Rust toolchain is required after extraction.
+
+Download matching archive from [GitHub Releases](https://github.com/JensOlschewski/chassis-lab/releases),
+extract it, then run `bin/clab` (`bin/clab.exe` on Windows).
 
 ## Development
 

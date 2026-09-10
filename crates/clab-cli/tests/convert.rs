@@ -47,6 +47,27 @@ fn converts_res_to_default_simulation_hdf5() {
 }
 
 #[test]
+fn converts_svc_res_to_default_json() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("shared_svc.res");
+    fs::write(&input, MINIMAL_RES).unwrap();
+
+    let result = convert(&input).output().unwrap();
+
+    assert!(result.status.success());
+    let output = directory.path().join("shared_svc.json");
+    assert!(output.is_file());
+    let document: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+    assert_eq!(document["schema_version"], 1);
+    assert_eq!(document["sample_count"], 2);
+    assert_eq!(
+        String::from_utf8(result.stdout).unwrap(),
+        format!("generated {} (SVC JSON)\n", output.display())
+    );
+}
+
+#[test]
 fn converts_acd_to_default_measurement_hdf5() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("shared.acd");

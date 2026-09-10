@@ -11,10 +11,10 @@ gravity = 9.80665 # m/s^2
 
 [svc.inputs]
 # Replace these example paths with converted simulation output and reviewed
-# measurements from your own vehicle or test campaign.
+# measurements from your own vehicle.
 signal_map = "example-signals.toml"
-simulation_hdf5 = "../crates/clab-converter/examples/example-svc.h5"
-measurement_reference = "example-measures.json"
+simulation_json = "example-simulation-svc.json"
+measurement_reference = "example-measurement-svc.json"
 
 [svc.validation.tolerances.absolute]
 # Keep only metrics relevant to your example or validation case.

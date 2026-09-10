@@ -64,7 +64,7 @@ pub struct CaseConfig {
     pub domain: String,
     pub variant: String,
     pub loadcase: String,
-    pub simulation_hdf5: PathBuf,
+    pub simulation_json: PathBuf,
     pub gravity: f64,
     pub signals: BTreeMap<String, SignalRef>,
     pub validation: Option<ValidationConfig>,
@@ -74,7 +74,7 @@ pub struct CaseConfig {
 impl CaseConfig {
     pub fn configured_domains(&self) -> Vec<Domain> {
         let mut domains = Vec::new();
-        if !self.simulation_hdf5.as_os_str().is_empty() {
+        if !self.simulation_json.as_os_str().is_empty() {
             domains.push(Domain::Svc);
         }
         if self.vertical.is_some() {
@@ -132,8 +132,8 @@ fn parse_legacy(
     for k in ["name", "domain", "variant", "loadcase"] {
         require(case, k, "[case]")?
     }
-    keys(inputs, &["simulation_hdf5"], "[inputs]")?;
-    require(inputs, "simulation_hdf5", "[inputs]")?;
+    keys(inputs, &["simulation_json"], "[inputs]")?;
+    require(inputs, "simulation_json", "[inputs]")?;
     let physics = table(
         root.get("physics")
             .ok_or_else(|| ConfigError("missing required [physics] table".into()))?,
@@ -149,10 +149,10 @@ fn parse_legacy(
         domain: string(case, "domain", "[case]")?,
         variant: string(case, "variant", "[case]")?,
         loadcase: string(case, "loadcase", "[case]")?,
-        simulation_hdf5: resolve(
-            value(inputs, "simulation_hdf5", "[inputs]")?,
+        simulation_json: resolve(
+            value(inputs, "simulation_json", "[inputs]")?,
             path,
-            "[inputs].simulation_hdf5",
+            "[inputs].simulation_json",
         )?,
         gravity: positive(value(physics, "gravity", "[physics]")?, "[physics].gravity")?,
         signals: signal_map.1,
@@ -199,7 +199,7 @@ fn parse_unified(
     } else {
         9.80665
     };
-    let (simulation_hdf5, signals, validation, svc_signal_map) = if let Some(svc) = svc {
+    let (simulation_json, signals, validation, svc_signal_map) = if let Some(svc) = svc {
         keys(svc, &["inputs", "signals", "validation"], "[svc]")?;
         let inputs = table(
             svc.get("inputs")
@@ -208,16 +208,16 @@ fn parse_unified(
         )?;
         keys(
             inputs,
-            &["signal_map", "simulation_hdf5", "measurement_reference"],
+            &["signal_map", "simulation_json", "measurement_reference"],
             "[svc.inputs]",
         )?;
-        require(inputs, "simulation_hdf5", "[svc.inputs]")?;
+        require(inputs, "simulation_json", "[svc.inputs]")?;
         let source = signal_source(svc, path, "[svc]", Some(inputs))?;
         (
             resolve(
-                value(inputs, "simulation_hdf5", "[svc.inputs]")?,
+                value(inputs, "simulation_json", "[svc.inputs]")?,
                 path,
-                "[svc.inputs].simulation_hdf5",
+                "[svc.inputs].simulation_json",
             )?,
             source.1,
             parse_validation(
@@ -238,7 +238,7 @@ fn parse_unified(
     Ok(CaseConfig {
         path: path.to_path_buf(),
         name: string(case, "name", "[case]")?,
-        domain: if vertical.is_some() && !simulation_hdf5.as_os_str().is_empty() {
+        domain: if vertical.is_some() && !simulation_json.as_os_str().is_empty() {
             "multi".into()
         } else if vertical.is_some() {
             "knc".into()
@@ -247,7 +247,7 @@ fn parse_unified(
         },
         variant: string(case, "variant", "[case]")?,
         loadcase: string(case, "loadcase", "[case]")?,
-        simulation_hdf5,
+        simulation_json,
         gravity,
         signals,
         validation,
@@ -641,16 +641,16 @@ mod tests {
     fn parses_legacy_inline() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nvariant='v'\nloadcase='l'\n[inputs]\nsimulation_hdf5='x.h5'\n[physics]\ngravity=9.8\n[signals.x]\nentity='e'\ncomponent='c'\nunit='u'\n").unwrap();
+        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nvariant='v'\nloadcase='l'\n[inputs]\nsimulation_json='x.json'\n[physics]\ngravity=9.8\n[signals.x]\nentity='e'\ncomponent='c'\nunit='u'\n").unwrap();
         let c = load_config(&p).unwrap();
         assert_eq!(c.signals["x"].entity, "e");
-        assert_eq!(c.simulation_hdf5, d.path().join("x.h5"));
+        assert_eq!(c.simulation_json, d.path().join("x.json"));
     }
     #[test]
     fn rejects_unknown_and_bad_tolerance() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nvariant='v'\nloadcase='l'\nextra=1\n[inputs]\nsimulation_hdf5='x'\n[physics]\ngravity=9.8\n").unwrap();
+        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nvariant='v'\nloadcase='l'\nextra=1\n[inputs]\nsimulation_json='x.json'\n[physics]\ngravity=9.8\n").unwrap();
         assert!(load_config(&p).unwrap_err().to_string().contains("unknown"));
     }
     #[test]

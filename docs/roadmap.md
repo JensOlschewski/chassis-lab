@@ -147,9 +147,9 @@ Issues:
 - Run manifests record Rust CLI version, embedded Python and scientific package
   versions, converter source revision, HDF5 format version, and repository
   revision.
-- Releases publish a Python wheel and standalone `clab` bundle.
-- Current bundled workflow target is Linux x86_64. Checksums accompany every
-  artifact.
+- Releases publish standalone `clab` bundles for validated Linux x86_64, Windows
+  x86_64, and Intel macOS x86_64 targets. No Python wheel is a user CLI
+  artifact. Checksums accompany every artifact.
 - `crates/clab-converter/` remains a library dependency of the unified CLI.
 
 ## Gitea maintenance policy
