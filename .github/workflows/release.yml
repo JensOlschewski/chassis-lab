@@ -192,7 +192,7 @@ jobs:
             *) ext=tar.gz ;;
           esac
           archive="dist/embed-bundle-${{ matrix.platform }}.$ext"
-          renamed="dist/clab-v${version}-${{ matrix.platform }}.$ext"
+          renamed="dist/clab-v${version}-${{ matrix.target }}.$ext"
           mv "$archive" "$renamed"
           rm -f "$archive.sha256"
           if [ "${{ matrix.platform }}" = windows-x86_64 ]; then

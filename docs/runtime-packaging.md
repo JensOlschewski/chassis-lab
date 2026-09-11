@@ -30,8 +30,9 @@ Every archive must contain:
 - `checksums.sha256` covering every archive file except itself.
 
 The release job also publishes an archive-level SHA-256 file beside the
-archive. Archive names use `clab-vVERSION-PLATFORM`, where `PLATFORM` is one of
-`linux-x86_64`, `windows-x86_64`, or `macos-x86_64`.
+archive. Archive names use `clab-vVERSION-TARGET`, where `TARGET` is the Rust
+target triple: `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, or
+`x86_64-apple-darwin`.
 
 ## Locked Inputs
 
