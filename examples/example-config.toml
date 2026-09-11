@@ -1,58 +1,51 @@
-# Combined synthetic SVC and vertical configuration.
+# Canonical function-first example configuration.
 # Relative paths resolve from this file's directory.
-#
-# This example uses modular signal mappings and SVC tolerances. For a
-# self-contained config, replace each external file with the corresponding
-# inline table:
-#
-# Inline alternatives:
-# [svc.mappings.front_left_wheel_load]
-# entity = "example.wheel_loads"
-# component = "front_left"
-# unit = "newton"
-# [svc.validation.tolerances.absolute]
-# total_mass_kg = 20.0
-# [svc.validation.tolerances.relative_percent]
-# total_mass_kg = 1.0
 
 [case]
-# Stable case/test identifier.
 name = "example-config"
-# Physical loading condition.
+domain = "knc"
 loadcase = "2UP"
 
 [physics]
-gravity = 9.80665 # m/s^2
+gravity = 9.80665
 
-[svc.inputs]
-# Replace paths with converted simulation output and reviewed measurements
-# in json format.
-simulation_json = "example-simulation-svc.json"
-measurement_reference = "example-measurement-svc.json"
+[input.svc.simulation]
+input_file = "example-simulation-svc.json"
 
-[svc.mappings]
+[input.svc.measurement]
+input_file = "example-measurement-svc.json"
+
+# SVC mappings apply to SVC only.
+[mappings.svc]
 file = "example-signals.toml"
 
-[svc.validation]
-tolerances = "example-svc-tolerances.toml"
+[input.knc.vertical.simulation]
+input_file = "example-simulation-vertical.h5"
 
+[input.knc.vertical.measurement]
+input_file = "example-measurement-vertical.h5"
 
-[vertical.inputs]
-# Convert res and acd before validating this domain.
-measurement_hdf5 = "example-measurement-vertical.h5"
-simulation_hdf5 = "example-simulation-vertical.h5"
-
-[vertical.mappings]
+# KnC mappings are shared by all KnC tests. Test-specific values below add to
+# or override this base using deep-merge precedence: shared < domain < test.
+[mappings.knc]
 file = "example-vertical-signals.toml"
 
-[vertical.setup]
+[mappings.knc.vertical]
+# Example child override; child-only mappings are also supported.
+[mappings.knc.vertical.front_left_travel]
+unit = "mm"
+
+[setup.knc.vertical]
 code = "example-vertical"
 brakes_applied = false
 engine_running = false
 front_arb_connected = true
 rear_arb_connected = true
 
-[vertical.window]
+[setup.knc.vertical.window]
 minimum_mm = -1
 maximum_mm = 1
 step_mm = 1
+
+# Tolerances are optional. Without them, SVC comparison is informational.
+[validation.svc]

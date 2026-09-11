@@ -7,7 +7,7 @@ fn fixture_case(directory: &std::path::Path, failing: bool) -> std::path::PathBu
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = fs::read_to_string(root.join("example-config.toml"))
         .unwrap()
-        .split("\n[vertical.inputs]")
+        .split("\n[input.knc.vertical.simulation]")
         .next()
         .unwrap()
         .to_owned();
@@ -39,7 +39,37 @@ fn fixture_case(directory: &std::path::Path, failing: bool) -> std::path::PathBu
         .replace(
             "\"example-measurement-svc.json\"",
             &format!("\"{}\"", reference_path.display()),
+        )
+        .replace(
+            "\"example-vertical-signals.toml\"",
+            &format!(
+                "\"{}\"",
+                root.join("example-vertical-signals.toml").display()
+            ),
+        )
+        .replace(
+            "\"example-simulation-vertical.h5\"",
+            &format!(
+                "\"{}\"",
+                root.join("example-simulation-vertical.h5").display()
+            ),
+        )
+        .replace(
+            "\"example-measurement-vertical.h5\"",
+            &format!(
+                "\"{}\"",
+                root.join("example-measurement-vertical.h5").display()
+            ),
         );
+    let tolerance_section = format!(
+        "[validation.svc]\ntolerances = \"{}\"",
+        tolerances.display()
+    );
+    let config = if config.contains("[validation.svc]") {
+        config.replace("[validation.svc]", &tolerance_section)
+    } else {
+        format!("{config}\n{tolerance_section}\n")
+    };
     let path = directory.join("case.toml");
     fs::write(&path, config).unwrap();
     path

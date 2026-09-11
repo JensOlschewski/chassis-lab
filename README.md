@@ -32,8 +32,10 @@ replace an existing output.
 - TOML files define combined cases, inputs, signal mappings, setup, and tolerances.
 
 See [`examples/example-config.toml`](examples/example-config.toml) and its
-modular mapping/tolerance files. It configures SVC and vertical validation
-together; comments show equivalent inline configuration. All files use
+modular mapping files. Function-first sections use `[input.svc.simulation]`,
+`[input.svc.measurement]`, and `[input.knc.vertical.*]`. KnC mappings use
+`[mappings.knc]` as shared base and `[mappings.knc.vertical]` as test override;
+precedence is shared < domain < test with recursive table merge. All files use
 synthetic names and values as templates for private vehicle data.
 `examples/example-measurement-vertical.acd` converts to a matching
 HDF5 file; together they are a small synthetic vertical measurement pair.
@@ -55,14 +57,19 @@ select domains; `-t vertical` selects KnC vertical validation. `--output-dir`
 creates `svc.json`, `svc.csv`, `knc-vertical.json`, `knc-vertical.csv`, and
 `knc-vertical.svg` for selected domains.
 
-SVC evaluation, tolerance comparison, reporting, provenance, and output safety
-are Rust-owned. Final simulation sample is selected by default. Embedded Python
+Without report options, validation prints comparisons only and writes no report
+files. Explicit report options enable reports.
+
+SVC evaluation, optional tolerance comparison, reporting, provenance, and output
+safety are Rust-owned. SVC references without tolerances are informational.
+Final simulation sample is selected by default. Embedded Python
 is used only as a scientific kernel through the Rust CLI. Exit codes are 0 for
 pass, 1 for tolerance failure, and 2 for operational or configuration errors.
 
-Vertical configs now use `[vertical.inputs].measurement_hdf5`. Replace legacy
-`measurement_acd` entries by converting the ACD first with `clab convert`; raw
-ACD is not accepted by validation.
+Vertical configs use `[input.knc.vertical.measurement].input_file` for normalized
+HDF5. Replace legacy `measurement_acd` entries by converting the ACD first with
+`clab convert`; raw ACD is not accepted by validation. Legacy domain-first
+configuration remains accepted during migration.
 
 ## Output
 

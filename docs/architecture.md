@@ -152,31 +152,37 @@ using channel name exactly `time` for sample axis and retaining that channel.
 ## Configuration
 
 `examples/example-config.toml` defines combined SVC and vertical validation.
-Configuration supports modular files and equivalent inline tables:
+Canonical configuration is function-first:
 
 ```toml
-[svc.inputs]
-simulation_json = "..."
-measurement_reference = "...json"
+[input.svc.simulation]
+input_file = "...json"
 
-[svc.mappings]
+[input.svc.measurement]
+input_file = "...json"
+
+[input.knc.vertical.simulation]
+input_file = "...h5"
+
+[input.knc.vertical.measurement]
+input_file = "...h5"
+
+[mappings.svc]
 file = "example-signals.toml"
 
-[svc.validation]
-tolerances = "example-svc-tolerances.toml"
-
-[vertical.inputs]
-measurement_hdf5 = "..."
-simulation_hdf5 = "..."
-
-[vertical.mappings]
+[mappings.knc]
 file = "example-vertical-signals.toml"
+
+[mappings.knc.vertical]
+# inline values add to or override domain mappings
 ```
 
-`[vertical.setup]` contains setup flags and `window_*_mm` bounds. Signal maps
-contain canonical names, entities, components, and units. Inline mappings and
-tolerances remain available; defining inline and modular versions together is
-rejected. Paths resolve relative to config file.
+`[setup.knc.vertical]` contains setup flags and window bounds. Signal maps contain
+canonical names, entities, components, and units. Mapping precedence is shared <
+domain < test; child values override, child-only values add, missing values inherit,
+and nested tables deep-merge. External mapping files use same merge rules. Legacy
+domain-first sections remain accepted. SVC tolerances are optional; without them,
+comparisons are informational. Paths resolve relative to config file.
 
 ## Conventions
 

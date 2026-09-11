@@ -149,6 +149,12 @@ fn report_paths(args: &ValidateArgs, selected: &[Domain]) -> Result<ReportPaths>
     if args.plot_output.is_some() && !selected.contains(&Domain::Knc) {
         bail!("--plot-output requires selecting KnC");
     }
+    if args.output_dir.is_none() && !individual {
+        return Ok(ReportPaths {
+            svc: None,
+            knc: None,
+        });
+    }
     if let Some(plot) = &args.plot_output
         && plot
             .extension()
@@ -341,7 +347,7 @@ fn rollback_published(published: Vec<(PathBuf, Option<tempfile::NamedTempFile>)>
 #[cfg(test)]
 mod tests {
     use super::{Domain, ValidateArgs, publish_staged, report_paths, stage_reports};
-    use std::{fs, path::PathBuf};
+    use std::fs;
 
     #[test]
     fn failed_force_publish_restores_prior_outputs() {
@@ -364,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn combined_validation_defaults_reports_to_current_directory() {
+    fn combined_validation_without_report_options_writes_no_reports() {
         let args = ValidateArgs {
             config: "config.toml".into(),
             domains: Vec::new(),
@@ -378,7 +384,7 @@ mod tests {
         };
         let reports = report_paths(&args, &[Domain::Svc, Domain::Knc]).unwrap();
 
-        assert_eq!(reports.svc.unwrap().0, PathBuf::from("svc.json"));
-        assert_eq!(reports.knc.unwrap().2, PathBuf::from("knc-vertical.svg"));
+        assert!(reports.svc.is_none());
+        assert!(reports.knc.is_none());
     }
 }

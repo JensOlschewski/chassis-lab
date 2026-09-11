@@ -276,10 +276,6 @@ fn defaults_to_all_configured_domains() {
     let directory = tempdir().unwrap();
     closed_fixture(&directory.path().join("simulation.h5"), simulation);
     closed_fixture(&directory.path().join("measurement.h5"), measurement);
-    let vertical_path = directory.path().join("vertical.toml");
-    config(&vertical_path, "measurement.h5", false);
-    let vertical = fs::read_to_string(&vertical_path).unwrap();
-    let vertical = &vertical[vertical.find("[vertical.inputs]").unwrap()..];
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let svc_simulation = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/example-simulation-svc.json");
@@ -306,10 +302,26 @@ fn defaults_to_all_configured_domains() {
         .replace(
             "\"example-simulation-svc.json\"",
             &format!("\"{}\"", svc_simulation.display()),
-        );
-    let svc = &svc[..svc.find("[vertical.inputs]").unwrap()];
+        )
+        .replace(
+            "\"example-vertical-signals.toml\"",
+            &format!(
+                "\"{}\"",
+                examples.join("example-vertical-signals.toml").display()
+            ),
+        )
+        .replace(
+            "\"example-simulation-vertical.h5\"",
+            &format!("\"{}\"", directory.path().join("simulation.h5").display()),
+        )
+        .replace(
+            "\"example-measurement-vertical.h5\"",
+            &format!("\"{}\"", directory.path().join("measurement.h5").display()),
+        )
+        .replace("brakes_applied = false", "brakes_applied = true")
+        .replace("rear_arb_connected = true", "");
     let case = directory.path().join("case.toml");
-    fs::write(&case, format!("{svc}\n{vertical}")).unwrap();
+    fs::write(&case, svc).unwrap();
     let vertical_output = directory.path().join("vertical-reports");
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([

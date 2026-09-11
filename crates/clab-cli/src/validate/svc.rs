@@ -288,9 +288,6 @@ fn compare(
             }
             let absolute = tolerances.absolute.get(name).copied();
             let relative = tolerances.relative_percent.get(name).copied();
-            if absolute.is_none() && relative.is_none() {
-                bail!("no acceptance tolerance configured for metric: {name}");
-            }
             let allowed = [
                 absolute,
                 relative.map(|value| expected.abs() * value / 100.0),
@@ -307,7 +304,8 @@ fn compare(
                 absolute_tolerance: absolute,
                 relative_percent: relative,
                 allowed_difference: allowed,
-                passed: (measured - expected).abs() <= allowed,
+                passed: absolute.is_none() && relative.is_none()
+                    || (measured - expected).abs() <= allowed,
             })
         })
         .collect()
@@ -449,9 +447,18 @@ fn print_console(config: &CaseConfig, reference: &SvcReference, metrics: &[Metri
         );
     }
     let failed = metrics.iter().filter(|m| !m.passed).count();
+    let informational = metrics
+        .iter()
+        .all(|metric| metric.absolute_tolerance.is_none() && metric.relative_percent.is_none());
     println!(
         "\nvalidation result: {}. {} passed; {} failed; {} total",
-        if failed == 0 { "ok" } else { "FAILED" },
+        if informational {
+            "informational (no SVC tolerances configured)"
+        } else if failed == 0 {
+            "ok"
+        } else {
+            "FAILED"
+        },
         metrics.len() - failed,
         failed,
         metrics.len()
