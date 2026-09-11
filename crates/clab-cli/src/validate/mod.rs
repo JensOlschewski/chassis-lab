@@ -184,7 +184,7 @@ fn report_paths(args: &ValidateArgs, selected: &[Domain]) -> Result<ReportPaths>
 fn protected_inputs(config: &CaseConfig) -> Result<Vec<PathBuf>> {
     let mut paths = vec![config.path.clone()];
     if config.configured_domains().contains(&Domain::Svc) {
-        paths.push(config.simulation_hdf5.clone());
+        paths.push(config.simulation_json.clone());
         if let Some(validation) = &config.validation {
             paths.push(validation.reference.clone());
         }

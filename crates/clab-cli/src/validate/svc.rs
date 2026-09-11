@@ -9,8 +9,8 @@ use anyhow::{Context, Result, bail};
 use clab_core::{
     config::{CaseConfig, SignalRef},
     conventions::{SignalConvention, apply_convention_for_final_sample, svc_conventions},
-    simulation_hdf5::SimulationFile,
     svc_reference::{SvcReference, load_svc_reference},
+    svc_simulation_json::SvcSimulationFile,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -79,10 +79,10 @@ pub(crate) fn validate(config: &CaseConfig, color: Color) -> Result<(Reports, bo
     let validation = config.validation.as_ref().ok_or_else(|| {
         anyhow::anyhow!("case '{}' has no [validation] configuration", config.name)
     })?;
-    let simulation = SimulationFile::open(&config.simulation_hdf5).with_context(|| {
+    let simulation = SvcSimulationFile::open(&config.simulation_json).with_context(|| {
         format!(
-            "failed to read simulation HDF5 '{}'",
-            config.simulation_hdf5.display()
+            "failed to read SVC simulation JSON '{}'",
+            config.simulation_json.display()
         )
     })?;
     let actual = evaluate(config, &simulation)?;
@@ -105,20 +105,14 @@ pub(crate) fn validate(config: &CaseConfig, color: Color) -> Result<(Reports, bo
 fn validate_identity(config: &CaseConfig, reference: &SvcReference) -> Result<()> {
     if (
         reference.case.name.as_str(),
-        reference.case.variant.as_str(),
         reference.case.loadcase.as_str(),
-    ) != (
-        config.name.as_str(),
-        config.variant.as_str(),
-        config.loadcase.as_str(),
-    ) {
+    ) != (config.name.as_str(), config.loadcase.as_str())
+    {
         bail!(
-            "reference case identity does not match configuration: expected ({:?}, {:?}, {:?}), found ({:?}, {:?}, {:?})",
+            "reference case identity does not match configuration: expected ({:?}, {:?}), found ({:?}, {:?})",
             config.name,
-            config.variant,
             config.loadcase,
             reference.case.name,
-            reference.case.variant,
             reference.case.loadcase
         );
     }
@@ -129,10 +123,10 @@ pub(crate) fn preflight(config: &CaseConfig) -> Result<()> {
     let validation = config.validation.as_ref().ok_or_else(|| {
         anyhow::anyhow!("case '{}' has no [validation] configuration", config.name)
     })?;
-    let simulation = SimulationFile::open(&config.simulation_hdf5).with_context(|| {
+    let simulation = SvcSimulationFile::open(&config.simulation_json).with_context(|| {
         format!(
-            "failed to read simulation HDF5 '{}'",
-            config.simulation_hdf5.display()
+            "failed to read SVC simulation JSON '{}'",
+            config.simulation_json.display()
         )
     })?;
     for (name, reference) in &config.signals {
@@ -161,7 +155,7 @@ pub(crate) fn preflight(config: &CaseConfig) -> Result<()> {
     Ok(())
 }
 
-fn evaluate(config: &CaseConfig, simulation: &SimulationFile) -> Result<BTreeMap<String, f64>> {
+fn evaluate(config: &CaseConfig, simulation: &SvcSimulationFile) -> Result<BTreeMap<String, f64>> {
     let conventions = svc_conventions();
     let mut values = BTreeMap::new();
     for name in WHEEL_LOADS.into_iter().chain(GEOMETRY) {
@@ -183,7 +177,7 @@ fn evaluate(config: &CaseConfig, simulation: &SimulationFile) -> Result<BTreeMap
             name,
             format!(
                 "{}:{}/{}",
-                config.simulation_hdf5.display(),
+                config.simulation_json.display(),
                 reference.entity,
                 reference.component
             ),
@@ -346,13 +340,13 @@ fn report_json(
     reference: &SvcReference,
     metrics: &[Metric],
 ) -> Result<String> {
-    let mut inputs = serde_json::json!({"config": provenance(&config.path)?, "simulation_hdf5": provenance(&config.simulation_hdf5)?, "reference": provenance(&reference.path)?});
+    let mut inputs = serde_json::json!({"config": provenance(&config.path)?, "simulation_json": provenance(&config.simulation_json)?, "reference": provenance(&reference.path)?});
     if let Some(path) = &config.svc_signal_map {
         inputs["signal_map"] = serde_json::to_value(provenance(path)?)?;
     }
     let sources: Vec<_> = reference.sources.iter().map(|source| serde_json::json!({"file": source.file, "sha256": source.sha256, "test_date": source.test_date, "result": source.result})).collect();
     Ok(serde_json::to_string_pretty(
-        &serde_json::json!({"schema_version": 2, "case": {"name": config.name, "variant": config.variant, "loadcase": config.loadcase}, "sample_index": -1, "passed": metrics.iter().all(|m| m.passed), "failed_count": metrics.iter().filter(|m| !m.passed).count(), "inputs": inputs, "reference_sources": sources, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}, "metrics": metrics}),
+        &serde_json::json!({"schema_version": 2, "case": {"name": config.name, "loadcase": config.loadcase}, "sample_index": -1, "passed": metrics.iter().all(|m| m.passed), "failed_count": metrics.iter().filter(|m| !m.passed).count(), "inputs": inputs, "reference_sources": sources, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}, "metrics": metrics}),
     )? + "\n")
 }
 
@@ -360,7 +354,6 @@ fn report_csv(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric])
     let mut writer = csv::WriterBuilder::new().from_writer(Vec::new());
     writer.write_record([
         "case",
-        "variant",
         "loadcase",
         "metric",
         "unit",
@@ -377,7 +370,7 @@ fn report_csv(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric])
         "reference_sha256",
     ])?;
     let config_hash = provenance(&config.path)?.sha256;
-    let simulation_hash = provenance(&config.simulation_hdf5)?.sha256;
+    let simulation_hash = provenance(&config.simulation_json)?.sha256;
     let reference_hash = provenance(&reference.path)?.sha256;
     let signal_hash = config
         .svc_signal_map
@@ -389,7 +382,6 @@ fn report_csv(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric])
     for metric in metrics {
         let row = [
             config.name.clone(),
-            config.variant.clone(),
             config.loadcase.clone(),
             metric.name.clone(),
             metric.unit.clone(),
@@ -422,11 +414,10 @@ fn report_csv(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric])
 
 fn print_console(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric], color: bool) {
     println!(
-        "SVC validation\ncase: {} ({}, {})\nsimulation: {}\nreference: {}\n\nrunning {} metrics",
+        "SVC validation\ncase: {} ({})\nsimulation: {}\nreference: {}\n\nrunning {} metrics",
         config.name,
-        config.variant,
         config.loadcase,
-        config.simulation_hdf5.display(),
+        config.simulation_json.display(),
         reference.path.display(),
         metrics.len()
     );

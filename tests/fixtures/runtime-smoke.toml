@@ -3,16 +3,15 @@
 
 [case]
 name = "example-config"
-variant = "EXAMPLE"
 loadcase = "2UP"
 
 [physics]
 gravity = 9.80665
 
 [svc.inputs]
-simulation_hdf5 = "svc.simulation.h5"
+simulation_json = "svc.simulation.json"
 signal_map = "example-signals.toml"
-measurement_reference = "example-measures.json"
+measurement_reference = "example-measurement-svc.json"
 
 [svc.validation.tolerances.absolute]
 front_left_mass_kg = 0.01

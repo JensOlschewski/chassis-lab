@@ -24,6 +24,7 @@ pub struct ValidationTolerances {
     pub absolute: BTreeMap<String, f64>,
     pub relative_percent: BTreeMap<String, f64>,
 }
+type ToleranceMaps = (BTreeMap<String, f64>, BTreeMap<String, f64>);
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidationConfig {
     pub reference: PathBuf,
@@ -62,9 +63,8 @@ pub struct CaseConfig {
     pub path: PathBuf,
     pub name: String,
     pub domain: String,
-    pub variant: String,
     pub loadcase: String,
-    pub simulation_hdf5: PathBuf,
+    pub simulation_json: PathBuf,
     pub gravity: f64,
     pub signals: BTreeMap<String, SignalRef>,
     pub validation: Option<ValidationConfig>,
@@ -74,7 +74,7 @@ pub struct CaseConfig {
 impl CaseConfig {
     pub fn configured_domains(&self) -> Vec<Domain> {
         let mut domains = Vec::new();
-        if !self.simulation_hdf5.as_os_str().is_empty() {
+        if !self.simulation_json.as_os_str().is_empty() {
             domains.push(Domain::Svc);
         }
         if self.vertical.is_some() {
@@ -114,6 +114,7 @@ fn parse_legacy(
             "physics",
             "signal_map",
             "signals",
+            "signal_mappings",
             "validation",
         ],
         "top level",
@@ -128,12 +129,16 @@ fn parse_legacy(
             .ok_or_else(|| ConfigError("missing required [inputs] table".into()))?,
         "[inputs]",
     )?;
-    keys(case, &["name", "domain", "variant", "loadcase"], "[case]")?;
-    for k in ["name", "domain", "variant", "loadcase"] {
+    keys(case, &["name", "domain", "loadcase"], "[case]")?;
+    for k in ["name", "domain", "loadcase"] {
         require(case, k, "[case]")?
     }
-    keys(inputs, &["simulation_hdf5"], "[inputs]")?;
-    require(inputs, "simulation_hdf5", "[inputs]")?;
+    keys(
+        inputs,
+        &["simulation_json", "signal_map", "signal_mappings"],
+        "[inputs]",
+    )?;
+    require(inputs, "simulation_json", "[inputs]")?;
     let physics = table(
         root.get("physics")
             .ok_or_else(|| ConfigError("missing required [physics] table".into()))?,
@@ -147,12 +152,11 @@ fn parse_legacy(
         path: path.to_path_buf(),
         name: string(case, "name", "[case]")?,
         domain: string(case, "domain", "[case]")?,
-        variant: string(case, "variant", "[case]")?,
         loadcase: string(case, "loadcase", "[case]")?,
-        simulation_hdf5: resolve(
-            value(inputs, "simulation_hdf5", "[inputs]")?,
+        simulation_json: resolve(
+            value(inputs, "simulation_json", "[inputs]")?,
             path,
-            "[inputs].simulation_hdf5",
+            "[inputs].simulation_json",
         )?,
         gravity: positive(value(physics, "gravity", "[physics]")?, "[physics].gravity")?,
         signals: signal_map.1,
@@ -176,8 +180,8 @@ fn parse_unified(
         .get("physics")
         .map(|value| table(value, "[physics]"))
         .transpose()?;
-    keys(case, &["name", "variant", "loadcase"], "[case]")?;
-    for k in ["name", "variant", "loadcase"] {
+    keys(case, &["name", "loadcase"], "[case]")?;
+    for k in ["name", "loadcase"] {
         require(case, k, "[case]")?
     }
     let svc = root
@@ -199,8 +203,18 @@ fn parse_unified(
     } else {
         9.80665
     };
-    let (simulation_hdf5, signals, validation, svc_signal_map) = if let Some(svc) = svc {
-        keys(svc, &["inputs", "signals", "validation"], "[svc]")?;
+    let (simulation_json, signals, validation, svc_signal_map) = if let Some(svc) = svc {
+        keys(
+            svc,
+            &[
+                "inputs",
+                "mappings",
+                "signals",
+                "signal_mappings",
+                "validation",
+            ],
+            "[svc]",
+        )?;
         let inputs = table(
             svc.get("inputs")
                 .ok_or_else(|| ConfigError("missing required [inputs] table".into()))?,
@@ -208,16 +222,21 @@ fn parse_unified(
         )?;
         keys(
             inputs,
-            &["signal_map", "simulation_hdf5", "measurement_reference"],
+            &[
+                "signal_map",
+                "signal_mappings",
+                "simulation_json",
+                "measurement_reference",
+            ],
             "[svc.inputs]",
         )?;
-        require(inputs, "simulation_hdf5", "[svc.inputs]")?;
+        require(inputs, "simulation_json", "[svc.inputs]")?;
         let source = signal_source(svc, path, "[svc]", Some(inputs))?;
         (
             resolve(
-                value(inputs, "simulation_hdf5", "[svc.inputs]")?,
+                value(inputs, "simulation_json", "[svc.inputs]")?,
                 path,
-                "[svc.inputs].simulation_hdf5",
+                "[svc.inputs].simulation_json",
             )?,
             source.1,
             parse_validation(
@@ -238,16 +257,15 @@ fn parse_unified(
     Ok(CaseConfig {
         path: path.to_path_buf(),
         name: string(case, "name", "[case]")?,
-        domain: if vertical.is_some() && !simulation_hdf5.as_os_str().is_empty() {
+        domain: if vertical.is_some() && !simulation_json.as_os_str().is_empty() {
             "multi".into()
         } else if vertical.is_some() {
             "knc".into()
         } else {
             "svc".into()
         },
-        variant: string(case, "variant", "[case]")?,
         loadcase: string(case, "loadcase", "[case]")?,
-        simulation_hdf5,
+        simulation_json,
         gravity,
         signals,
         validation,
@@ -258,7 +276,18 @@ fn parse_unified(
 
 fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn std::error::Error>> {
     let v = table(raw, "[vertical]")?;
-    keys(v, &["inputs", "setup", "window", "signals"], "[vertical]")?;
+    keys(
+        v,
+        &[
+            "inputs",
+            "mappings",
+            "setup",
+            "window",
+            "signals",
+            "signal_mappings",
+        ],
+        "[vertical]",
+    )?;
     let i = table(
         v.get("inputs")
             .ok_or_else(|| ConfigError("missing required [vertical.inputs] table".into()))?,
@@ -271,7 +300,12 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
     )?;
     keys(
         i,
-        &["signal_map", "measurement_hdf5", "simulation_hdf5"],
+        &[
+            "signal_map",
+            "signal_mappings",
+            "measurement_hdf5",
+            "simulation_hdf5",
+        ],
         "[vertical.inputs]",
     )?;
     require(i, "measurement_hdf5", "[vertical.inputs]")?;
@@ -367,16 +401,57 @@ fn signal_source(
     inputs: Option<&toml::map::Map<String, Value>>,
 ) -> Result<SignalSource, Box<dyn std::error::Error>> {
     let source = inputs.unwrap_or(container);
-    let map = source.get("signal_map");
-    let inline = container.get("signals");
-    if map.is_some() && inline.is_some() {
+    let legacy_map = source
+        .get("signal_mappings")
+        .or_else(|| source.get("signal_map"));
+    let mappings = container.get("mappings");
+    let mappings_table = mappings
+        .map(|value| table(value, &format!("{where_}.mappings")))
+        .transpose()?;
+    let mappings_file = mappings_table.and_then(|table| table.get("file"));
+    let mappings_inline = mappings_table.and_then(|table| {
+        if table.contains_key("file") {
+            None
+        } else {
+            Some(mappings.expect("mappings table exists"))
+        }
+    });
+    let inline = mappings_inline
+        .or_else(|| container.get("signal_mappings"))
+        .or_else(|| container.get("signals"));
+    if source.get("signal_mappings").is_some() && source.get("signal_map").is_some() {
         return Err(ConfigError(format!(
-            "{where_} cannot define both signal_map and inline signals"
+            "{where_}.inputs cannot define both signal_mappings and signal_map"
+        ))
+        .into());
+    }
+    if mappings_file.is_some() && mappings_table.unwrap().len() != 1 {
+        return Err(ConfigError(format!(
+            "{where_}.mappings cannot define both file and inline signal mappings"
+        ))
+        .into());
+    }
+    if container.get("signal_mappings").is_some() && container.get("signals").is_some() {
+        return Err(ConfigError(format!(
+            "{where_} cannot define both signal_mappings and signals"
         ))
         .into());
     };
-    if let Some(m) = map {
-        let p = resolve(m, path, &format!("{where_}.signal_map"))?;
+    if (legacy_map.is_some() || inline.is_some()) && mappings_file.is_some() {
+        return Err(ConfigError(format!(
+            "{where_} cannot define both modular and inline signal mappings"
+        ))
+        .into());
+    }
+    if let Some(m) = legacy_map.or(mappings_file) {
+        let key = if mappings_file.is_some() {
+            "mappings.file"
+        } else if source.get("signal_mappings").is_some() {
+            "signal_mappings"
+        } else {
+            "signal_map"
+        };
+        let p = resolve(m, path, &format!("{where_}.{key}"))?;
         if !p.is_file() {
             return Err(format!("signal map does not exist: {}", p.display()).into());
         };
@@ -384,16 +459,29 @@ fn signal_source(
             .parse()
             .map_err(|e| ConfigError(format!("invalid signal map TOML in {}: {e}", p.display())))?;
         let t = &t;
-        keys(t, &["signals"], &format!("signal map {}", p.display()))?;
+        keys(
+            t,
+            &["signals", "signal_mappings", "mappings"],
+            &format!("signal map {}", p.display()),
+        )?;
+        let values = t
+            .get("mappings")
+            .or_else(|| t.get("signal_mappings"))
+            .or_else(|| t.get("signals"));
         return Ok((
             Some(p),
-            parse_signals(t.get("signals"), "signal map signals")?,
+            parse_signals(values, "signal map signal_mappings")?,
         ));
     }
     if let Some(v) = inline {
-        return Ok((None, parse_signals(Some(v), &format!("{where_}.signals"))?));
+        let key = if container.get("signal_mappings").is_some() {
+            "signal_mappings"
+        } else {
+            "signals"
+        };
+        return Ok((None, parse_signals(Some(v), &format!("{where_}.{key}"))?));
     }
-    Err(ConfigError(format!("{where_} must define signal_map or inline signals")).into())
+    Err(ConfigError(format!("{where_} must define mappings or signal mappings")).into())
 }
 fn parse_signals(
     v: Option<&Value>,
@@ -462,17 +550,30 @@ fn parse_validation(
         value(t, "reference", where_)?
     };
     let reference = resolve(reference, path, "validation reference")?;
-    let tol = table(
-        value(t, "tolerances", where_)?,
-        &format!("{where_}.tolerances"),
-    )?;
-    keys(
-        tol,
-        &["absolute", "relative_percent"],
-        &format!("{where_}.tolerances"),
-    )?;
-    let absolute = parse_tolerances(tol.get("absolute"), "absolute")?;
-    let relative_percent = parse_tolerances(tol.get("relative_percent"), "relative_percent")?;
+    let tolerance_value = value(t, "tolerances", where_)?;
+    let tolerance_label = format!("{where_}.tolerances");
+    let (absolute, relative_percent) = if tolerance_value.as_str().is_some() {
+        let tolerance_path = resolve(tolerance_value, path, &tolerance_label)?;
+        let text = fs::read_to_string(&tolerance_path).map_err(|error| {
+            ConfigError(format!(
+                "failed to read tolerance file '{}': {error}",
+                tolerance_path.display()
+            ))
+        })?;
+        let file: toml::Table = text.parse().map_err(|error| {
+            ConfigError(format!(
+                "invalid tolerance TOML in {}: {error}",
+                tolerance_path.display()
+            ))
+        })?;
+        parse_tolerance_table(
+            &file,
+            &format!("tolerance file {}", tolerance_path.display()),
+        )?
+    } else {
+        let tol = table(tolerance_value, &tolerance_label)?;
+        parse_tolerance_table(tol, &tolerance_label)?
+    };
     if absolute.is_empty() && relative_percent.is_empty() {
         return Err(ConfigError(format!(
             "{where_}.tolerances must define at least one tolerance"
@@ -486,6 +587,16 @@ fn parse_validation(
             relative_percent,
         },
     }))
+}
+
+fn parse_tolerance_table(
+    tol: &toml::map::Map<String, Value>,
+    where_: &str,
+) -> Result<ToleranceMaps, Box<dyn std::error::Error>> {
+    keys(tol, &["absolute", "relative_percent"], where_)?;
+    let absolute = parse_tolerances(tol.get("absolute"), "absolute")?;
+    let relative_percent = parse_tolerances(tol.get("relative_percent"), "relative_percent")?;
+    Ok((absolute, relative_percent))
 }
 fn parse_tolerances(
     raw: Option<&Value>,
@@ -641,23 +752,69 @@ mod tests {
     fn parses_legacy_inline() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nvariant='v'\nloadcase='l'\n[inputs]\nsimulation_hdf5='x.h5'\n[physics]\ngravity=9.8\n[signals.x]\nentity='e'\ncomponent='c'\nunit='u'\n").unwrap();
+        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nloadcase='l'\n[inputs]\nsimulation_json='x.json'\n[physics]\ngravity=9.8\n[signals.x]\nentity='e'\ncomponent='c'\nunit='u'\n").unwrap();
         let c = load_config(&p).unwrap();
         assert_eq!(c.signals["x"].entity, "e");
-        assert_eq!(c.simulation_hdf5, d.path().join("x.h5"));
+        assert_eq!(c.simulation_json, d.path().join("x.json"));
     }
     #[test]
     fn rejects_unknown_and_bad_tolerance() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nvariant='v'\nloadcase='l'\nextra=1\n[inputs]\nsimulation_hdf5='x'\n[physics]\ngravity=9.8\n").unwrap();
+        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nloadcase='l'\nextra=1\n[inputs]\nsimulation_json='x.json'\n[physics]\ngravity=9.8\n").unwrap();
         assert!(load_config(&p).unwrap_err().to_string().contains("unknown"));
+    }
+
+    #[test]
+    fn parses_modular_signal_mappings_and_tolerances() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("signals.toml"),
+            "[signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("tolerances.toml"),
+            "[absolute]\ntotal_mass_kg=1\n",
+        )
+        .unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[case]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[svc.inputs]\nsimulation_json='simulation.json'\nmeasurement_reference='reference.json'\n[svc.mappings]\nfile='signals.toml'\n[svc.validation]\ntolerances='tolerances.toml'\n",
+        )
+        .unwrap();
+
+        let config = load_config(&p).unwrap();
+        assert_eq!(config.signals["total"].unit, "kg");
+        assert_eq!(
+            config.validation.unwrap().tolerances.absolute["total_mass_kg"],
+            1.0
+        );
+    }
+
+    #[test]
+    fn rejects_modular_and_inline_signal_mappings_together() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("signals.toml"),
+            "[signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+        )
+        .unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[case]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[svc.inputs]\nsimulation_json='simulation.json'\n[svc.mappings]\nfile='signals.toml'\n[svc.mappings.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+        )
+        .unwrap();
+
+        assert!(load_config(&p).unwrap_err().to_string().contains("both"));
     }
     #[test]
     fn parses_vertical_only_unified_config() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p, "[case]\nname='n'\nvariant='v'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\ncode='x'\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
+        fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\ncode='x'\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.configured_domains(), vec![Domain::Knc]);
     }

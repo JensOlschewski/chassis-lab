@@ -2,7 +2,6 @@
     "schema_version": 1,
     "case": {
         "name": "example-config",
-        "variant": "EXAMPLE",
         "loadcase": "2UP"
     },
     "coordinate_system": {

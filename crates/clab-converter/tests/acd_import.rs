@@ -64,8 +64,10 @@ fn rejects_acd_without_exact_time_channel() {
 #[test]
 fn committed_vertical_examples_are_valid_and_correspond() {
     let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
-    let source = examples.join("example-vertical.acd");
-    let expected = MeasurementFile::open(examples.join("example-vertical.h5")).unwrap();
+    let source = examples.join("../../../examples/example-measurement-vertical.acd");
+    let expected =
+        MeasurementFile::open(examples.join("../../../examples/example-measurement-vertical.h5"))
+            .unwrap();
     let directory = tempdir().unwrap();
     let output = directory.path().join("example-vertical.h5");
 

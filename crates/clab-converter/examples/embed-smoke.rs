@@ -106,7 +106,13 @@ fn initialize_python() -> Result<Option<PathBuf>> {
         .parent()
         .and_then(Path::parent)
         .filter(|root| root.join("lib/python3.12").is_dir())
-        .map(Path::to_path_buf);
+        .map(|root| {
+            if cfg!(windows) {
+                root.join("lib/python3.12")
+            } else {
+                root.to_path_buf()
+            }
+        });
 
     if let Some(runtime) = &runtime {
         initialize_isolated(runtime, &executable)?;
