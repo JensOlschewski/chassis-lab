@@ -174,6 +174,20 @@ fn report_paths(args: &ValidateArgs, selected: &[Domain]) -> Result<ReportPaths>
             }),
         });
     }
+    if selected.len() > 1 {
+        return Ok(ReportPaths {
+            svc: selected
+                .contains(&Domain::Svc)
+                .then(|| (PathBuf::from("svc.json"), PathBuf::from("svc.csv"))),
+            knc: selected.contains(&Domain::Knc).then(|| {
+                (
+                    PathBuf::from("knc-vertical.json"),
+                    PathBuf::from("knc-vertical.csv"),
+                    PathBuf::from("knc-vertical.svg"),
+                )
+            }),
+        });
+    }
     match selected {
         [Domain::Svc] => Ok(ReportPaths { svc: match (args.json_output.clone(), args.csv_output.clone()) { (None, None) => None, (json, csv) => Some((json.ok_or_else(|| anyhow::anyhow!("--json-output and --csv-output must be provided together"))?, csv.ok_or_else(|| anyhow::anyhow!("--json-output and --csv-output must be provided together"))?)) }, knc: None }),
         [Domain::Knc] => Ok(ReportPaths { svc: None, knc: match (args.json_output.clone(), args.csv_output.clone(), args.plot_output.clone()) { (None, None, None) => None, (json, csv, svg) => Some((json.ok_or_else(|| anyhow::anyhow!("vertical reports require --json-output, --csv-output, and --plot-output"))?, csv.ok_or_else(|| anyhow::anyhow!("vertical reports require --json-output, --csv-output, and --plot-output"))?, svg.ok_or_else(|| anyhow::anyhow!("vertical reports require --json-output, --csv-output, and --plot-output"))?)) } }),
@@ -326,8 +340,8 @@ fn rollback_published(published: Vec<(PathBuf, Option<tempfile::NamedTempFile>)>
 
 #[cfg(test)]
 mod tests {
-    use super::{publish_staged, stage_reports};
-    use std::fs;
+    use super::{Domain, ValidateArgs, publish_staged, report_paths, stage_reports};
+    use std::{fs, path::PathBuf};
 
     #[test]
     fn failed_force_publish_restores_prior_outputs() {
@@ -347,5 +361,24 @@ mod tests {
         assert!(publish_staged(staged, true).is_err());
         assert_eq!(fs::read_to_string(first).unwrap(), "old");
         assert!(second.is_dir());
+    }
+
+    #[test]
+    fn combined_validation_defaults_reports_to_current_directory() {
+        let args = ValidateArgs {
+            config: "config.toml".into(),
+            domains: Vec::new(),
+            tests: Vec::new(),
+            output_dir: None,
+            json_output: None,
+            csv_output: None,
+            plot_output: None,
+            force: false,
+            color: super::svc::Color::Auto,
+        };
+        let reports = report_paths(&args, &[Domain::Svc, Domain::Knc]).unwrap();
+
+        assert_eq!(reports.svc.unwrap().0, PathBuf::from("svc.json"));
+        assert_eq!(reports.knc.unwrap().2, PathBuf::from("knc-vertical.svg"));
     }
 }
