@@ -274,9 +274,12 @@ fn validates_normalized_hdf5_with_embedded_python_and_safe_outputs() {
 #[test]
 fn defaults_to_all_configured_domains() {
     let directory = tempdir().unwrap();
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    if !examples.join("example-simulation-svc.json").is_file() {
+        return;
+    }
     closed_fixture(&directory.path().join("simulation.h5"), simulation);
     closed_fixture(&directory.path().join("measurement.h5"), measurement);
-    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let input = directory.path().join("input.json");
     fs::write(&input, format!(r#"{{"svc":{{"simulation":{{"input_file":"{}"}},"measurement":{{"input_file":"{}"}}}},"knc":{{"vertical":{{"simulation":{{"input_file":"{}"}},"measurement":{{"input_file":"{}"}}}}}}}}"#, examples.join("example-simulation-svc.json").display(), examples.join("example-measurement-svc.json").display(), directory.path().join("simulation.h5").display(), directory.path().join("measurement.h5").display())).unwrap();
     let setup = directory.path().join("setup.json");

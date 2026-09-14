@@ -52,6 +52,7 @@ pub struct VerticalConfig {
     pub window: VerticalWindow,
     pub signals: BTreeMap<String, SignalRef>,
     pub signal_map: Option<PathBuf>,
+    pub tolerances: ValidationTolerances,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Domain {
@@ -115,6 +116,7 @@ fn parse_function_first(
             "case",
             "physics",
             "input",
+            "signals",
             "mappings",
             "setup",
             "validation",
@@ -178,17 +180,15 @@ fn load_function_role_files(
     path: &Path,
 ) -> Result<toml::map::Map<String, Value>, Box<dyn std::error::Error>> {
     let mut root = root.clone();
-    for (section, json) in [
-        ("input", true),
-        ("setup", true),
-        ("mappings", false),
-        ("validation", false),
-    ] {
+    for section in ["input", "setup", "signals", "mappings", "validation"] {
         let Some(raw) = root.get(section) else {
             continue;
         };
         let section_table = table(raw, &format!("[{section}]"))?;
-        let Some(file) = section_table.get("input_file") else {
+        let Some(file) = section_table
+            .get("file")
+            .or_else(|| section_table.get("input_file"))
+        else {
             continue;
         };
         if section_table.len() != 1 {
@@ -197,14 +197,16 @@ fn load_function_role_files(
             ))
             .into());
         }
-        let file = resolve(file, path, &format!("[{section}].input_file"))?;
+        let legacy_json =
+            section_table.contains_key("input_file") && matches!(section, "input" | "setup");
+        let file = resolve(file, path, &format!("[{section}].file"))?;
         let text = fs::read_to_string(&file).map_err(|error| {
             ConfigError(format!(
                 "failed to read {section} file '{}': {error}",
                 file.display()
             ))
         })?;
-        let external = if json {
+        let mut external = if legacy_json {
             let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| {
                 ConfigError(format!("invalid JSON in {}: {error}", file.display()))
             })?;
@@ -214,9 +216,47 @@ fn load_function_role_files(
                 ConfigError(format!("invalid TOML in {}: {error}", file.display()))
             })?)
         };
+        resolve_external_paths(
+            &mut external,
+            file.parent().unwrap_or_else(|| Path::new(".")),
+        )?;
         root.insert(section.into(), external);
     }
     Ok(root)
+}
+
+/// Resolve paths declared inside an external role against that role's directory.
+///
+/// Role contents lose their original location when merged into case config, so
+/// normalize references before merging.
+fn resolve_external_paths(
+    value: &mut Value,
+    base: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match value {
+        Value::Table(table) => {
+            for (key, value) in table {
+                if matches!(key.as_str(), "file" | "input_file") {
+                    if let Some(path) = value.as_str() {
+                        let path = expand(Path::new(path))?;
+                        if !path.is_absolute() {
+                            *value =
+                                Value::String(absolute(&base.join(path))?.display().to_string());
+                        }
+                    }
+                } else {
+                    resolve_external_paths(value, base)?;
+                }
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                resolve_external_paths(value, base)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn json_to_toml(
@@ -270,7 +310,7 @@ fn function_svc(
             resolve(
                 &Value::String(p.to_string_lossy().into()),
                 path,
-                "[input.svc.simulation].input_file",
+                "[input.svc.simulation].file",
             )
         })
         .transpose()?;
@@ -279,7 +319,7 @@ fn function_svc(
         return Ok(None);
     };
     let mappings = merged_mapping(root, "svc", None, path)?;
-    let signals = parse_signals(Some(&Value::Table(mappings.clone())), "[mappings.svc]")?;
+    let signals = parse_signals(Some(&Value::Table(mappings.clone())), "[signals.svc]")?;
     let validation = function_validation(root, measurement, path)?;
     let map_path = mapping_file_path(root, "svc", None, path)?;
     Ok(Some((simulation, signals, validation, map_path)))
@@ -339,6 +379,15 @@ fn function_vertical(
     });
     vertical.insert("setup".into(), Value::Table(setup_copy));
     vertical.insert("window".into(), window);
+    if let Some(validation) = root
+        .get("validation")
+        .and_then(Value::as_table)
+        .and_then(|v| v.get("knc"))
+        .and_then(Value::as_table)
+        .and_then(|v| v.get("vertical"))
+    {
+        vertical.insert("validation".into(), validation.clone());
+    }
     Ok(Some(parse_vertical(&Value::Table(vertical), path)?))
 }
 
@@ -351,10 +400,13 @@ fn function_input(
         return Ok(None);
     };
     let table = table(raw, &format!("{where_}.{name}"))?;
-    keys(table, &["input_file"], &format!("{where_}.{name}"))?;
+    keys(table, &["file", "input_file"], &format!("{where_}.{name}"))?;
     Ok(Some(PathBuf::from(string_value(
-        value(table, "input_file", where_)?,
-        "input_file",
+        table
+            .get("file")
+            .or_else(|| table.get("input_file"))
+            .unwrap(),
+        "file",
     )?)))
 }
 
@@ -365,37 +417,46 @@ fn merged_mapping(
     path: &Path,
 ) -> Result<Map<String, Value>, Box<dyn std::error::Error>> {
     let all = root
-        .get("mappings")
-        .map(|v| table(v, "[mappings]"))
+        .get("signals")
+        .map(|v| table(v, "[signals]"))
+        .or_else(|| root.get("mappings").map(|v| table(v, "[mappings]")))
         .transpose()?;
     let mut result = Map::new();
     if let Some(all) = all
         && let Some(base) = all.get(domain)
     {
-        let base_table = table(base, &format!("[mappings.{domain}]"))?;
+        let base_table = table(base, &format!("[signals.{domain}]"))?;
         if let Some(shared) = base_table.get("base") {
             merge_mapping_source(
                 &mut result,
                 shared,
                 path,
-                &format!("[mappings.{domain}.base]"),
+                &format!("[signals.{domain}.base]"),
             )?;
         } else {
-            merge_mapping_source(&mut result, base, path, &format!("[mappings.{domain}]"))?;
+            merge_mapping_source(
+                &mut result,
+                base_table.get("signals").unwrap_or(base),
+                path,
+                &format!("[signals.{domain}.signals]"),
+            )?;
         }
         if let Some(test) = test
             && let Some(child) = base_table.get(test)
         {
             merge_mapping_source(
                 &mut result,
-                child,
+                child
+                    .as_table()
+                    .and_then(|table| table.get("signals"))
+                    .unwrap_or(child),
                 path,
-                &format!("[mappings.{domain}.{test}]"),
+                &format!("[signals.{domain}.{test}]"),
             )?;
         }
     }
     if result.is_empty() {
-        return Err(ConfigError(format!("[mappings.{domain}] must define mappings")).into());
+        return Err(ConfigError(format!("[signals.{domain}] must define mappings")).into());
     }
     Ok(result)
 }
@@ -485,7 +546,21 @@ fn function_validation(
         .and_then(|v| v.get("svc"));
     let tolerances = validation
         .and_then(Value::as_table)
-        .and_then(|v| v.get("tolerances"));
+        .and_then(|v| v.get("validation"))
+        .and_then(Value::as_table)
+        .and_then(|v| v.get("tolerances"))
+        .or_else(|| {
+            validation
+                .and_then(Value::as_table)
+                .and_then(|v| v.get("tolerances"))
+        })
+        .or_else(|| {
+            root.get("validation")
+                .and_then(Value::as_table)
+                .and_then(|v| v.get("svc"))
+                .and_then(Value::as_table)
+                .and_then(|v| v.get("tolerances"))
+        });
     let reference = resolve(
         &Value::String(reference.to_string_lossy().into()),
         path,
@@ -525,6 +600,7 @@ fn parse_legacy(
             "signal_map",
             "signals",
             "signal_mappings",
+            "validation",
             "validation",
         ],
         "top level",
@@ -687,6 +763,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             "window",
             "signals",
             "signal_mappings",
+            "validation",
         ],
         "[vertical]",
     )?;
@@ -793,6 +870,37 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
         },
         signals: source.1,
         signal_map: source.0,
+        tolerances: vertical_tolerances(v)?,
+    })
+}
+
+fn vertical_tolerances(
+    vertical: &toml::map::Map<String, Value>,
+) -> Result<ValidationTolerances, Box<dyn std::error::Error>> {
+    let Some(validation) = vertical.get("validation") else {
+        return Ok(ValidationTolerances {
+            absolute: BTreeMap::new(),
+            relative_percent: BTreeMap::new(),
+        });
+    };
+    let validation = table(validation, "[vertical.validation]")?;
+    let tolerances = validation
+        .get("tolerances")
+        .or_else(|| {
+            validation
+                .get("validation")
+                .and_then(Value::as_table)
+                .and_then(|v| v.get("tolerances"))
+        })
+        .map(|value| table(value, "[vertical.validation.tolerances]"))
+        .transpose()?;
+    let (absolute, relative_percent) = tolerances
+        .map(|value| parse_tolerance_table(value, "[vertical.validation.tolerances]"))
+        .transpose()?
+        .unwrap_or_default();
+    Ok(ValidationTolerances {
+        absolute,
+        relative_percent,
     })
 }
 
@@ -1249,6 +1357,29 @@ mod tests {
     }
 
     #[test]
+    fn resolves_external_input_paths_relative_to_input_role_file() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir(d.path().join("input")).unwrap();
+        fs::write(
+            d.path().join("input/input.toml"),
+            "[svc.simulation]\nfile='data/simulation.json'\n[svc.measurement]\nfile='data/reference.json'\n",
+        )
+        .unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[meta]\nname='n'\nloadcase='l'\n[input]\nfile='input/input.toml'\n[signals.svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+        )
+        .unwrap();
+
+        let config = load_config(&p).unwrap();
+        assert_eq!(
+            config.simulation_json,
+            d.path().join("input/data/simulation.json")
+        );
+    }
+
+    #[test]
     fn meta_rejects_redundant_domain() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
@@ -1258,5 +1389,35 @@ mod tests {
         )
         .unwrap();
         assert!(load_config(&p).unwrap_err().to_string().contains("unknown"));
+    }
+
+    #[test]
+    fn parses_canonical_inline_roles() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(&p, "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input.svc.simulation]\nfile='simulation.json'\n[input.svc.measurement]\nfile='reference.json'\n[signals.svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[validation.svc.tolerances.absolute]\ntotal=1\n").unwrap();
+        let config = load_config(&p).unwrap();
+        assert_eq!(config.signals["total"].unit, "kg");
+        assert_eq!(config.validation.unwrap().tolerances.absolute["total"], 1.0);
+    }
+
+    #[test]
+    fn parses_canonical_toml_role_files_and_signal_inheritance() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("input.toml"), "[svc.simulation]\nfile='simulation.json'\n[svc.measurement]\nfile='reference.json'\n[knc.vertical.simulation]\nfile='simulation.h5'\n[knc.vertical.measurement]\nfile='measurement.h5'\n").unwrap();
+        fs::write(d.path().join("setup.toml"), "[knc.vertical]\ncode='v'\nbrakes_applied=false\nengine_running=false\nfront_arb_connected=true\n[knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n").unwrap();
+        fs::write(d.path().join("signals.toml"), "[svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[knc.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n[knc.vertical.signals.front_left_wheel_center_x]\nentity='fl'\ncomponent='x'\nunit='mm'\n").unwrap();
+        fs::write(
+            d.path().join("validation.toml"),
+            "[svc.validation.tolerances.absolute]\ntotal=1\n",
+        )
+        .unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(&p, "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input]\nfile='input.toml'\n[setup]\nfile='setup.toml'\n[signals]\nfile='signals.toml'\n[validation]\nfile='validation.toml'\n").unwrap();
+        let config = load_config(&p).unwrap();
+        assert_eq!(config.signals["total"].unit, "kg");
+        let vertical = config.vertical.unwrap();
+        assert_eq!(vertical.signals["front_left_travel"].component, "travel");
+        assert_eq!(vertical.signals["front_left_wheel_center_x"].component, "x");
     }
 }

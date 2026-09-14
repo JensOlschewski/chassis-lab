@@ -1,52 +1,27 @@
-# Canonical combined function-first configuration.
+# Example configuration.
 #
-# [meta] contains only stable case identity. There is no domain field: domains
-# are discovered from roles configured in [input].
-# Relative paths in this file and its role files resolve from this file's folder.
+# Modular approach:
+# Each config role is stored in its own file.
+
 [meta]
-# Stable identifier used in reports and reference matching.
 name = "example-config"
-# Physical loading condition for this case.
 loadcase = "example-loadcase"
 
 [physics]
-# Shared physical constants used by domain calculations.
-gravity = 9.80665
+gravity = 9.80665 # m/s²
 
 [input]
-# One JSON role file keeps all executable input paths together.
-# It contains [svc] simulation/measurement and [knc.vertical] paths.
-input_file = "example-input.json"
+# Simulation and measurement sources (.res or .acd).
+file = "example-input.toml"
 
 [setup]
-# One JSON role file contains setup values for configured KnC tests.
-input_file = "example-setup.json"
+# test definitions and their setup values.
+file = "example-setup.toml"
 
-[mappings]
-# One TOML role file contains SVC mappings and shared KnC mappings.
-# Test-specific KnC mappings can add to or override the shared base.
-input_file = "example-input.toml"
+[signals]
+# signal mappings; test-specific mappings extend or override them.
+file = "example-signal-mappings.toml"
 
 [validation]
-# One TOML role file contains validation policy. SVC tolerances are optional;
-# without them, comparisons are informational rather than acceptance checks.
-input_file = "example-validation.toml"
-
-# Inline role sections can replace external files for small cases. These are
-# equivalent examples; do not define the same role both inline and externally.
-# [input.svc.simulation]
-# input_file = "example-simulation-svc.json"
-# [input.svc.measurement]
-# input_file = "example-measurement-svc.json"
-# [input.knc.vertical.simulation]
-# input_file = "example-simulation-vertical.h5"
-# [input.knc.vertical.measurement]
-# input_file = "example-measurement-vertical.h5"
-# [mappings.svc]
-# file = "example-signals.toml"
-# [mappings.knc]
-# file = "example-vertical-signals.toml"
-# [mappings.knc.vertical]
-# # Shared KnC mappings apply first; vertical values override or extend them.
-# [mappings.knc.vertical.front_left_travel]
-# unit = "mm"
+# optional tolerance definition, without `clab validate` results remain informational.
+file = "example-validation-tolerances.toml"

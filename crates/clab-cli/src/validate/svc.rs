@@ -420,22 +420,16 @@ fn print_console(config: &CaseConfig, reference: &SvcReference, metrics: &[Metri
         metrics.len()
     );
     for metric in metrics {
-        let status = if metric.passed { "ok" } else { "FAILED" };
-        let status = if color {
-            format!(
-                "{}{}\x1b[0m",
-                if metric.passed {
-                    "\x1b[32m"
-                } else {
-                    "\x1b[31m"
-                },
-                status
-            )
+        let configured = metric.absolute_tolerance.is_some() || metric.relative_percent.is_some();
+        let status = if !configured {
+            paint_status("missing", "\x1b[33m", color)
+        } else if metric.passed {
+            paint_status("ok", "\x1b[32m", color)
         } else {
-            status.into()
+            paint_status("failed", "\x1b[31m", color)
         };
         println!(
-            "  {} ... {} (actual {:.8}; reference {:.8}; diff {:.8} {} {:.8} {})",
+            "  svc::{} ... {} (actual {:.8}; reference {:.8}; diff {:.8} {} {:.8} {})",
             metric.name,
             status,
             metric.actual,
@@ -447,25 +441,30 @@ fn print_console(config: &CaseConfig, reference: &SvcReference, metrics: &[Metri
         );
     }
     let failed = metrics.iter().filter(|m| !m.passed).count();
-    let informational = metrics
-        .iter()
-        .all(|metric| metric.absolute_tolerance.is_none() && metric.relative_percent.is_none());
     println!(
         "\nvalidation result: {}. {} passed; {} failed; {} total",
-        if informational {
-            "informational (no SVC tolerances configured)"
-        } else if failed == 0 {
-            "ok"
-        } else {
-            "FAILED"
-        },
-        metrics.len() - failed,
+        if failed == 0 { "ok" } else { "failed" },
+        metrics
+            .iter()
+            .filter(|metric| {
+                metric.passed
+                    && (metric.absolute_tolerance.is_some() || metric.relative_percent.is_some())
+            })
+            .count(),
         failed,
         metrics.len()
     );
 }
 
-fn color_enabled(color: Color) -> bool {
+pub(crate) fn paint_status(status: &str, colour: &str, enabled: bool) -> String {
+    if enabled {
+        format!("{colour}{status}\x1b[0m")
+    } else {
+        status.into()
+    }
+}
+
+pub(crate) fn color_enabled(color: Color) -> bool {
     color_enabled_for(
         color,
         std::io::stdout().is_terminal(),

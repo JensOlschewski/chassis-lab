@@ -5,6 +5,7 @@ use clap_complete::{Shell, generate};
 mod check;
 mod convert;
 mod inspect;
+mod signals;
 mod validate;
 
 #[derive(Debug, Parser)]
@@ -24,6 +25,8 @@ enum Command {
     Inspect(inspect::InspectArgs),
     /// Convert a supported input to HDF5.
     Convert(convert::ConvertArgs),
+    /// List canonical signals or generate a TOML mapping template.
+    Signals(signals::SignalsArgs),
     /// Generate shell completion scripts.
     Completion { shell: Shell },
 }
@@ -47,6 +50,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Check(args) => check::check(args),
         Command::Inspect(args) => inspect::inspect(args),
         Command::Convert(args) => convert::convert(args),
+        Command::Signals(args) => signals::signals(args),
         Command::Completion { shell } => {
             generate(shell, &mut Cli::command(), "clab", &mut std::io::stdout());
             Ok(())

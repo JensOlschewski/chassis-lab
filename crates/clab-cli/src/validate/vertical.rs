@@ -8,6 +8,7 @@ use std::{
     sync::OnceLock,
 };
 
+use super::svc::{color_enabled, paint_status};
 use anyhow::{Context, Result, bail};
 use clab_core::{
     config::{CaseConfig, SignalRef},
@@ -64,7 +65,7 @@ pub(crate) struct Reports {
     pub svg: String,
 }
 
-pub(crate) fn validate(config: &CaseConfig) -> Result<Reports> {
+pub(crate) fn validate(config: &CaseConfig, color: super::svc::Color) -> Result<(Reports, bool)> {
     let vertical = config
         .vertical
         .as_ref()
@@ -91,23 +92,87 @@ pub(crate) fn validate(config: &CaseConfig) -> Result<Reports> {
         "case: {} ({}, {})",
         config.name, config.loadcase, vertical.setup.code
     );
-    for comparison in &response.comparisons {
-        println!(
-            "{} {}: measurement baseline {:.8} mm; simulation baseline {:.8} mm; RMSE {:.8} mm; max {:.8} mm",
-            comparison.corner,
-            comparison.axis,
-            comparison.measurement_baseline_mm,
-            comparison.simulation_baseline_mm,
-            comparison.rmse_mm,
-            comparison.maximum_error_mm
-        );
+    let tolerance_failed = validate_tolerances(config, &response.comparisons, color)?;
+    Ok((
+        Reports {
+            json: serde_json::to_string_pretty(&report)? + "\n",
+            csv: csv_text(config, &response.comparisons)?,
+            svg: response.svg,
+        },
+        tolerance_failed,
+    ))
+}
+
+fn validate_tolerances(
+    config: &CaseConfig,
+    comparisons: &[Comparison],
+    color: super::svc::Color,
+) -> Result<bool> {
+    let tolerances = &config.vertical.as_ref().unwrap().tolerances;
+    if !tolerances.relative_percent.is_empty() {
+        bail!("relative vertical tolerances are not supported; use absolute tolerances")
     }
-    println!("validation result: informational (no vertical tolerances configured)");
-    Ok(Reports {
-        json: serde_json::to_string_pretty(&report)? + "\n",
-        csv: csv_text(config, &response.comparisons)?,
-        svg: response.svg,
-    })
+    let expected = comparisons
+        .iter()
+        .map(|comparison| format!("{}_wheel_center_{}_mm", comparison.corner, comparison.axis))
+        .collect::<std::collections::BTreeSet<_>>();
+    for name in tolerances.absolute.keys() {
+        if !expected.contains(name) {
+            bail!("tolerance configured for unknown vertical metric: {name}")
+        }
+    }
+    let mut failed = false;
+    let mut passed = 0;
+    let mut missing = 0;
+    for comparison in comparisons {
+        let name = format!(
+            "{}_{}_{}_mm",
+            comparison.corner, "wheel_center", comparison.axis
+        );
+        if let Some(tolerance) = tolerances.absolute.get(&name) {
+            let metric_passed = comparison.maximum_error_mm <= *tolerance;
+            println!(
+                "  knc::vertical::{name} ... {} (actual {:.8}; reference 0.00000000; diff {:.8} {} {:.8} mm)",
+                paint_status(
+                    if metric_passed { "ok" } else { "failed" },
+                    if metric_passed {
+                        "\x1b[32m"
+                    } else {
+                        "\x1b[31m"
+                    },
+                    color_enabled(color)
+                ),
+                comparison.maximum_error_mm,
+                comparison.maximum_error_mm,
+                if metric_passed { "<=" } else { ">" },
+                tolerance,
+            );
+            if metric_passed {
+                passed += 1;
+            }
+            failed |= !metric_passed;
+        } else {
+            missing += 1;
+            println!(
+                "  knc::vertical::{name} ... {} (actual max {:.8}; tolerance missing)",
+                paint_status("missing", "\x1b[33m", color_enabled(color)),
+                comparison.maximum_error_mm
+            );
+        }
+    }
+    println!(
+        "\nvalidation result: {}. {passed} passed; {failed_count} failed; {total} total",
+        if failed {
+            "failed"
+        } else if missing > 0 {
+            "incomplete"
+        } else {
+            "ok"
+        },
+        failed_count = comparisons.len() - passed - missing,
+        total = comparisons.len()
+    );
+    Ok(failed)
 }
 
 pub(crate) fn preflight(config: &CaseConfig) -> Result<()> {

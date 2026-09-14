@@ -77,7 +77,8 @@ pub(crate) fn validate(args: ValidateArgs) -> Result<()> {
                 tolerance_failed |= failed;
             }
             Domain::Knc => {
-                let report = vertical::validate(&config)?;
+                let (report, failed) = vertical::validate(&config, args.color)?;
+                tolerance_failed |= failed;
                 if let Some(paths) = &reports.knc {
                     contents.extend([
                         (paths.0.clone(), report.json),

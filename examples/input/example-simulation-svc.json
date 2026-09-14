@@ -231,6 +231,6 @@
   ],
   "sample_count": 1,
   "schema_version": 1,
-  "source_file": "examples/example-simulation-svc.res",
+  "source_file": "./examples/input/raw-data/example-simulation-svc.res",
   "values_per_sample": 25
 }
