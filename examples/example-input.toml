@@ -1,0 +1,9 @@
+# Combined role mappings. `base` is shared by domain; test tables override it.
+[svc.base]
+file = "example-signals.toml"
+
+[knc.base]
+file = "example-vertical-signals.toml"
+
+[knc.vertical]
+# Test-specific mapping overrides can be added here.

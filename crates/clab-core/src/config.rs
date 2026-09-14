@@ -62,7 +62,6 @@ pub enum Domain {
 pub struct CaseConfig {
     pub path: PathBuf,
     pub name: String,
-    pub domain: String,
     pub loadcase: String,
     pub simulation_json: PathBuf,
     pub gravity: f64,
@@ -108,9 +107,11 @@ fn parse_function_first(
     root: &toml::map::Map<String, Value>,
     path: &Path,
 ) -> Result<CaseConfig, Box<dyn std::error::Error>> {
+    let root = load_function_role_files(root, path)?;
     keys(
-        root,
+        &root,
         &[
+            "meta",
             "case",
             "physics",
             "input",
@@ -120,15 +121,27 @@ fn parse_function_first(
         ],
         "top level",
     )?;
-    let case = table(
-        root.get("case")
-            .ok_or_else(|| ConfigError("missing required [case] table".into()))?,
-        "[case]",
-    )?;
-    keys(case, &["name", "domain", "loadcase"], "[case]")?;
-    require(case, "name", "[case]")?;
-    require(case, "loadcase", "[case]")?;
-    let input = table(value(root, "input", "top level")?, "[input]")?;
+    let (case, case_where) = if let Some(meta) = root.get("meta") {
+        (table(meta, "[meta]")?, "[meta]")
+    } else {
+        (
+            table(
+                root.get("case")
+                    .ok_or_else(|| ConfigError("missing required [meta] table".into()))?,
+                "[case]",
+            )?,
+            "[case]",
+        )
+    };
+    let case_keys = if case_where == "[case]" {
+        &["name", "domain", "loadcase"][..]
+    } else {
+        &["name", "loadcase"][..]
+    };
+    keys(case, case_keys, case_where)?;
+    require(case, "name", case_where)?;
+    require(case, "loadcase", case_where)?;
+    let input = table(value(&root, "input", "top level")?, "[input]")?;
     keys(input, &["svc", "knc"], "[input]")?;
     let physics = root
         .get("physics")
@@ -140,8 +153,8 @@ fn parse_function_first(
         .transpose()?
         .unwrap_or(9.80665);
 
-    let svc = function_svc(root, input, path)?;
-    let vertical = function_vertical(root, input, path)?;
+    let svc = function_svc(&root, input, path)?;
+    let vertical = function_vertical(&root, input, path)?;
     if svc.is_none() && vertical.is_none() {
         return Err(ConfigError("[input] must define at least one domain".into()).into());
     }
@@ -149,21 +162,90 @@ fn parse_function_first(
         svc.unwrap_or_else(|| (PathBuf::new(), BTreeMap::new(), None, None));
     Ok(CaseConfig {
         path: path.to_path_buf(),
-        name: string(case, "name", "[case]")?,
-        domain: string(case, "domain", "[case]").unwrap_or_else(|_| {
-            if vertical.is_some() {
-                "knc".into()
-            } else {
-                "svc".into()
-            }
-        }),
-        loadcase: string(case, "loadcase", "[case]")?,
+        name: string(case, "name", case_where)?,
+        loadcase: string(case, "loadcase", case_where)?,
         simulation_json,
         gravity,
         signals,
         validation,
         vertical,
         svc_signal_map,
+    })
+}
+
+fn load_function_role_files(
+    root: &toml::map::Map<String, Value>,
+    path: &Path,
+) -> Result<toml::map::Map<String, Value>, Box<dyn std::error::Error>> {
+    let mut root = root.clone();
+    for (section, json) in [
+        ("input", true),
+        ("setup", true),
+        ("mappings", false),
+        ("validation", false),
+    ] {
+        let Some(raw) = root.get(section) else {
+            continue;
+        };
+        let section_table = table(raw, &format!("[{section}]"))?;
+        let Some(file) = section_table.get("input_file") else {
+            continue;
+        };
+        if section_table.len() != 1 {
+            return Err(ConfigError(format!(
+                "[{section}] input_file cannot be combined with inline values"
+            ))
+            .into());
+        }
+        let file = resolve(file, path, &format!("[{section}].input_file"))?;
+        let text = fs::read_to_string(&file).map_err(|error| {
+            ConfigError(format!(
+                "failed to read {section} file '{}': {error}",
+                file.display()
+            ))
+        })?;
+        let external = if json {
+            let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| {
+                ConfigError(format!("invalid JSON in {}: {error}", file.display()))
+            })?;
+            json_to_toml(&value, &format!("{section} file {}", file.display()))?
+        } else {
+            Value::Table(text.parse::<toml::Table>().map_err(|error| {
+                ConfigError(format!("invalid TOML in {}: {error}", file.display()))
+            })?)
+        };
+        root.insert(section.into(), external);
+    }
+    Ok(root)
+}
+
+fn json_to_toml(
+    value: &serde_json::Value,
+    where_: &str,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    Ok(match value {
+        serde_json::Value::Null => {
+            return Err(ConfigError(format!("{where_} cannot contain null")).into());
+        }
+        serde_json::Value::Bool(value) => Value::Boolean(*value),
+        serde_json::Value::Number(value) => Value::Float(
+            value
+                .as_f64()
+                .ok_or_else(|| ConfigError(format!("{where_} contains invalid number")))?,
+        ),
+        serde_json::Value::String(value) => Value::String(value.clone()),
+        serde_json::Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .map(|value| json_to_toml(value, where_))
+                .collect::<Result<_, _>>()?,
+        ),
+        serde_json::Value::Object(values) => Value::Table(
+            values
+                .iter()
+                .map(|(key, value)| Ok((key.clone(), json_to_toml(value, where_)?)))
+                .collect::<Result<_, Box<dyn std::error::Error>>>()?,
+        ),
     })
 }
 
@@ -290,9 +372,19 @@ fn merged_mapping(
     if let Some(all) = all
         && let Some(base) = all.get(domain)
     {
-        merge_mapping_source(&mut result, base, path, &format!("[mappings.{domain}]"))?;
+        let base_table = table(base, &format!("[mappings.{domain}]"))?;
+        if let Some(shared) = base_table.get("base") {
+            merge_mapping_source(
+                &mut result,
+                shared,
+                path,
+                &format!("[mappings.{domain}.base]"),
+            )?;
+        } else {
+            merge_mapping_source(&mut result, base, path, &format!("[mappings.{domain}]"))?;
+        }
         if let Some(test) = test
-            && let Some(child) = table(base, &format!("[mappings.{domain}]"))?.get(test)
+            && let Some(child) = base_table.get(test)
         {
             merge_mapping_source(
                 &mut result,
@@ -371,6 +463,7 @@ fn mapping_file_path(
     };
     let source = test
         .and_then(|t| base.get(t).and_then(Value::as_table))
+        .or_else(|| base.get("base").and_then(Value::as_table))
         .unwrap_or(base);
     source
         .get("file")
@@ -468,7 +561,6 @@ fn parse_legacy(
     Ok(CaseConfig {
         path: path.to_path_buf(),
         name: string(case, "name", "[case]")?,
-        domain: string(case, "domain", "[case]")?,
         loadcase: string(case, "loadcase", "[case]")?,
         simulation_json: resolve(
             value(inputs, "simulation_json", "[inputs]")?,
@@ -574,13 +666,6 @@ fn parse_unified(
     Ok(CaseConfig {
         path: path.to_path_buf(),
         name: string(case, "name", "[case]")?,
-        domain: if vertical.is_some() && !simulation_json.as_os_str().is_empty() {
-            "multi".into()
-        } else if vertical.is_some() {
-            "knc".into()
-        } else {
-            "svc".into()
-        },
         loadcase: string(case, "loadcase", "[case]")?,
         simulation_json,
         gravity,
@@ -1134,5 +1219,44 @@ mod tests {
         fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\ncode='x'\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.configured_domains(), vec![Domain::Knc]);
+    }
+
+    #[test]
+    fn parses_external_function_first_role_files() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("input.json"),
+            r#"{"svc":{"simulation":{"input_file":"simulation.json"},"measurement":{"input_file":"reference.json"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("mappings.toml"),
+            "[svc.base.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+        )
+        .unwrap();
+        fs::write(d.path().join("validation.toml"), "[svc]\n").unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[meta]\nname='n'\nloadcase='l'\n[input]\ninput_file='input.json'\n[mappings]\ninput_file='mappings.toml'\n[validation]\ninput_file='validation.toml'\n",
+        )
+        .unwrap();
+
+        let config = load_config(&p).unwrap();
+        assert_eq!(config.simulation_json, d.path().join("simulation.json"));
+        assert_eq!(config.validation.unwrap().tolerances.absolute.len(), 0);
+        assert_eq!(config.signals["total"].component, "c");
+    }
+
+    #[test]
+    fn meta_rejects_redundant_domain() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[meta]\nname='n'\ndomain='svc'\nloadcase='l'\n[input.svc.simulation]\ninput_file='simulation.json'\n[mappings.svc.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+        )
+        .unwrap();
+        assert!(load_config(&p).unwrap_err().to_string().contains("unknown"));
     }
 }

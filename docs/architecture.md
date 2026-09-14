@@ -177,6 +177,12 @@ file = "example-vertical-signals.toml"
 # inline values add to or override domain mappings
 ```
 
+External role files can replace inline sections. Input JSON combines SVC and
+KnC paths; setup JSON contains setup and window data; mappings TOML contains
+`[svc]` and `[knc]` bases plus test overrides; validation TOML contains optional
+policy. `[meta]` contains only `name` and `loadcase`; domain is derived. Paths
+resolve relative to main config.
+
 `[setup.knc.vertical]` contains setup flags and window bounds. Signal maps contain
 canonical names, entities, components, and units. Mapping precedence is shared <
 domain < test; child values override, child-only values add, missing values inherit,

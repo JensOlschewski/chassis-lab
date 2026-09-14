@@ -2,7 +2,7 @@
     "schema_version": 1,
     "case": {
         "name": "example-config",
-        "loadcase": "2UP"
+        "loadcase": "example-loadcase"
     },
     "coordinate_system": {
         "cg_x_origin": "front_axle_wheel_center",

@@ -5,12 +5,6 @@ use tempfile::tempdir;
 
 fn fixture_case(directory: &std::path::Path, failing: bool) -> std::path::PathBuf {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    let config = fs::read_to_string(root.join("example-config.toml"))
-        .unwrap()
-        .split("\n[input.knc.vertical.simulation]")
-        .next()
-        .unwrap()
-        .to_owned();
     let reference = fs::read_to_string(root.join("example-measurement-svc.json")).unwrap();
     let simulation = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/example-simulation-svc.json");
@@ -23,53 +17,13 @@ fn fixture_case(directory: &std::path::Path, failing: bool) -> std::path::PathBu
     };
     let reference_path = directory.join("reference.json");
     fs::write(&reference_path, reference).unwrap();
-    let config = config
-        .replace(
-            "\"example-simulation-svc.json\"",
-            &format!("\"{}\"", simulation.display()),
-        )
-        .replace(
-            "\"example-signals.toml\"",
-            &format!("\"{}\"", signals.display()),
-        )
-        .replace(
-            "\"example-svc-tolerances.toml\"",
-            &format!("\"{}\"", tolerances.display()),
-        )
-        .replace(
-            "\"example-measurement-svc.json\"",
-            &format!("\"{}\"", reference_path.display()),
-        )
-        .replace(
-            "\"example-vertical-signals.toml\"",
-            &format!(
-                "\"{}\"",
-                root.join("example-vertical-signals.toml").display()
-            ),
-        )
-        .replace(
-            "\"example-simulation-vertical.h5\"",
-            &format!(
-                "\"{}\"",
-                root.join("example-simulation-vertical.h5").display()
-            ),
-        )
-        .replace(
-            "\"example-measurement-vertical.h5\"",
-            &format!(
-                "\"{}\"",
-                root.join("example-measurement-vertical.h5").display()
-            ),
-        );
-    let tolerance_section = format!(
-        "[validation.svc]\ntolerances = \"{}\"",
+    let config = format!(
+        "[meta]\nname = 'example-config'\nloadcase = 'example-loadcase'\n[physics]\ngravity = 9.80665\n[input.svc.simulation]\ninput_file = '{}'\n[input.svc.measurement]\ninput_file = '{}'\n[mappings.svc]\nfile = '{}'\n[validation.svc]\ntolerances = '{}'\n",
+        simulation.display(),
+        reference_path.display(),
+        signals.display(),
         tolerances.display()
     );
-    let config = if config.contains("[validation.svc]") {
-        config.replace("[validation.svc]", &tolerance_section)
-    } else {
-        format!("{config}\n{tolerance_section}\n")
-    };
     let path = directory.join("case.toml");
     fs::write(&path, config).unwrap();
     path

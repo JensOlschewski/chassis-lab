@@ -32,30 +32,29 @@ replace an existing output.
 - TOML files define combined cases, inputs, signal mappings, setup, and tolerances.
 
 See [`examples/example-config.toml`](examples/example-config.toml) and its
-modular mapping files. Function-first sections use `[input.svc.simulation]`,
-`[input.svc.measurement]`, and `[input.knc.vertical.*]`. KnC mappings use
-`[mappings.knc]` as shared base and `[mappings.knc.vertical]` as test override;
-precedence is shared < domain < test with recursive table merge. All files use
-synthetic names and values as templates for private vehicle data.
+external role files. `[meta]` identifies case; `[input]`, `[setup]`,
+`[mappings]`, and `[validation]` point to role files resolved relative to main
+config. Input JSON combines SVC and KnC vertical paths. Mapping TOML uses
+`base` plus test overrides, with shared KnC mappings inherited by vertical.
+Inline function-first sections remain supported. All files use synthetic names
+and values as templates for private vehicle data.
 `examples/example-measurement-vertical.acd` converts to a matching
 HDF5 file; together they are a small synthetic vertical measurement pair.
 
 Vertical validation consumes normalized inputs only:
 
 ```text
-clab validate case.toml -t vertical --output-dir reports
+clab validate case.toml -t vertical
 ```
 
 SVC validation consumes readable simulation JSON and reviewed reference JSON:
 
 ```text
-clab validate case.toml -d svc --output-dir reports
+clab validate case.toml -d svc
 ```
 
 Without `-d`, `validate` runs every configured domain. `-d svc` and `-d knc`
-select domains; `-t vertical` selects KnC vertical validation. `--output-dir`
-creates `svc.json`, `svc.csv`, `knc-vertical.json`, `knc-vertical.csv`, and
-`knc-vertical.svg` for selected domains.
+select domains; `-t vertical` selects KnC vertical validation.
 
 Without report options, validation prints comparisons only and writes no report
 files. Explicit report options enable reports.

@@ -1,0 +1,12 @@
+{
+  "svc": {
+    "simulation": { "input_file": "example-simulation-svc.json" },
+    "measurement": { "input_file": "example-measurement-svc.json" }
+  },
+  "knc": {
+    "vertical": {
+      "simulation": { "input_file": "example-simulation-vertical.h5" },
+      "measurement": { "input_file": "example-measurement-vertical.h5" }
+    }
+  }
+}

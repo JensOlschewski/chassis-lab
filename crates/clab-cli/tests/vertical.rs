@@ -277,49 +277,29 @@ fn defaults_to_all_configured_domains() {
     closed_fixture(&directory.path().join("simulation.h5"), simulation);
     closed_fixture(&directory.path().join("measurement.h5"), measurement);
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    let svc_simulation = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/example-simulation-svc.json");
-    let svc = fs::read_to_string(examples.join("example-config.toml"))
-        .unwrap()
-        .replace(
-            "\"example-signals.toml\"",
-            &format!("\"{}\"", examples.join("example-signals.toml").display()),
-        )
-        .replace(
-            "\"example-measurement-svc.json\"",
-            &format!(
-                "\"{}\"",
-                examples.join("example-measurement-svc.json").display()
-            ),
-        )
-        .replace(
-            "\"example-svc-tolerances.toml\"",
-            &format!(
-                "\"{}\"",
-                examples.join("example-svc-tolerances.toml").display()
-            ),
-        )
-        .replace(
-            "\"example-simulation-svc.json\"",
-            &format!("\"{}\"", svc_simulation.display()),
-        )
-        .replace(
-            "\"example-vertical-signals.toml\"",
-            &format!(
-                "\"{}\"",
-                examples.join("example-vertical-signals.toml").display()
-            ),
-        )
-        .replace(
-            "\"example-simulation-vertical.h5\"",
-            &format!("\"{}\"", directory.path().join("simulation.h5").display()),
-        )
-        .replace(
-            "\"example-measurement-vertical.h5\"",
-            &format!("\"{}\"", directory.path().join("measurement.h5").display()),
-        )
-        .replace("brakes_applied = false", "brakes_applied = true")
-        .replace("rear_arb_connected = true", "");
+    let input = directory.path().join("input.json");
+    fs::write(&input, format!(r#"{{"svc":{{"simulation":{{"input_file":"{}"}},"measurement":{{"input_file":"{}"}}}},"knc":{{"vertical":{{"simulation":{{"input_file":"{}"}},"measurement":{{"input_file":"{}"}}}}}}}}"#, examples.join("example-simulation-svc.json").display(), examples.join("example-measurement-svc.json").display(), directory.path().join("simulation.h5").display(), directory.path().join("measurement.h5").display())).unwrap();
+    let setup = directory.path().join("setup.json");
+    fs::write(&setup, r#"{"knc":{"vertical":{"code":"example-vertical","brakes_applied":true,"engine_running":false,"front_arb_connected":true,"window":{"minimum_mm":-1,"maximum_mm":1,"step_mm":1}}}}"#).unwrap();
+    let mappings = directory.path().join("mappings.toml");
+    fs::write(
+        &mappings,
+        format!(
+            "[svc.base]\nfile = '{}'\n[knc.base]\nfile = '{}'\n[knc.vertical]\n",
+            examples.join("example-signals.toml").display(),
+            examples.join("example-vertical-signals.toml").display()
+        ),
+    )
+    .unwrap();
+    let validation = directory.path().join("validation.toml");
+    fs::write(&validation, "[svc]\n").unwrap();
+    let svc = format!(
+        "[meta]\nname='example-config'\nloadcase='example-loadcase'\n[physics]\ngravity=9.80665\n[input]\ninput_file='{}'\n[setup]\ninput_file='{}'\n[mappings]\ninput_file='{}'\n[validation]\ninput_file='{}'\n",
+        input.display(),
+        setup.display(),
+        mappings.display(),
+        validation.display()
+    );
     let case = directory.path().join("case.toml");
     fs::write(&case, svc).unwrap();
     let vertical_output = directory.path().join("vertical-reports");
