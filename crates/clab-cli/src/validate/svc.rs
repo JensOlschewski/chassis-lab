@@ -43,6 +43,21 @@ const GEOMETRY: [&str; 20] = [
     "rear_left_camber",
     "rear_right_camber",
 ];
+const REPORT_METRICS: [&str; 13] = [
+    "front_left_mass_kg",
+    "front_right_mass_kg",
+    "front_mass_kg",
+    "rear_left_mass_kg",
+    "rear_right_mass_kg",
+    "rear_mass_kg",
+    "total_mass_kg",
+    "front_distribution_percent",
+    "rear_distribution_percent",
+    "cg_x_from_front_axle_mm",
+    "front_track_mm",
+    "rear_track_mm",
+    "wheelbase_mm",
+];
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub(crate) enum Color {
@@ -263,7 +278,7 @@ fn compare(
     {
         bail!("tolerance configured for unknown reference metric(s): {name}");
     }
-    reference
+    let mut metrics = reference
         .values
         .iter()
         .map(|(name, expected)| {
@@ -296,7 +311,19 @@ fn compare(
                     || (measured - expected).abs() <= allowed,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    metrics.sort_by(|left, right| metric_order(&left.name, &right.name));
+    Ok(metrics)
+}
+
+fn metric_order(left: &str, right: &str) -> std::cmp::Ordering {
+    let index = |name: &str| {
+        REPORT_METRICS
+            .iter()
+            .position(|metric| *metric == name)
+            .unwrap_or(REPORT_METRICS.len())
+    };
+    index(left).cmp(&index(right)).then_with(|| left.cmp(right))
 }
 
 fn metric_unit(name: &str) -> Result<String> {
@@ -477,6 +504,7 @@ fn color_enabled_for(color: Color, terminal: bool, no_color: bool) -> bool {
 mod tests {
     use super::Color;
     use super::color_enabled_for;
+    use super::metric_order;
 
     #[test]
     fn color_modes_respect_terminal_and_no_color() {
@@ -485,5 +513,43 @@ mod tests {
         assert!(color_enabled_for(Color::Auto, true, false));
         assert!(!color_enabled_for(Color::Auto, true, true));
         assert!(!color_enabled_for(Color::Auto, false, false));
+    }
+
+    #[test]
+    fn orders_svc_metrics_for_readable_reports() {
+        let mut names = vec![
+            "wheelbase_mm",
+            "rear_mass_kg",
+            "front_right_mass_kg",
+            "total_mass_kg",
+            "front_left_mass_kg",
+            "rear_left_mass_kg",
+            "front_mass_kg",
+            "rear_right_mass_kg",
+            "front_distribution_percent",
+            "rear_distribution_percent",
+            "cg_x_from_front_axle_mm",
+            "front_track_mm",
+            "rear_track_mm",
+        ];
+        names.sort_by(|left, right| metric_order(left, right));
+        assert_eq!(
+            names,
+            [
+                "front_left_mass_kg",
+                "front_right_mass_kg",
+                "front_mass_kg",
+                "rear_left_mass_kg",
+                "rear_right_mass_kg",
+                "rear_mass_kg",
+                "total_mass_kg",
+                "front_distribution_percent",
+                "rear_distribution_percent",
+                "cg_x_from_front_axle_mm",
+                "front_track_mm",
+                "rear_track_mm",
+                "wheelbase_mm",
+            ]
+        );
     }
 }
