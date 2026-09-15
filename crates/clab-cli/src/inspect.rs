@@ -100,31 +100,99 @@ fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<
         Hdf5Input::Measurement(file) => {
             let summary = file.summary();
             println!("source file: {}", summary.source_file);
-            println!("format version: {}", summary.format_version);
-            println!("samples: {}", summary.sample_count);
-            println!("channels: {}", summary.channel_count);
-            println!("test metadata: {}", summary.test_info_count);
-            if let Some(encoding) = &summary.encoding {
-                println!("encoding: {encoding}");
+            if match_text.is_none() {
+                println!("format version: {}", summary.format_version);
             }
-            if let Some(dialect) = &summary.dialect {
-                println!("dialect: {dialect}");
+            println!("samples: {}", summary.sample_count);
+            if match_text.is_none() {
+                println!("channels: {}", summary.channel_count);
+                println!("test metadata: {}", summary.test_info_count);
+                if let Some(encoding) = &summary.encoding {
+                    println!("encoding: {encoding}");
+                }
+                if let Some(dialect) = &summary.dialect {
+                    println!("dialect: {dialect}");
+                }
             }
             if signals {
-                println!("ORIGINAL NAME\tUNIT\tOFFSET\tCOLUMN\tDESCRIPTION");
                 let channels = match match_text {
                     Some(text) => file.matching_channels(text),
                     None => file.channels().iter().collect(),
                 };
-                for channel in channels {
+                let channel_width = channels
+                    .iter()
+                    .map(|channel| channel.group_name.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max("CHANNEL".len());
+                let unit_width = channels
+                    .iter()
+                    .map(|channel| channel.unit.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max("UNIT".len());
+                if match_text.is_some() {
+                    for channel in &channels {
+                        let values = file.read_channel(&channel.group_name, None)?.values;
+                        let (count, minimum, maximum) =
+                            values.into_iter().filter(|value| value.is_finite()).fold(
+                                (0usize, f64::INFINITY, f64::NEG_INFINITY),
+                                |(count, minimum, maximum), value| {
+                                    (count + 1, minimum.min(value), maximum.max(value))
+                                },
+                            );
+                        if channels.len() > 1 {
+                            println!("channel: {}", channel.group_name);
+                        }
+                        if count == 0 {
+                            println!("raw: no finite samples");
+                        } else {
+                            println!("raw: {minimum:.6}..{maximum:.6}");
+                            println!("offset: {:.6}", channel.offset);
+                            println!(
+                                "normalized: {:.6}..{:.6}",
+                                minimum - channel.offset,
+                                maximum - channel.offset
+                            );
+                        }
+                    }
+                    println!();
                     println!(
-                        "{}\t{}\t{}\t{}\t{}",
-                        channel.original_name,
-                        channel.unit,
-                        channel.offset,
-                        channel.column,
-                        channel.description
+                        "{:<channel_width$}  {:<unit_width$}  {:>14}  DESCRIPTION",
+                        "CHANNEL", "UNIT", "SOURCE COLUMN"
                     );
+                } else {
+                    println!(
+                        "{:<channel_width$}  {:<unit_width$}  {:>14} {:>14}  DESCRIPTION",
+                        "CHANNEL", "UNIT", "OFFSET", "SOURCE COLUMN"
+                    );
+                }
+                for channel in channels {
+                    let description = if channel.original_name == channel.group_name {
+                        channel.description.clone()
+                    } else if channel.description.is_empty() {
+                        format!("source name: {}", channel.original_name)
+                    } else {
+                        format!(
+                            "source name: {}; {}",
+                            channel.original_name, channel.description
+                        )
+                    };
+                    if match_text.is_some() {
+                        println!(
+                            "{:<channel_width$}  {:<unit_width$}  {:>14}  {}",
+                            channel.group_name, channel.unit, channel.column, description
+                        );
+                    } else {
+                        println!(
+                            "{:<channel_width$}  {:<unit_width$}  {:>14.6} {:>14}  {}",
+                            channel.group_name,
+                            channel.unit,
+                            channel.offset,
+                            channel.column,
+                            description
+                        );
+                    }
                 }
             }
         }
