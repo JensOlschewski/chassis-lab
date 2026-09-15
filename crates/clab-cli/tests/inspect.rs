@@ -50,8 +50,18 @@ fn inspects_measurement_hdf5_and_lists_channels() {
     assert!(stdout.contains("format version: 1"));
     assert!(stdout.contains("samples: 6\nchannels: 17\ntest metadata: 5"));
     assert!(stdout.contains("encoding: utf-8-sig\ndialect: ascii3"));
-    assert!(stdout.contains("ORIGINAL NAME\tUNIT\tOFFSET\tCOLUMN\tDESCRIPTION"));
-    assert!(stdout.contains("lfwcx\tmm\t0\t2\tFront left X"));
+    assert!(stdout.contains("CHANNEL"));
+    assert!(stdout.contains("SOURCE COLUMN"));
+    assert!(stdout.contains("lfwcx"));
+    assert!(stdout.contains("Front left X"));
+
+    let matched = inspect(&path, &["--match", "lfwcx"]);
+    assert!(matched.status.success());
+    assert!(
+        String::from_utf8(matched.stdout)
+            .unwrap()
+            .contains("values: 6 finite; raw")
+    );
 }
 
 #[test]

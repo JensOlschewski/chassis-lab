@@ -111,20 +111,52 @@ fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<
                 println!("dialect: {dialect}");
             }
             if signals {
-                println!("ORIGINAL NAME\tUNIT\tOFFSET\tCOLUMN\tDESCRIPTION");
+                println!(
+                    "{:<24} {:<10} {:>14} {:>14}  DESCRIPTION",
+                    "CHANNEL", "UNIT", "OFFSET", "SOURCE COLUMN"
+                );
                 let channels = match match_text {
                     Some(text) => file.matching_channels(text),
                     None => file.channels().iter().collect(),
                 };
                 for channel in channels {
+                    let description = if channel.original_name == channel.group_name {
+                        channel.description.clone()
+                    } else if channel.description.is_empty() {
+                        format!("source name: {}", channel.original_name)
+                    } else {
+                        format!(
+                            "source name: {}; {}",
+                            channel.original_name, channel.description
+                        )
+                    };
                     println!(
-                        "{}\t{}\t{}\t{}\t{}",
-                        channel.original_name,
+                        "{:<24} {:<10} {:>14.6} {:>14}  {}",
+                        channel.group_name,
                         channel.unit,
                         channel.offset,
                         channel.column,
-                        channel.description
+                        description
                     );
+                    if match_text.is_some() {
+                        let values = file.read_channel(&channel.group_name, None)?.values;
+                        let (count, minimum, maximum) =
+                            values.into_iter().filter(|value| value.is_finite()).fold(
+                                (0usize, f64::INFINITY, f64::NEG_INFINITY),
+                                |(count, minimum, maximum), value| {
+                                    (count + 1, minimum.min(value), maximum.max(value))
+                                },
+                            );
+                        if count == 0 {
+                            println!("  values: no finite samples");
+                        } else {
+                            println!(
+                                "  values: {count} finite; raw {minimum:.6}..{maximum:.6}; offset-normalized {:.6}..{:.6}",
+                                minimum - channel.offset,
+                                maximum - channel.offset
+                            );
+                        }
+                    }
                 }
             }
         }
