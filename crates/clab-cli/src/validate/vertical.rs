@@ -87,10 +87,11 @@ pub(crate) fn validate(config: &CaseConfig, color: super::svc::Color) -> Result<
     let response = kernel(&request)?;
     validate_response(&response, &request.grid)?;
     let report = report(config, &response.comparisons)?;
-    println!("Vertical trajectory comparison");
     println!(
-        "case: {} ({}, {})",
-        config.name, config.loadcase, vertical.setup.code
+        "KnC Vertical\nsimulation: {}\nreference: {}\n\nrunning {} metrics",
+        vertical.simulation_hdf5.display(),
+        vertical.measurement_hdf5.display(),
+        response.comparisons.len()
     );
     let tolerance_failed = validate_tolerances(config, &response.comparisons, color)?;
     Ok((
@@ -109,9 +110,6 @@ fn validate_tolerances(
     color: super::svc::Color,
 ) -> Result<bool> {
     let tolerances = &config.vertical.as_ref().unwrap().tolerances;
-    if !tolerances.relative_percent.is_empty() {
-        bail!("relative vertical tolerances are not supported; use absolute tolerances")
-    }
     let expected = comparisons
         .iter()
         .map(|comparison| format!("{}_wheel_center_{}_mm", comparison.corner, comparison.axis))
@@ -129,8 +127,23 @@ fn validate_tolerances(
             "{}_{}_{}_mm",
             comparison.corner, "wheel_center", comparison.axis
         );
-        if let Some(tolerance) = tolerances.absolute.get(&name) {
-            let metric_passed = comparison.maximum_error_mm <= *tolerance;
+        let absolute = tolerances.absolute.get(&name).copied();
+        let relative = tolerances.relative_percent.get(&name).map(|percent| {
+            comparison
+                .measurement_mm
+                .iter()
+                .map(|value| value.abs())
+                .fold(0.0, f64::max)
+                * percent
+                / 100.0
+        });
+        if absolute.is_some() || relative.is_some() {
+            let tolerance = match (absolute, relative) {
+                (Some(absolute), Some(relative)) => absolute.min(relative),
+                (Some(value), None) | (None, Some(value)) => value,
+                (None, None) => unreachable!(),
+            };
+            let metric_passed = comparison.maximum_error_mm <= tolerance;
             println!(
                 "  knc::vertical::{name} ... {} (actual {:.8}; reference 0.00000000; diff {:.8} {} {:.8} mm)",
                 paint_status(
@@ -145,7 +158,7 @@ fn validate_tolerances(
                 comparison.maximum_error_mm,
                 comparison.maximum_error_mm,
                 if metric_passed { "<=" } else { ">" },
-                tolerance,
+                tolerance
             );
             if metric_passed {
                 passed += 1;
@@ -154,7 +167,7 @@ fn validate_tolerances(
         } else {
             missing += 1;
             println!(
-                "  knc::vertical::{name} ... {} (actual max {:.8}; tolerance missing)",
+                "  knc::vertical::{name} ... {} (max error {:.8} mm; tolerance missing)",
                 paint_status("missing", "\x1b[33m", color_enabled(color)),
                 comparison.maximum_error_mm
             );
@@ -345,6 +358,9 @@ fn validate_setup(measurement: &MeasurementFile, config: &CaseConfig) -> Result<
             "" | "NaN" | "nan" => None,
             _ => bail!("measurement setup metadata {name} has invalid value {value:?}"),
         };
+        if name == "rarbon" && actual.is_none() {
+            continue;
+        }
         if expected != actual {
             bail!("measurement setup {name}={actual:?}; expected {expected:?}");
         }

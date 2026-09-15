@@ -7,8 +7,8 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clab_core::{
-    config::{CaseConfig, SignalRef},
-    conventions::{SignalConvention, apply_convention_for_final_sample, svc_conventions},
+    config::CaseConfig,
+    conventions::{apply_convention_for_final_sample, svc_conventions},
     svc_reference::{SvcReference, load_svc_reference},
     svc_simulation_json::SvcSimulationFile,
 };
@@ -166,11 +166,12 @@ fn evaluate(config: &CaseConfig, simulation: &SvcSimulationFile) -> Result<BTree
         let convention = conventions
             .get(name)
             .ok_or_else(|| anyhow::anyhow!("missing SVC signal convention: {name}"))?;
-        validate_mapping_unit(reference, name, convention)?;
+        let mut convention = convention.clone();
+        convention.source_unit = reference.unit.clone();
         let signal = simulation.read_signal(
             &reference.entity,
             &reference.component,
-            Some(&convention.source_unit),
+            Some(&reference.unit),
         )?;
         let transformed = apply_convention_for_final_sample(
             &signal.values,
@@ -246,20 +247,6 @@ fn evaluate(config: &CaseConfig, simulation: &SvcSimulationFile) -> Result<BTree
     Ok(values)
 }
 
-fn validate_mapping_unit(
-    reference: &SignalRef,
-    name: &str,
-    convention: &SignalConvention,
-) -> Result<()> {
-    if reference.unit != convention.source_unit {
-        bail!(
-            "SVC signal '{name}' must use configured unit '{}'",
-            convention.source_unit
-        );
-    }
-    Ok(())
-}
-
 fn compare(
     actual: &BTreeMap<String, f64>,
     reference: &SvcReference,
@@ -288,13 +275,14 @@ fn compare(
             }
             let absolute = tolerances.absolute.get(name).copied();
             let relative = tolerances.relative_percent.get(name).copied();
-            let allowed = [
+            let allowed = match (
                 absolute,
                 relative.map(|value| expected.abs() * value / 100.0),
-            ]
-            .into_iter()
-            .flatten()
-            .fold(0.0, f64::max);
+            ) {
+                (Some(absolute), Some(relative)) => absolute.min(relative),
+                (Some(value), None) | (None, Some(value)) => value,
+                (None, None) => 0.0,
+            };
             Ok(Metric {
                 name: name.clone(),
                 unit: metric_unit(name)?,
@@ -412,9 +400,7 @@ fn report_csv(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric])
 
 fn print_console(config: &CaseConfig, reference: &SvcReference, metrics: &[Metric], color: bool) {
     println!(
-        "SVC validation\ncase: {} ({})\nsimulation: {}\nreference: {}\n\nrunning {} metrics",
-        config.name,
-        config.loadcase,
+        "SVC\nsimulation: {}\nreference: {}\n\nrunning {} metrics",
         config.simulation_json.display(),
         reference.path.display(),
         metrics.len()
@@ -428,17 +414,24 @@ fn print_console(config: &CaseConfig, reference: &SvcReference, metrics: &[Metri
         } else {
             paint_status("failed", "\x1b[31m", color)
         };
-        println!(
-            "  svc::{} ... {} (actual {:.8}; reference {:.8}; diff {:.8} {} {:.8} {})",
-            metric.name,
-            status,
-            metric.actual,
-            metric.reference,
-            metric.difference,
-            if metric.passed { "<=" } else { ">" },
-            metric.allowed_difference,
-            metric.unit
-        );
+        if configured {
+            println!(
+                "  svc::{} ... {} (actual {:.8}; reference {:.8}; diff {:.8} {} {:.8} {})",
+                metric.name,
+                status,
+                metric.actual,
+                metric.reference,
+                metric.difference,
+                if metric.passed { "<=" } else { ">" },
+                metric.allowed_difference,
+                metric.unit
+            );
+        } else {
+            println!(
+                "  svc::{} ... {} (actual {:.8}; reference {:.8}; diff {:.8})",
+                metric.name, status, metric.actual, metric.reference, metric.difference
+            );
+        }
     }
     let failed = metrics.iter().filter(|m| !m.passed).count();
     println!(

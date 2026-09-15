@@ -276,3 +276,15 @@ rear_right_wheel_center_y_mm = 0.1
 rear_right_wheel_center_z_mm = 0.1
 
 [validation.knc.vertical.validation.tolerances.relative_percent]
+front_left_wheel_center_x_mm = 1.0
+front_left_wheel_center_y_mm = 1.0
+front_left_wheel_center_z_mm = 1.0
+front_right_wheel_center_x_mm = 1.0
+front_right_wheel_center_y_mm = 1.0
+front_right_wheel_center_z_mm = 1.0
+rear_left_wheel_center_x_mm = 1.0
+rear_left_wheel_center_y_mm = 1.0
+rear_left_wheel_center_z_mm = 1.0
+rear_right_wheel_center_x_mm = 1.0
+rear_right_wheel_center_y_mm = 1.0
+rear_right_wheel_center_z_mm = 1.0

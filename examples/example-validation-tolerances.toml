@@ -32,15 +32,25 @@ wheelbase_mm = 0.5
 
 [knc.vertical.validation.tolerances.absolute]
 front_left_wheel_center_x_mm = 0.1
-# front_left_wheel_center_y_mm = 0.1
-# front_left_wheel_center_z_mm = 0.1
-# front_right_wheel_center_x_mm = 0.1
-# front_right_wheel_center_y_mm = 0.1
-# front_right_wheel_center_z_mm = 0.1
+front_left_wheel_center_y_mm = 0.1
+front_left_wheel_center_z_mm = 0.1
+front_right_wheel_center_x_mm = 0.1
+front_right_wheel_center_y_mm = 0.1
+front_right_wheel_center_z_mm = 0.1
 rear_left_wheel_center_x_mm = 0.1
 rear_left_wheel_center_y_mm = 0.1
 rear_left_wheel_center_z_mm = 0.1
 rear_right_wheel_center_x_mm = 0.1
 rear_right_wheel_center_y_mm = 0.1
 rear_right_wheel_center_z_mm = 0.1
+
 [knc.vertical.validation.tolerances.relative_percent]
+front_right_wheel_center_x_mm = 0.2
+front_right_wheel_center_y_mm = 0.2
+front_right_wheel_center_z_mm = 0.2
+rear_left_wheel_center_x_mm = 0.2
+rear_left_wheel_center_y_mm = 0.2
+rear_left_wheel_center_z_mm = 0.2
+rear_right_wheel_center_x_mm = 0.2
+rear_right_wheel_center_y_mm = 0.2
+rear_right_wheel_center_z_mm = 0.2

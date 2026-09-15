@@ -64,7 +64,10 @@ pub(crate) fn validate(args: ValidateArgs) -> Result<()> {
 
     let mut contents = Vec::new();
     let mut tolerance_failed = false;
-    for domain in selected {
+    for (index, domain) in selected.into_iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
         match domain {
             Domain::Svc => {
                 let (report, failed) = svc::validate(&config, args.color)?;
@@ -235,7 +238,14 @@ fn validate_outputs(reports: &ReportPaths, force: bool, inputs: Vec<PathBuf>) ->
         .collect();
     let inputs: Result<Vec<_>> = inputs
         .iter()
-        .map(|path| path.canonicalize().map_err(Into::into))
+        .map(|path| {
+            path.canonicalize().map_err(|error| {
+                anyhow::anyhow!(
+                    "configured input does not exist '{}': {error}",
+                    path.display()
+                )
+            })
+        })
         .collect();
     let inputs = inputs?;
     let mut unique = std::collections::BTreeSet::new();

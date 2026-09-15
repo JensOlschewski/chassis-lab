@@ -1,3 +1,5 @@
+use std::process::ExitCode;
+
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
@@ -31,16 +33,16 @@ enum Command {
     Completion { shell: Shell },
 }
 
-fn main() {
-    if let Err(error) = run(Cli::parse()) {
-        eprintln!("error: {error:#}");
-        std::process::exit(
-            if error.downcast_ref::<validate::ToleranceFailure>().is_some() {
-                1
-            } else {
-                2
-            },
-        );
+fn main() -> ExitCode {
+    match run(Cli::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) if error.downcast_ref::<validate::ToleranceFailure>().is_some() => {
+            ExitCode::from(1)
+        }
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            ExitCode::from(2)
+        }
     }
 }
 

@@ -205,6 +205,7 @@ impl SvcSimulationFile {
             }
         };
         if let Some(expected_unit) = expected_unit
+            && !signal.info.unit.is_empty()
             && signal.info.unit != expected_unit
         {
             return Err(Self::format(
