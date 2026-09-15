@@ -215,8 +215,12 @@ fn source(path: &Path, result: &str) -> Result<serde_json::Value> {
 fn read_text(path: &Path) -> Result<String> {
     let bytes = fs::read(path)?;
     if bytes.starts_with(&[0xff, 0xfe]) {
-        let units = bytes[2..]
-            .chunks_exact(2)
+        let (units, remainder) = bytes[2..].as_chunks::<2>();
+        if !remainder.is_empty() {
+            bail!("invalid UTF-16LE text: {}", path.display());
+        }
+        let units = units
+            .iter()
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect::<Vec<_>>();
         return String::from_utf16(&units)
