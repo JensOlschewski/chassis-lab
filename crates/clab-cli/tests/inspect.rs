@@ -57,11 +57,10 @@ fn inspects_measurement_hdf5_and_lists_channels() {
 
     let matched = inspect(&path, &["--match", "lfwcx"]);
     assert!(matched.status.success());
-    assert!(
-        String::from_utf8(matched.stdout)
-            .unwrap()
-            .contains("values: 6 finite; raw")
-    );
+    let stdout = String::from_utf8(matched.stdout).unwrap();
+    assert!(stdout.contains("raw: 1200.000000..1200.000000"));
+    assert!(stdout.contains("offset: 0.000000"));
+    assert!(stdout.contains("normalized: 1200.000000..1200.000000"));
 }
 
 #[test]
