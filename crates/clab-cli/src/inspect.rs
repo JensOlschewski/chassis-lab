@@ -2,11 +2,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clab_core::input_hdf5::{Hdf5Input, open_hdf5_input};
+use clab_core::svc_simulation_json::SvcSimulationFile;
 use clap::Args;
 
 #[derive(Debug, Args)]
 pub(crate) struct InspectArgs {
-    /// Normalized HDF5 simulation or measurement file (.h5 or .hdf5).
+    /// Normalized SVC JSON or HDF5 simulation/measurement file.
     file: PathBuf,
     /// List all available signals or channels.
     #[arg(long)]
@@ -26,15 +27,46 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase);
     match extension.as_deref() {
+        Some("json") => inspect_svc_json(
+            &args.file,
+            args.signals || args.r#match.is_some(),
+            args.r#match.as_deref(),
+        ),
         Some("h5" | "hdf5") => inspect_hdf5(
             &args.file,
             args.signals || args.r#match.is_some(),
             args.r#match.as_deref(),
         ),
-        _ => bail!(
-            "unsupported input extension; clab inspect accepts only .h5 or .hdf5; convert raw .res or .acd inputs first with clab convert"
-        ),
+        _ => bail!("unsupported input extension; clab inspect accepts .json, .h5, or .hdf5"),
     }
+}
+
+fn inspect_svc_json(path: &Path, signals: bool, match_text: Option<&str>) -> Result<()> {
+    let file = SvcSimulationFile::open(path)
+        .with_context(|| format!("failed to inspect SVC JSON '{}'", path.display()))?;
+    println!("source file: {}", file.source_file());
+    println!("format version: 1");
+    println!("samples: {}", file.sample_count());
+    println!("signals: {}", file.signals().count());
+    if signals {
+        println!("ENTITY\tCOMPONENT\tUNIT\tADAMS ID");
+        let matches = match match_text {
+            Some(text) => file.matching_signals(text),
+            None => file.signals().collect(),
+        };
+        for signal in matches {
+            let entity = if signal.source_path.is_empty() {
+                &signal.entity
+            } else {
+                &signal.source_path
+            };
+            println!(
+                "{}\t{}\t{}\t{}",
+                entity, signal.component, signal.unit, signal.adams_id
+            );
+        }
+    }
+    Ok(())
 }
 
 fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<()> {

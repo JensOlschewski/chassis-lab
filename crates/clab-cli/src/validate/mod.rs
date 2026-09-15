@@ -64,7 +64,10 @@ pub(crate) fn validate(args: ValidateArgs) -> Result<()> {
 
     let mut contents = Vec::new();
     let mut tolerance_failed = false;
-    for domain in selected {
+    for (index, domain) in selected.into_iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
         match domain {
             Domain::Svc => {
                 let (report, failed) = svc::validate(&config, args.color)?;
@@ -77,7 +80,8 @@ pub(crate) fn validate(args: ValidateArgs) -> Result<()> {
                 tolerance_failed |= failed;
             }
             Domain::Knc => {
-                let report = vertical::validate(&config)?;
+                let (report, failed) = vertical::validate(&config, args.color)?;
+                tolerance_failed |= failed;
                 if let Some(paths) = &reports.knc {
                     contents.extend([
                         (paths.0.clone(), report.json),
@@ -149,6 +153,12 @@ fn report_paths(args: &ValidateArgs, selected: &[Domain]) -> Result<ReportPaths>
     if args.plot_output.is_some() && !selected.contains(&Domain::Knc) {
         bail!("--plot-output requires selecting KnC");
     }
+    if args.output_dir.is_none() && !individual {
+        return Ok(ReportPaths {
+            svc: None,
+            knc: None,
+        });
+    }
     if let Some(plot) = &args.plot_output
         && plot
             .extension()
@@ -174,6 +184,20 @@ fn report_paths(args: &ValidateArgs, selected: &[Domain]) -> Result<ReportPaths>
             }),
         });
     }
+    if selected.len() > 1 {
+        return Ok(ReportPaths {
+            svc: selected
+                .contains(&Domain::Svc)
+                .then(|| (PathBuf::from("svc.json"), PathBuf::from("svc.csv"))),
+            knc: selected.contains(&Domain::Knc).then(|| {
+                (
+                    PathBuf::from("knc-vertical.json"),
+                    PathBuf::from("knc-vertical.csv"),
+                    PathBuf::from("knc-vertical.svg"),
+                )
+            }),
+        });
+    }
     match selected {
         [Domain::Svc] => Ok(ReportPaths { svc: match (args.json_output.clone(), args.csv_output.clone()) { (None, None) => None, (json, csv) => Some((json.ok_or_else(|| anyhow::anyhow!("--json-output and --csv-output must be provided together"))?, csv.ok_or_else(|| anyhow::anyhow!("--json-output and --csv-output must be provided together"))?)) }, knc: None }),
         [Domain::Knc] => Ok(ReportPaths { svc: None, knc: match (args.json_output.clone(), args.csv_output.clone(), args.plot_output.clone()) { (None, None, None) => None, (json, csv, svg) => Some((json.ok_or_else(|| anyhow::anyhow!("vertical reports require --json-output, --csv-output, and --plot-output"))?, csv.ok_or_else(|| anyhow::anyhow!("vertical reports require --json-output, --csv-output, and --plot-output"))?, svg.ok_or_else(|| anyhow::anyhow!("vertical reports require --json-output, --csv-output, and --plot-output"))?)) } }),
@@ -184,7 +208,7 @@ fn report_paths(args: &ValidateArgs, selected: &[Domain]) -> Result<ReportPaths>
 fn protected_inputs(config: &CaseConfig) -> Result<Vec<PathBuf>> {
     let mut paths = vec![config.path.clone()];
     if config.configured_domains().contains(&Domain::Svc) {
-        paths.push(config.simulation_hdf5.clone());
+        paths.push(config.simulation_json.clone());
         if let Some(validation) = &config.validation {
             paths.push(validation.reference.clone());
         }
@@ -214,7 +238,14 @@ fn validate_outputs(reports: &ReportPaths, force: bool, inputs: Vec<PathBuf>) ->
         .collect();
     let inputs: Result<Vec<_>> = inputs
         .iter()
-        .map(|path| path.canonicalize().map_err(Into::into))
+        .map(|path| {
+            path.canonicalize().map_err(|error| {
+                anyhow::anyhow!(
+                    "configured input does not exist '{}': {error}",
+                    path.display()
+                )
+            })
+        })
         .collect();
     let inputs = inputs?;
     let mut unique = std::collections::BTreeSet::new();
@@ -326,7 +357,7 @@ fn rollback_published(published: Vec<(PathBuf, Option<tempfile::NamedTempFile>)>
 
 #[cfg(test)]
 mod tests {
-    use super::{publish_staged, stage_reports};
+    use super::{Domain, ValidateArgs, publish_staged, report_paths, stage_reports};
     use std::fs;
 
     #[test]
@@ -347,5 +378,24 @@ mod tests {
         assert!(publish_staged(staged, true).is_err());
         assert_eq!(fs::read_to_string(first).unwrap(), "old");
         assert!(second.is_dir());
+    }
+
+    #[test]
+    fn combined_validation_without_report_options_writes_no_reports() {
+        let args = ValidateArgs {
+            config: "config.toml".into(),
+            domains: Vec::new(),
+            tests: Vec::new(),
+            output_dir: None,
+            json_output: None,
+            csv_output: None,
+            plot_output: None,
+            force: false,
+            color: super::svc::Color::Auto,
+        };
+        let reports = report_paths(&args, &[Domain::Svc, Domain::Knc]).unwrap();
+
+        assert!(reports.svc.is_none());
+        assert!(reports.knc.is_none());
     }
 }

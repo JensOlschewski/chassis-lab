@@ -94,7 +94,6 @@ capabilities:
 Vertical migration: `[vertical.inputs].measurement_hdf5` is required. Convert
 legacy ACD inputs with `clab convert`; validation never reads raw ACD.
 | `clab convert-res INPUT` | `clab convert INPUT` | Writes normalized HDF5 |
-| `clab create-run CONFIG` | `clab run create CONFIG` | Creates isolated run directory and manifest |
 
 `clab inspect FILE` accepts normalized simulation or measurement HDF5 files
 (`.h5` or `.hdf5`) only. Convert raw `.res` or `.acd` inputs first with
@@ -152,19 +151,44 @@ using channel name exactly `time` for sample axis and retaining that channel.
 
 ## Configuration
 
-`examples/example-config.toml` defines vehicle metadata and SVC inputs. Private
-domain configurations can add vertical inputs using the same structure:
+`examples/example-config.toml` defines combined SVC and vertical validation.
+Canonical configuration is function-first:
 
 ```toml
-[svc.inputs]
-signal_map = "example-signals.toml"
-simulation_hdf5 = "..."
-measurement_reference = "...json"
+[input.svc.simulation]
+input_file = "...json"
+
+[input.svc.measurement]
+input_file = "...json"
+
+[input.knc.vertical.simulation]
+input_file = "...h5"
+
+[input.knc.vertical.measurement]
+input_file = "...h5"
+
+[mappings.svc]
+file = "example-signals.toml"
+
+[mappings.knc]
+file = "example-vertical-signals.toml"
+
+[mappings.knc.vertical]
+# inline values add to or override domain mappings
 ```
 
-`[vertical.setup]` contains setup flags and `window_*_mm` bounds. Signal maps
-contain canonical names, HDF5 entities, components, and units. Inline mappings
-remain available for isolated fixtures, but cannot be combined with `signal_map`.
+External role files can replace inline sections. Input JSON combines SVC and
+KnC paths; setup JSON contains setup and window data; mappings TOML contains
+`[svc]` and `[knc]` bases plus test overrides; validation TOML contains optional
+policy. `[meta]` contains only `name` and `loadcase`; domain is derived. Paths
+resolve relative to main config.
+
+`[setup.knc.vertical]` contains setup flags and window bounds. Signal maps contain
+canonical names, entities, components, and units. Mapping precedence is shared <
+domain < test; child values override, child-only values add, missing values inherit,
+and nested tables deep-merge. External mapping files use same merge rules. Legacy
+domain-first sections remain accepted. SVC tolerances are optional; without them,
+comparisons are informational. Paths resolve relative to config file.
 
 ## Conventions
 

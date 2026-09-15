@@ -8,37 +8,40 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - os: ubuntu-latest
+            platform: linux-x86_64
             target: x86_64-unknown-linux-gnu
-            archive: clab-linux-x86_64.tar.gz
           - os: windows-latest
+            platform: windows-x86_64
             target: x86_64-pc-windows-msvc
-            archive: clab-windows-x86_64.zip
           - os: macos-26-intel
+            platform: macos-x86_64
             target: x86_64-apple-darwin
-            archive: clab-macos-x86_64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate release tag
-        if: github.event_name == 'push'
         shell: bash
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          test "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)" = "${RELEASE_TAG#v}"
-          test "$(sed -n 's/^version = "\([^"]*\)"/\1/p' py-chassislab/pyproject.toml | head -n 1)" = "${RELEASE_TAG#v}"
+          version="${RELEASE_TAG#v}"
+          test "$(sed -n 's/^version = \"\([^\"]*\)\"/\1/p' Cargo.toml | head -n 1)" = "$version"
+          test "$(sed -n 's/^version = \"\([^\"]*\)\"/\1/p' py-chassislab/pyproject.toml | head -n 1)" = "$version"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -47,61 +50,192 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Cache Rust build
-        uses: actions/cache@v4
+      - name: Cache Rust runtime build
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock', '.github/workflows/release.yml') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock', '.github/workflows/release.yml', 'packaging/*') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-release-
 
-      - name: Install build tools
+      - name: Install Rust build tools
         run: python -m pip install "cmake>=3.26,<4"
 
-      - name: Select installed Visual Studio generator
+      - name: Set up MSVC environment
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: Add-Content $env:GITHUB_ENV 'CMAKE_GENERATOR=Visual Studio 17 2022'
-
-      - name: Build CLI
-        run: cargo build -p clab-cli --release --locked --target "${{ matrix.target }}"
-
-      - name: Package Unix CLI
-        if: runner.os != 'Windows'
-        shell: bash
-        run: tar -czf "${{ matrix.archive }}" -C "target/${{ matrix.target }}/release" clab
-
-      - name: Package Windows CLI
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Compress-Archive -Path "target/${{ matrix.target }}/release/clab.exe" -DestinationPath "${{ matrix.archive }}"
-
-      - name: Upload release package
-        uses: actions/upload-artifact@v4
+        uses: ilammy/msvc-dev-cmd@v1
         with:
-          name: package-${{ matrix.target }}
-          path: ${{ matrix.archive }}
+          arch: x64
+
+      - name: Select Windows CMake generator
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV 'CMAKE_GENERATOR=Ninja'
+
+      - name: Build Linux embedded runtime
+        if: runner.os == 'Linux'
+        run: packaging/build-embedded-runtime.sh dist/embed-bundle-linux-x86_64
+
+      - name: Build Windows embedded runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\packaging\build-embedded-runtime-windows.ps1 dist\embed-bundle-windows-x86_64
+
+      - name: Build Intel macOS embedded runtime
+        if: runner.os == 'macOS'
+        run: packaging/build-embedded-runtime-macos.sh dist/embed-bundle-macos-x86_64
+
+      - name: Smoke test Linux release runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          smoke_input="$(mktemp)"
+          trap 'rm -f "$smoke_input"' EXIT
+          tar -czf "$smoke_input" \
+            dist/embed-bundle-linux-x86_64.tar.gz \
+            examples/input/example-simulation-svc.res \
+            examples/input/example-simulation-vertical.res \
+            examples/input/example-measurement-vertical.acd \
+            tests/fixtures/runtime-smoke.toml examples/example-signal-mappings.toml examples/input/example-measurement-svc.json
+          docker run --rm --pull=missing -i ubuntu:24.04 bash -ceu '
+            mkdir /tmp/input /tmp/bundle /tmp/smoke
+            tar -xzf - -C /tmp/input
+            tar -xzf /tmp/input/dist/embed-bundle-linux-x86_64.tar.gz -C /tmp/bundle
+            bundle=/tmp/bundle/embed-bundle-linux-x86_64
+            cp /tmp/input/examples/input/example-simulation-svc.res /tmp/smoke/
+            cp /tmp/input/examples/input/example-simulation-vertical.res /tmp/smoke/
+            cp /tmp/input/examples/input/example-measurement-vertical.acd /tmp/smoke/
+            cp /tmp/input/tests/fixtures/runtime-smoke.toml /tmp/smoke/
+            cp /tmp/input/examples/example-signal-mappings.toml /tmp/smoke/example-signals.toml
+            cp /tmp/input/examples/input/example-measurement-svc.json /tmp/smoke/
+            cd /tmp/smoke
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.json
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-vertical.res -o vertical.simulation.h5
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-vertical.acd -o vertical.measurement.h5
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" validate runtime-smoke.toml --output-dir reports
+            test -s reports/svc.json && test -s reports/knc-vertical.json
+          ' < "$smoke_input"
+
+      - name: Smoke test Windows release runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP "clab-release-windows-smoke"
+          Remove-Item $smoke -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive dist\embed-bundle-windows-x86_64.zip -DestinationPath $smoke
+          $bundle = Join-Path $smoke "embed-bundle-windows-x86_64"
+          $env:Path = "$(Join-Path $bundle 'bin');$env:SystemRoot\System32;$env:SystemRoot"
+          $env:PYTHONHOME = "C:\poisoned"
+          $env:PYTHONPATH = "C:\poisoned"
+          $env:VIRTUAL_ENV = "C:\poisoned"
+          & "$bundle\bin\clab.exe" --version
+          & "$bundle\bin\embed-smoke.exe" "$smoke\embed-smoke.svg"
+          Copy-Item examples\input\example-simulation-svc.res $smoke
+          Copy-Item examples\input\example-simulation-vertical.res $smoke
+           Copy-Item examples\input\example-measurement-vertical.acd $smoke
+           Copy-Item tests\fixtures\runtime-smoke.toml $smoke
+          Copy-Item examples\example-signal-mappings.toml (Join-Path $smoke "example-signals.toml")
+           Copy-Item examples\input\example-measurement-svc.json $smoke
+          Push-Location $smoke
+          & "$bundle\bin\clab.exe" convert example-simulation-svc.res -o svc.simulation.json
+          & "$bundle\bin\clab.exe" convert example-simulation-vertical.res -o vertical.simulation.h5
+           & "$bundle\bin\clab.exe" convert example-measurement-vertical.acd -o vertical.measurement.h5
+          & "$bundle\bin\clab.exe" validate runtime-smoke.toml --output-dir reports
+          if (-not (Test-Path reports\svc.json)) { throw "missing SVC report" }
+          if (-not (Test-Path reports\knc-vertical.json)) { throw "missing vertical report" }
+          Pop-Location
+
+      - name: Smoke test macOS release runtime
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          smoke="$RUNNER_TEMP/clab-release-macos-smoke"
+          rm -rf "$smoke" && mkdir -p "$smoke"
+          tar -xzf dist/embed-bundle-macos-x86_64.tar.gz -C "$smoke"
+          bundle="$smoke/embed-bundle-macos-x86_64"
+          clean_env=(env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned DYLD_LIBRARY_PATH=/poisoned)
+          "${clean_env[@]}" "$bundle/bin/clab" --version
+          "${clean_env[@]}" "$bundle/bin/embed-smoke" "$smoke/embed-smoke.svg"
+           cp examples/input/example-simulation-svc.res "$smoke/"
+           cp examples/input/example-simulation-vertical.res "$smoke/"
+           cp examples/input/example-measurement-vertical.acd "$smoke/"
+           cp tests/fixtures/runtime-smoke.toml "$smoke/"
+           cp examples/example-signal-mappings.toml "$smoke/example-signals.toml"
+           cp examples/input/example-measurement-svc.json "$smoke/"
+          cd "$smoke"
+           "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.json
+           "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-vertical.res -o vertical.simulation.h5
+           "${clean_env[@]}" "$bundle/bin/clab" convert example-measurement-vertical.acd -o vertical.measurement.h5
+          "${clean_env[@]}" "$bundle/bin/clab" validate runtime-smoke.toml --output-dir reports
+          test -s reports/svc.json && test -s reports/knc-vertical.json
+
+      - name: Verify archive checksum
+        shell: bash
+        run: |
+          case "${{ matrix.platform }}" in
+            linux-x86_64) sha256sum --check "dist/embed-bundle-${{ matrix.platform }}.tar.gz.sha256" ;;
+            macos-x86_64) shasum -a 256 --check "dist/embed-bundle-${{ matrix.platform }}.tar.gz.sha256" ;;
+            windows-x86_64) powershell -NoProfile -Command "\$expected=(Get-Content 'dist/embed-bundle-windows-x86_64.zip.sha256').Split()[0]; \$actual=(Get-FileHash 'dist/embed-bundle-windows-x86_64.zip' -Algorithm SHA256).Hash.ToLowerInvariant(); if (\$expected -ne \$actual) { exit 1 }" ;;
+          esac
+
+      - name: Rename release archive
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          case "${{ matrix.platform }}" in
+            windows-x86_64) ext=zip ;;
+            *) ext=tar.gz ;;
+          esac
+          archive="dist/embed-bundle-${{ matrix.platform }}.$ext"
+          renamed="dist/clab-v${version}-${{ matrix.target }}.$ext"
+          mv "$archive" "$renamed"
+          rm -f "$archive.sha256"
+          if [ "${{ matrix.platform }}" = windows-x86_64 ]; then
+            powershell -NoProfile -Command "\$hash=(Get-FileHash '$renamed' -Algorithm SHA256).Hash.ToLowerInvariant(); \"\$hash  $(basename "$renamed")\" | Set-Content '$renamed.sha256' -Encoding ascii"
+          elif [ "${{ matrix.platform }}" = linux-x86_64 ]; then
+            sha256sum "$renamed" > "$renamed.sha256"
+          else
+            shasum -a 256 "$renamed" > "$renamed.sha256"
+          fi
+
+      - name: Upload gated runtime archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ matrix.platform }}
+          path: dist/clab-v*
 
   publish:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download release packages
-        uses: actions/download-artifact@v4
+      - name: Download gated runtime archives
+        uses: actions/download-artifact@v8
         with:
           pattern: package-*
           path: dist
           merge-multiple: true
 
-      - name: Create checksums
-        run: sha256sum dist/* > dist/SHA256SUMS
+      - name: Create release checksums
+        run: find dist -maxdepth 1 -type f -name 'clab-v*' ! -name '*.sha256' -print0 | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          body: |
+            Supported standalone platforms:
+            - Linux x86_64
+            - Windows x86_64
+            - Intel macOS x86_64
+
+            Each archive contains embedded CPython, required scientific wheels,
+            dependency licenses, build provenance, and internal checksums.
           files: dist/*
           generate_release_notes: true
 
@@ -110,12 +244,15 @@ jobs:
     needs: [build, publish]
     runs-on: ubuntu-latest
     steps:
-      - name: Download release packages
-        uses: actions/download-artifact@v4
+      - name: Download release archives
+        uses: actions/download-artifact@v8
         with:
           pattern: package-*
           path: dist
           merge-multiple: true
+
+      - name: Create release checksums
+        run: find dist -maxdepth 1 -type f -name 'clab-v*' ! -name '*.sha256' -print0 | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
 
       - name: Publish release and assets to Gitea
         env:
@@ -127,24 +264,16 @@ jobs:
           set -euo pipefail
           api="$GITEA_URL/api/v1/repos/$GITEA_REPOSITORY"
           auth=(-H "Authorization: token $GITEA_TOKEN")
-
           if ! release=$(curl -fsS "${auth[@]}" "$api/releases/tags/$RELEASE_TAG"); then
-            release=$(curl -fsS -X POST "${auth[@]}" \
-              -H 'Content-Type: application/json' \
-              "$api/releases" \
-              -d "$(jq -n --arg tag "$RELEASE_TAG" '{tag_name: $tag, name: ("ChassisLab " + $tag), body: "Built by GitHub Actions."}')")
+            release=$(curl -fsS -X POST "${auth[@]}" -H 'Content-Type: application/json' \
+              "$api/releases" -d "$(jq -n --arg tag "$RELEASE_TAG" '{tag_name: $tag, name: ("ChassisLab " + $tag), body: "Built by GitHub Actions."}')")
           fi
-
           release_id=$(jq -r '.id' <<< "$release")
           assets=$(curl -fsS "${auth[@]}" "$api/releases/$release_id/assets")
           for asset in dist/*; do
             name=$(basename "$asset")
             existing_id=$(jq -r --arg name "$name" '.[] | select(.name == $name) | .id' <<< "$assets")
-            if [ -n "$existing_id" ]; then
-              curl -fsS -X DELETE "${auth[@]}" "$api/releases/$release_id/assets/$existing_id"
-            fi
-            curl -fsS -X POST "${auth[@]}" \
-              -H 'Content-Type: application/octet-stream' \
-              --data-binary "@$asset" \
-              "$api/releases/$release_id/assets?name=$name" >/dev/null
+            if [ -n "$existing_id" ]; then curl -fsS -X DELETE "${auth[@]}" "$api/releases/$release_id/assets/$existing_id"; fi
+            curl -fsS -X POST "${auth[@]}" -H 'Content-Type: application/octet-stream' \
+              --data-binary "@$asset" "$api/releases/$release_id/assets?name=$name" >/dev/null
           done

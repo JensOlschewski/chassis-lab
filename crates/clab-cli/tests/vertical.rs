@@ -163,7 +163,7 @@ fn config(path: &std::path::Path, measurement: &str, omit: bool) {
             signals.push_str(&format!("[vertical.signals.{corner}_{name}]\nentity = \"{corner}\"\ncomponent = \"{component}\"\nunit = \"mm\"\n"));
         }
     }
-    fs::write(path,format!("[case]\nname=\"fixture\"\nvariant=\"V\"\nloadcase=\"L\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
+    fs::write(path,format!("[case]\nname=\"fixture\"\nloadcase=\"L\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
 }
 fn command(config: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
@@ -274,31 +274,37 @@ fn validates_normalized_hdf5_with_embedded_python_and_safe_outputs() {
 #[test]
 fn defaults_to_all_configured_domains() {
     let directory = tempdir().unwrap();
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    if !examples.join("example-simulation-svc.json").is_file() {
+        return;
+    }
     closed_fixture(&directory.path().join("simulation.h5"), simulation);
     closed_fixture(&directory.path().join("measurement.h5"), measurement);
-    let vertical_path = directory.path().join("vertical.toml");
-    config(&vertical_path, "measurement.h5", false);
-    let vertical = fs::read_to_string(&vertical_path).unwrap();
-    let vertical = &vertical[vertical.find("[vertical.inputs]").unwrap()..];
-    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    let svc_simulation = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../clab-converter/examples/example-svc.h5");
-    let svc = fs::read_to_string(examples.join("example-config.toml"))
-        .unwrap()
-        .replace(
-            "\"example-signals.toml\"",
-            &format!("\"{}\"", examples.join("example-signals.toml").display()),
-        )
-        .replace(
-            "\"example-measures.json\"",
-            &format!("\"{}\"", examples.join("example-measures.json").display()),
-        )
-        .replace(
-            "\"../crates/clab-converter/examples/example-svc.h5\"",
-            &format!("\"{}\"", svc_simulation.display()),
-        );
+    let input = directory.path().join("input.json");
+    fs::write(&input, format!(r#"{{"svc":{{"simulation":{{"input_file":"{}"}},"measurement":{{"input_file":"{}"}}}},"knc":{{"vertical":{{"simulation":{{"input_file":"{}"}},"measurement":{{"input_file":"{}"}}}}}}}}"#, examples.join("example-simulation-svc.json").display(), examples.join("example-measurement-svc.json").display(), directory.path().join("simulation.h5").display(), directory.path().join("measurement.h5").display())).unwrap();
+    let setup = directory.path().join("setup.json");
+    fs::write(&setup, r#"{"knc":{"vertical":{"code":"example-vertical","brakes_applied":true,"engine_running":false,"front_arb_connected":true,"window":{"minimum_mm":-1,"maximum_mm":1,"step_mm":1}}}}"#).unwrap();
+    let mappings = directory.path().join("mappings.toml");
+    fs::write(
+        &mappings,
+        format!(
+            "[svc.base]\nfile = '{}'\n[knc.base]\nfile = '{}'\n[knc.vertical]\n",
+            examples.join("example-signals.toml").display(),
+            examples.join("example-vertical-signals.toml").display()
+        ),
+    )
+    .unwrap();
+    let validation = directory.path().join("validation.toml");
+    fs::write(&validation, "[svc]\n").unwrap();
+    let svc = format!(
+        "[meta]\nname='example-config'\nloadcase='example-loadcase'\n[physics]\ngravity=9.80665\n[input]\ninput_file='{}'\n[setup]\ninput_file='{}'\n[mappings]\ninput_file='{}'\n[validation]\ninput_file='{}'\n",
+        input.display(),
+        setup.display(),
+        mappings.display(),
+        validation.display()
+    );
     let case = directory.path().join("case.toml");
-    fs::write(&case, format!("{svc}\n{vertical}")).unwrap();
+    fs::write(&case, svc).unwrap();
     let vertical_output = directory.path().join("vertical-reports");
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([

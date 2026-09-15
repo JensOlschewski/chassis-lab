@@ -15,7 +15,6 @@ pub struct SvcReferenceError(pub String);
 #[derive(Debug, Clone, PartialEq)]
 pub struct SvcReferenceCase {
     pub name: String,
-    pub variant: String,
     pub loadcase: String,
 }
 
@@ -99,10 +98,9 @@ pub fn load_svc_reference(
 
 fn parse_case(v: &Value) -> Result<SvcReferenceCase, Box<dyn std::error::Error>> {
     let t = obj(v, "case")?;
-    exact(t, &["name", "variant", "loadcase"], "case")?;
+    exact(t, &["name", "loadcase"], "case")?;
     Ok(SvcReferenceCase {
         name: nonempty(t, "name", "case")?,
-        variant: nonempty(t, "variant", "case")?,
         loadcase: nonempty(t, "loadcase", "case")?,
     })
 }
@@ -421,7 +419,7 @@ mod tests {
     use super::*;
 
     fn data() -> String {
-        r#"{"schema_version":1,"case":{"name":"n","variant":"v","loadcase":"l"},"coordinate_system":{"cg_x_origin":"front_axle_wheel_center","cg_x_positive":"rearward"},"sources":[{"file":"source.txt","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","result":"reviewed","test_date":"2019-09-06"}],"values":{"total_mass_kg":1500}}"#.into()
+        r#"{"schema_version":1,"case":{"name":"n","loadcase":"l"},"coordinate_system":{"cg_x_origin":"front_axle_wheel_center","cg_x_positive":"rearward"},"sources":[{"file":"source.txt","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","result":"reviewed","test_date":"2019-09-06"}],"values":{"total_mass_kg":1500}}"#.into()
     }
 
     #[test]

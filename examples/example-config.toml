@@ -1,37 +1,27 @@
-# Minimal, synthetic SVC configuration.
-# Relative paths resolve from this file's directory.
+# Example configuration.
+#
+# Modular approach:
+# Each config role is stored in its own file.
 
-[case]
+[meta]
 name = "example-config"
-variant = "EXAMPLE"
-loadcase = "2UP"
+loadcase = "example-loadcase"
 
 [physics]
-gravity = 9.80665 # m/s^2
+gravity = 9.80665 # m/s²
 
-[svc.inputs]
-# Replace these example paths with converted simulation output and reviewed
-# measurements from your own vehicle or test campaign.
-signal_map = "example-signals.toml"
-simulation_hdf5 = "../crates/clab-converter/examples/example-svc.h5"
-measurement_reference = "example-measures.json"
+[input]
+# Simulation and measurement sources (.res or .acd).
+file = "example-input.toml"
 
-[svc.validation.tolerances.absolute]
-# Keep only metrics relevant to your example or validation case.
-front_left_mass_kg = 0.01
-front_right_mass_kg = 0.01
-rear_left_mass_kg = 0.01
-rear_right_mass_kg = 0.01
-front_mass_kg = 0.01
-rear_mass_kg = 0.01
-total_mass_kg = 20.0
-front_distribution_percent = 0.01
-rear_distribution_percent = 0.01
-wheelbase_mm = 0.01
-front_track_mm = 0.01
-rear_track_mm = 0.01
-cg_x_from_front_axle_mm = 0.01
+[setup]
+# test definitions and their setup values.
+file = "example-setup.toml"
 
-[svc.validation.tolerances.relative_percent]
-total_mass_kg = 1.0
-wheelbase_mm = 0.5
+[signals]
+# signal mappings; test-specific mappings extend or override them.
+file = "example-signal-mappings.toml"
+
+[validation]
+# optional tolerance definition, without `clab validate` results remain informational.
+file = "example-validation-tolerances.toml"

@@ -1,3 +1,5 @@
+use std::process::ExitCode;
+
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
@@ -5,6 +7,7 @@ use clap_complete::{Shell, generate};
 mod check;
 mod convert;
 mod inspect;
+mod signals;
 mod validate;
 
 #[derive(Debug, Parser)]
@@ -24,20 +27,22 @@ enum Command {
     Inspect(inspect::InspectArgs),
     /// Convert a supported input to HDF5.
     Convert(convert::ConvertArgs),
+    /// List canonical signals or generate a TOML mapping template.
+    Signals(signals::SignalsArgs),
     /// Generate shell completion scripts.
     Completion { shell: Shell },
 }
 
-fn main() {
-    if let Err(error) = run(Cli::parse()) {
-        eprintln!("error: {error:#}");
-        std::process::exit(
-            if error.downcast_ref::<validate::ToleranceFailure>().is_some() {
-                1
-            } else {
-                2
-            },
-        );
+fn main() -> ExitCode {
+    match run(Cli::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) if error.downcast_ref::<validate::ToleranceFailure>().is_some() => {
+            ExitCode::from(1)
+        }
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            ExitCode::from(2)
+        }
     }
 }
 
@@ -47,6 +52,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Check(args) => check::check(args),
         Command::Inspect(args) => inspect::inspect(args),
         Command::Convert(args) => convert::convert(args),
+        Command::Signals(args) => signals::signals(args),
         Command::Completion { shell } => {
             generate(shell, &mut Cli::command(), "clab", &mut std::io::stdout());
             Ok(())

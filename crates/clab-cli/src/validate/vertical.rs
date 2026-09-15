@@ -8,6 +8,7 @@ use std::{
     sync::OnceLock,
 };
 
+use super::svc::{color_enabled, paint_status};
 use anyhow::{Context, Result, bail};
 use clab_core::{
     config::{CaseConfig, SignalRef},
@@ -64,7 +65,7 @@ pub(crate) struct Reports {
     pub svg: String,
 }
 
-pub(crate) fn validate(config: &CaseConfig) -> Result<Reports> {
+pub(crate) fn validate(config: &CaseConfig, color: super::svc::Color) -> Result<(Reports, bool)> {
     let vertical = config
         .vertical
         .as_ref()
@@ -86,28 +87,105 @@ pub(crate) fn validate(config: &CaseConfig) -> Result<Reports> {
     let response = kernel(&request)?;
     validate_response(&response, &request.grid)?;
     let report = report(config, &response.comparisons)?;
-    println!("Vertical trajectory comparison");
     println!(
-        "case: {} ({}, {}, {})",
-        config.name, config.variant, config.loadcase, vertical.setup.code
+        "KnC Vertical\nsimulation: {}\nreference: {}\n\nrunning {} metrics",
+        vertical.simulation_hdf5.display(),
+        vertical.measurement_hdf5.display(),
+        response.comparisons.len()
     );
-    for comparison in &response.comparisons {
-        println!(
-            "{} {}: measurement baseline {:.8} mm; simulation baseline {:.8} mm; RMSE {:.8} mm; max {:.8} mm",
-            comparison.corner,
-            comparison.axis,
-            comparison.measurement_baseline_mm,
-            comparison.simulation_baseline_mm,
-            comparison.rmse_mm,
-            comparison.maximum_error_mm
-        );
+    let tolerance_failed = validate_tolerances(config, &response.comparisons, color)?;
+    Ok((
+        Reports {
+            json: serde_json::to_string_pretty(&report)? + "\n",
+            csv: csv_text(config, &response.comparisons)?,
+            svg: response.svg,
+        },
+        tolerance_failed,
+    ))
+}
+
+fn validate_tolerances(
+    config: &CaseConfig,
+    comparisons: &[Comparison],
+    color: super::svc::Color,
+) -> Result<bool> {
+    let tolerances = &config.vertical.as_ref().unwrap().tolerances;
+    let expected = comparisons
+        .iter()
+        .map(|comparison| format!("{}_wheel_center_{}_mm", comparison.corner, comparison.axis))
+        .collect::<std::collections::BTreeSet<_>>();
+    for name in tolerances.absolute.keys() {
+        if !expected.contains(name) {
+            bail!("tolerance configured for unknown vertical metric: {name}")
+        }
     }
-    println!("validation result: informational (no vertical tolerances configured)");
-    Ok(Reports {
-        json: serde_json::to_string_pretty(&report)? + "\n",
-        csv: csv_text(config, &response.comparisons)?,
-        svg: response.svg,
-    })
+    let mut failed = false;
+    let mut passed = 0;
+    let mut missing = 0;
+    for comparison in comparisons {
+        let name = format!(
+            "{}_{}_{}_mm",
+            comparison.corner, "wheel_center", comparison.axis
+        );
+        let absolute = tolerances.absolute.get(&name).copied();
+        let relative = tolerances.relative_percent.get(&name).map(|percent| {
+            comparison
+                .measurement_mm
+                .iter()
+                .map(|value| value.abs())
+                .fold(0.0, f64::max)
+                * percent
+                / 100.0
+        });
+        if absolute.is_some() || relative.is_some() {
+            let tolerance = match (absolute, relative) {
+                (Some(absolute), Some(relative)) => absolute.min(relative),
+                (Some(value), None) | (None, Some(value)) => value,
+                (None, None) => unreachable!(),
+            };
+            let metric_passed = comparison.maximum_error_mm <= tolerance;
+            println!(
+                "  knc::vertical::{name} ... {} (actual {:.8}; reference 0.00000000; diff {:.8} {} {:.8} mm)",
+                paint_status(
+                    if metric_passed { "ok" } else { "failed" },
+                    if metric_passed {
+                        "\x1b[32m"
+                    } else {
+                        "\x1b[31m"
+                    },
+                    color_enabled(color)
+                ),
+                comparison.maximum_error_mm,
+                comparison.maximum_error_mm,
+                if metric_passed { "<=" } else { ">" },
+                tolerance
+            );
+            if metric_passed {
+                passed += 1;
+            }
+            failed |= !metric_passed;
+        } else {
+            missing += 1;
+            println!(
+                "  knc::vertical::{name} ... {} (max error {:.8} mm; tolerance missing)",
+                paint_status("missing", "\x1b[33m", color_enabled(color)),
+                comparison.maximum_error_mm
+            );
+        }
+    }
+    println!(
+        "\nvalidation result: {}. {passed} passed; {failed_count} failed; {total} total",
+        if failed {
+            "failed"
+        } else if missing > 0 {
+            "incomplete"
+        } else {
+            "ok"
+        },
+        failed_count = comparisons.len() - passed - missing,
+        total = comparisons.len()
+    );
+    Ok(failed)
 }
 
 pub(crate) fn preflight(config: &CaseConfig) -> Result<()> {
@@ -280,6 +358,9 @@ fn validate_setup(measurement: &MeasurementFile, config: &CaseConfig) -> Result<
             "" | "NaN" | "nan" => None,
             _ => bail!("measurement setup metadata {name} has invalid value {value:?}"),
         };
+        if name == "rarbon" && actual.is_none() {
+            continue;
+        }
         if expected != actual {
             bail!("measurement setup {name}={actual:?}; expected {expected:?}");
         }
@@ -324,7 +405,13 @@ fn initialize_python_once() -> Result<()> {
         .parent()
         .and_then(Path::parent)
         .filter(|root| root.join("lib/python3.12").is_dir())
-        .map(PathBuf::from);
+        .map(|root| {
+            if cfg!(windows) {
+                root.join("lib/python3.12")
+            } else {
+                PathBuf::from(root)
+            }
+        });
     let Some(runtime) = runtime else {
         Python::initialize();
         return Ok(());
@@ -425,7 +512,7 @@ fn report(config: &CaseConfig, comparisons: &[Comparison]) -> Result<serde_json:
         inputs["signal_map"] = record(path)?;
     }
     Ok(
-        serde_json::json!({"schema_version": 1, "case": config.name, "variant": config.variant, "loadcase": config.loadcase, "setup_code": v.setup.code, "metrics": comparisons, "inputs": inputs, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}}),
+        serde_json::json!({"schema_version": 1, "case": config.name, "loadcase": config.loadcase, "setup_code": v.setup.code, "metrics": comparisons, "inputs": inputs, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}}),
     )
 }
 fn record(path: &Path) -> Result<serde_json::Value> {
@@ -439,7 +526,6 @@ fn csv_text(config: &CaseConfig, comparisons: &[Comparison]) -> Result<String> {
     let mut writer = csv::WriterBuilder::new().from_writer(Vec::new());
     writer.write_record([
         "case",
-        "variant",
         "loadcase",
         "setup_code",
         "corner",
@@ -463,7 +549,6 @@ fn csv_text(config: &CaseConfig, comparisons: &[Comparison]) -> Result<String> {
     for c in comparisons {
         writer.write_record([
             safe_cell(&config.name),
-            safe_cell(&config.variant),
             safe_cell(&config.loadcase),
             safe_cell(&v.setup.code),
             safe_cell(&c.corner),

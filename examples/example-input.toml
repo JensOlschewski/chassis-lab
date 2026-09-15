@@ -1,0 +1,19 @@
+# Input definitions.
+# Assigns converted simulation and measurement data to each configured test.
+# Convert supported raw files with `clab convert` before validation.
+#
+# SVC measurement data is not converted automatically and must be prepared
+# separately.
+# Signal names, source fields, and unit conversion are defined in mappings.toml.
+
+[svc.simulation]
+file = "input/example-simulation-svc.json"
+
+[svc.measurement]
+file = "input/example-measurement-svc.json"
+
+[knc.vertical.simulation]
+file = "input/example-simulation-vertical.h5"
+
+[knc.vertical.measurement]
+file = "input/example-measurement-vertical.h5"

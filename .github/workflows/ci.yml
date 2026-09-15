@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust quality build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-quality-cargo-${{ hashFiles('**/Cargo.lock', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-quality-cargo-
+
+      - name: Install Rust build tools
+        run: python -m pip install "cmake>=3.26,<4"
+
+      - name: Install Python package
+        run: python -m pip install "./py-chassislab[dev]"
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint Rust
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --workspace --locked
+
+      - name: Build repository converter
+        run: cargo build --workspace --release --locked
+
+      - name: Check Python
+        run: cd py-chassislab && ruff check . && ruff format --check .
+
+      - name: Test Python and integration
+        run: cd py-chassislab && pytest -q
+
+  linux-runtime:
+    needs: quality
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Cache Linux runtime build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-linux-runtime-cargo-${{ hashFiles('**/Cargo.lock', 'packaging/embedded-runtime-linux-x86_64.lock', 'packaging/build-embedded-runtime.sh', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-linux-runtime-cargo-
+
+      - name: Install Rust build tools
+        run: python3 -m pip install "cmake>=3.26,<4"
+
+      - name: Build Linux runtime archive
+        run: packaging/build-embedded-runtime.sh dist/clab-runtime-linux-x86_64
+
+      - name: Verify Linux runtime checksum
+        run: sha256sum --check dist/clab-runtime-linux-x86_64.tar.gz.sha256
+
+      - name: Smoke test Linux runtime in clean Ubuntu container
+        run: |
+          smoke_input="$(mktemp)"
+          trap 'rm -f "$smoke_input"' EXIT
+          tar -czf "$smoke_input" \
+            dist/clab-runtime-linux-x86_64.tar.gz \
+            examples/example-config-flat.toml \
+            examples/input/example-measurement-svc.json \
+            examples/input/example-simulation-svc.res \
+            examples/input/example-simulation-vertical.res \
+            examples/input/example-measurement-vertical.acd
+          test -s "$smoke_input"
+          docker run --rm --pull=missing -i \
+            ubuntu:24.04 \
+            bash -ceu '
+              mkdir /tmp/input /tmp/clab-runtime /tmp/smoke
+              tar -xzf - -C /tmp/input
+              tar -xzf /tmp/input/dist/clab-runtime-linux-x86_64.tar.gz -C /tmp/clab-runtime
+              bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
+              cp /tmp/input/examples/example-config-flat.toml /tmp/smoke/
+              mkdir /tmp/smoke/input
+              cp /tmp/input/examples/input/example-measurement-svc.json /tmp/smoke/input/
+              cp /tmp/input/examples/input/example-simulation-svc.res /tmp/smoke/
+              cp /tmp/input/examples/input/example-simulation-vertical.res /tmp/smoke/
+              cp /tmp/input/examples/input/example-measurement-vertical.acd /tmp/smoke/
+              cd /tmp/smoke
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -o input/example-simulation-svc.json
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-vertical.res -o input/example-simulation-vertical.h5
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-vertical.acd -o input/example-measurement-vertical.h5
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" validate example-config-flat.toml --output-dir reports
+              test -s reports/svc.json
+              test -s reports/svc.csv
+              test -s reports/knc-vertical.json
+              test -s reports/knc-vertical.csv
+              test -s reports/knc-vertical.svg
+            ' < "$smoke_input"
