@@ -119,6 +119,18 @@ fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<
                     Some(text) => file.matching_channels(text),
                     None => file.channels().iter().collect(),
                 };
+                let channel_width = channels
+                    .iter()
+                    .map(|channel| channel.group_name.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max("CHANNEL".len());
+                let unit_width = channels
+                    .iter()
+                    .map(|channel| channel.unit.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max("UNIT".len());
                 if match_text.is_some() {
                     for channel in &channels {
                         let values = file.read_channel(&channel.group_name, None)?.values;
@@ -146,12 +158,12 @@ fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<
                     }
                     println!();
                     println!(
-                        "{:<24} {:<10} {:>14}  DESCRIPTION",
+                        "{:<channel_width$}  {:<unit_width$}  {:>14}  DESCRIPTION",
                         "CHANNEL", "UNIT", "SOURCE COLUMN"
                     );
                 } else {
                     println!(
-                        "{:<24} {:<10} {:>14} {:>14}  DESCRIPTION",
+                        "{:<channel_width$}  {:<unit_width$}  {:>14} {:>14}  DESCRIPTION",
                         "CHANNEL", "UNIT", "OFFSET", "SOURCE COLUMN"
                     );
                 }
@@ -168,12 +180,12 @@ fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<
                     };
                     if match_text.is_some() {
                         println!(
-                            "{:<24} {:<10} {:>14}  {}",
+                            "{:<channel_width$}  {:<unit_width$}  {:>14}  {}",
                             channel.group_name, channel.unit, channel.column, description
                         );
                     } else {
                         println!(
-                            "{:<24} {:<10} {:>14.6} {:>14}  {}",
+                            "{:<channel_width$}  {:<unit_width$}  {:>14.6} {:>14}  {}",
                             channel.group_name,
                             channel.unit,
                             channel.offset,
