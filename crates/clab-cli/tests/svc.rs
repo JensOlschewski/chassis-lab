@@ -229,6 +229,9 @@ fn check_runs_svc_preflight_without_python() {
         .env("PYTHONHOME", "/path/that/does/not/exist")
         .output()
         .unwrap();
-    assert_eq!(result.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&result.stderr).contains("identity"));
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
 }

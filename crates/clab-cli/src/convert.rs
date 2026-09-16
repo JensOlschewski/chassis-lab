@@ -5,15 +5,15 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use clap::Args;
+use clap::{Args, ValueEnum};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Args)]
 pub(crate) struct ConvertArgs {
     /// SVC RES, vertical RES, ACD, or vehicle-information HTML input.
     input: PathBuf,
-    /// Output file. Vehicle-information conversion writes `curb.json` and
-    /// `2up.json` to this directory; defaults to the input directory.
+    /// Output file. Vehicle-information conversion defaults to a JSON file
+    /// beside the input; an output directory retains the input filename.
     #[arg(short, long, value_name = "OUTPUT")]
     output: Option<PathBuf>,
     /// Replace an existing output file.
@@ -23,9 +23,17 @@ pub(crate) struct ConvertArgs {
     /// beside the HTML input when present.
     #[arg(long, value_name = "MOI_FILE")]
     moi: Option<PathBuf>,
-    /// Validation case name for vehicle-information references.
-    #[arg(long, value_name = "NAME")]
-    case_name: Option<String>,
+    /// Loadcase to convert from vehicle-information input.
+    #[arg(long, value_enum, ignore_case = true, value_name = "LOADCASE")]
+    loadcase: Option<VehicleLoadcase>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum VehicleLoadcase {
+    #[value(name = "CURB")]
+    Curb,
+    #[value(name = "2UP")]
+    TwoUp,
 }
 
 #[derive(Clone, Copy)]
@@ -87,33 +95,30 @@ impl InputKind {
             Self::SvcRes => "SVC JSON",
             Self::Res => "simulation HDF5",
             Self::Acd => "measurement HDF5",
-            Self::VehicleInfo => "SVC reference JSON files",
+            Self::VehicleInfo => "SVC reference JSON",
         }
     }
 }
 
 pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     let kind = InputKind::from_path(&args.input)?;
-    let output = args
-        .output
-        .unwrap_or_else(|| kind.default_output(&args.input));
     if matches!(kind, InputKind::VehicleInfo) {
-        let case_name = args.case_name.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("vehicle-information conversion requires --case-name NAME")
+        let loadcase = args.loadcase.ok_or_else(|| {
+            anyhow::anyhow!("vehicle-information conversion requires --loadcase CURB or 2UP")
         })?;
+        let output = vehicle_output(&args.input, args.output.as_deref())?;
+        validate_output(&args.input, &output, args.force)?;
         let moi = args.moi.as_deref().map(Path::to_path_buf).or_else(|| {
             let path = args.input.parent()?.join("MOISequence_S7_R2.txt");
             path.is_file().then_some(path)
         });
-        convert_vehicle_references(&args.input, moi.as_deref(), case_name, &output, args.force)?;
-        println!(
-            "generated {}/curb.json and {}/2up.json ({})",
-            output.display(),
-            output.display(),
-            kind.output_type()
-        );
+        convert_vehicle_reference(&args.input, moi.as_deref(), loadcase, &output, args.force)?;
+        println!("generated {} ({})", output.display(), kind.output_type());
         return Ok(());
     }
+    let output = args
+        .output
+        .unwrap_or_else(|| kind.default_output(&args.input));
     if matches!(kind, InputKind::SvcRes)
         && !output
             .extension()
@@ -141,48 +146,57 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     Ok(())
 }
 
-fn convert_vehicle_references(
+fn vehicle_output(input: &Path, output: Option<&Path>) -> Result<PathBuf> {
+    let filename = input
+        .file_stem()
+        .filter(|stem| !stem.is_empty())
+        .map(|stem| PathBuf::from(stem).with_extension("json"))
+        .ok_or_else(|| anyhow::anyhow!("vehicle-information input has no filename"))?;
+    match output {
+        Some(output) if output.is_dir() => Ok(output.join(filename)),
+        Some(output)
+            if output
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("json")) =>
+        {
+            Ok(output.to_path_buf())
+        }
+        Some(output) => bail!(
+            "vehicle-information output must be an existing directory or a .json file: {}",
+            output.display()
+        ),
+        None => Ok(input
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(filename)),
+    }
+}
+
+fn convert_vehicle_reference(
     input: &Path,
     moi: Option<&Path>,
-    case_name: &str,
-    output_dir: &Path,
+    loadcase: VehicleLoadcase,
+    output: &Path,
     force: bool,
 ) -> Result<()> {
-    if !output_dir.is_dir() {
-        bail!(
-            "vehicle-information output must be an existing directory: {}",
-            output_dir.display()
-        );
-    }
     let (mut curb, two_up) = parse_vehicle_html(&read_text(input)?)?;
     let html_source = source(input, "vehicle information")?;
-    let mut curb_sources = vec![html_source.clone()];
-    if let Some(moi) = moi {
-        curb.extend(parse_moi_values(&read_text(moi)?)?);
-        curb_sources.push(source(moi, "MOI CG height and inertia")?);
+    match loadcase {
+        VehicleLoadcase::Curb => {
+            let mut sources = vec![html_source];
+            if let Some(moi) = moi {
+                curb.extend(parse_moi_values(&read_text(moi)?)?);
+                sources.push(source(moi, "MOI CG height and inertia")?);
+            }
+            write_reference(output, sources, curb, force)
+        }
+        VehicleLoadcase::TwoUp => write_reference(output, vec![html_source], two_up, force),
     }
-    write_reference(
-        &output_dir.join("curb.json"),
-        &format!("{case_name}-curb"),
-        "CURB",
-        curb_sources,
-        curb,
-        force,
-    )?;
-    write_reference(
-        &output_dir.join("2up.json"),
-        case_name,
-        "2UP",
-        vec![html_source],
-        two_up,
-        force,
-    )
 }
 
 fn write_reference(
     output: &Path,
-    name: &str,
-    loadcase: &str,
     sources: Vec<serde_json::Value>,
     values: BTreeMap<String, f64>,
     force: bool,
@@ -195,7 +209,6 @@ fn write_reference(
     }
     let document = serde_json::json!({
         "schema_version": 1,
-        "case": {"name": name, "loadcase": loadcase},
         "coordinate_system": {"cg_x_origin": "front_axle_wheel_center", "cg_x_positive": "rearward"},
         "sources": sources,
         "values": values,
