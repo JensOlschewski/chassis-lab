@@ -2,7 +2,6 @@
 # Defines test conditions and the evaluated wheel-travel window.
 
 [knc.vertical]
-code = "example-vertical"
 brakes_applied = false
 engine_running = false
 front_arb_connected = true

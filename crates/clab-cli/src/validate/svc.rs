@@ -43,6 +43,21 @@ const GEOMETRY: [&str; 20] = [
     "rear_left_camber",
     "rear_right_camber",
 ];
+const REPORT_METRICS: [&str; 13] = [
+    "front_left_mass_kg",
+    "front_right_mass_kg",
+    "front_mass_kg",
+    "rear_left_mass_kg",
+    "rear_right_mass_kg",
+    "rear_mass_kg",
+    "total_mass_kg",
+    "front_distribution_percent",
+    "rear_distribution_percent",
+    "cg_x_from_front_axle_mm",
+    "front_track_mm",
+    "rear_track_mm",
+    "wheelbase_mm",
+];
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub(crate) enum Color {
@@ -252,18 +267,7 @@ fn compare(
     reference: &SvcReference,
     tolerances: &clab_core::config::ValidationTolerances,
 ) -> Result<Vec<Metric>> {
-    let tolerance_names: std::collections::BTreeSet<_> = tolerances
-        .absolute
-        .keys()
-        .chain(tolerances.relative_percent.keys())
-        .collect();
-    if let Some(name) = tolerance_names
-        .into_iter()
-        .find(|name| !reference.values.contains_key(*name))
-    {
-        bail!("tolerance configured for unknown reference metric(s): {name}");
-    }
-    reference
+    let mut metrics = reference
         .values
         .iter()
         .map(|(name, expected)| {
@@ -296,7 +300,19 @@ fn compare(
                     || (measured - expected).abs() <= allowed,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    metrics.sort_by(|left, right| metric_order(&left.name, &right.name));
+    Ok(metrics)
+}
+
+fn metric_order(left: &str, right: &str) -> std::cmp::Ordering {
+    let index = |name: &str| {
+        REPORT_METRICS
+            .iter()
+            .position(|metric| *metric == name)
+            .unwrap_or(REPORT_METRICS.len())
+    };
+    index(left).cmp(&index(right)).then_with(|| left.cmp(right))
 }
 
 fn metric_unit(name: &str) -> Result<String> {
@@ -475,8 +491,17 @@ fn color_enabled_for(color: Color, terminal: bool, no_color: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, path::PathBuf};
+
+    use clab_core::{
+        config::ValidationTolerances,
+        svc_reference::{SvcCoordinateSystem, SvcReference, SvcReferenceCase},
+    };
+
     use super::Color;
     use super::color_enabled_for;
+    use super::compare;
+    use super::metric_order;
 
     #[test]
     fn color_modes_respect_terminal_and_no_color() {
@@ -485,5 +510,71 @@ mod tests {
         assert!(color_enabled_for(Color::Auto, true, false));
         assert!(!color_enabled_for(Color::Auto, true, true));
         assert!(!color_enabled_for(Color::Auto, false, false));
+    }
+
+    #[test]
+    fn orders_svc_metrics_for_readable_reports() {
+        let mut names = vec![
+            "wheelbase_mm",
+            "rear_mass_kg",
+            "front_right_mass_kg",
+            "total_mass_kg",
+            "front_left_mass_kg",
+            "rear_left_mass_kg",
+            "front_mass_kg",
+            "rear_right_mass_kg",
+            "front_distribution_percent",
+            "rear_distribution_percent",
+            "cg_x_from_front_axle_mm",
+            "front_track_mm",
+            "rear_track_mm",
+        ];
+        names.sort_by(|left, right| metric_order(left, right));
+        assert_eq!(
+            names,
+            [
+                "front_left_mass_kg",
+                "front_right_mass_kg",
+                "front_mass_kg",
+                "rear_left_mass_kg",
+                "rear_right_mass_kg",
+                "rear_mass_kg",
+                "total_mass_kg",
+                "front_distribution_percent",
+                "rear_distribution_percent",
+                "cg_x_from_front_axle_mm",
+                "front_track_mm",
+                "rear_track_mm",
+                "wheelbase_mm",
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_tolerances_for_metrics_absent_from_reference() {
+        let reference = SvcReference {
+            path: PathBuf::from("reference.json"),
+            schema_version: 1,
+            case: SvcReferenceCase {
+                name: "case".into(),
+                loadcase: "CURB".into(),
+            },
+            coordinate_system: SvcCoordinateSystem {
+                cg_x_origin: "front_axle_wheel_center".into(),
+                cg_x_positive: "rearward".into(),
+            },
+            sources: vec![],
+            values: BTreeMap::from([("total_mass_kg".into(), 1000.0)]),
+        };
+        let actual = BTreeMap::from([("total_mass_kg".into(), 1000.0)]);
+        let tolerances = ValidationTolerances {
+            absolute: BTreeMap::from([("total_mass_kg".into(), 1.0), ("cg_height_mm".into(), 5.0)]),
+            relative_percent: BTreeMap::new(),
+        };
+
+        let metrics = compare(&actual, &reference, &tolerances).unwrap();
+
+        assert_eq!(metrics.len(), 1);
+        assert_eq!(metrics[0].name, "total_mass_kg");
     }
 }

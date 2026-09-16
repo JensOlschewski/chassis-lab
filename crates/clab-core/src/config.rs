@@ -32,7 +32,6 @@ pub struct ValidationConfig {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalSetup {
-    pub code: String,
     pub brakes_applied: bool,
     pub engine_running: bool,
     pub front_arb_connected: bool,
@@ -348,13 +347,21 @@ fn function_vertical(
             .ok_or_else(|| ConfigError("missing [setup] table".into()))?,
         "[setup]",
     )?;
-    let setup = setup_root
-        .get("knc")
-        .and_then(Value::as_table)
-        .and_then(|t| t.get("vertical"))
-        .or_else(|| setup_root.get("vertical"))
-        .ok_or_else(|| ConfigError("missing [setup.knc.vertical] table".into()))?;
-    let setup = table(setup, "[setup.knc.vertical]")?;
+    let setup = if let Some(knc) = setup_root.get("knc") {
+        let mut setup = table(knc, "[setup.knc]")?.clone();
+        if let Some(vertical) = setup.remove("vertical") {
+            merge_map(&mut setup, table(&vertical, "[setup.knc.vertical]")?);
+        }
+        setup
+    } else {
+        table(
+            setup_root
+                .get("vertical")
+                .ok_or_else(|| ConfigError("missing [setup.knc.vertical] table".into()))?,
+            "[setup.knc.vertical]",
+        )?
+        .clone()
+    };
     let mut vertical = Map::new();
     let mut inputs = Map::new();
     inputs.insert(
@@ -379,16 +386,43 @@ fn function_vertical(
     });
     vertical.insert("setup".into(), Value::Table(setup_copy));
     vertical.insert("window".into(), window);
-    if let Some(validation) = root
-        .get("validation")
-        .and_then(Value::as_table)
-        .and_then(|v| v.get("knc"))
-        .and_then(Value::as_table)
-        .and_then(|v| v.get("vertical"))
-    {
-        vertical.insert("validation".into(), validation.clone());
+    if let Some(validation) = knc_validation(root)? {
+        vertical.insert("validation".into(), Value::Table(validation));
     }
     Ok(Some(parse_vertical(&Value::Table(vertical), path)?))
+}
+
+fn knc_validation(
+    root: &toml::map::Map<String, Value>,
+) -> Result<Option<Map<String, Value>>, Box<dyn std::error::Error>> {
+    let Some(knc) = root
+        .get("validation")
+        .and_then(Value::as_table)
+        .and_then(|validation| validation.get("knc"))
+    else {
+        return Ok(None);
+    };
+    let knc = table(knc, "[validation.knc]")?;
+    let mut validation = knc
+        .get("validation")
+        .map(|value| table(value, "[validation.knc.validation]"))
+        .transpose()?
+        .cloned()
+        .unwrap_or_default();
+    if let Some(vertical) = knc.get("vertical") {
+        let vertical = table(vertical, "[validation.knc.vertical]")?;
+        if let Some(tolerances) = vertical.get("tolerances") {
+            let mut override_ = Map::new();
+            override_.insert("tolerances".into(), tolerances.clone());
+            merge_map(&mut validation, &override_);
+        } else if let Some(override_) = vertical.get("validation") {
+            merge_map(
+                &mut validation,
+                table(override_, "[validation.knc.vertical.validation]")?,
+            );
+        }
+    }
+    Ok((!validation.is_empty()).then_some(validation))
 }
 
 fn function_input(
@@ -792,7 +826,6 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
     keys(
         s,
         &[
-            "code",
             "brakes_applied",
             "engine_running",
             "front_arb_connected",
@@ -854,7 +887,6 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             "simulation_hdf5",
         )?,
         setup: VerticalSetup {
-            code: string(s, "code", "[vertical.setup]")?,
             brakes_applied: boolean(s, "brakes_applied")?,
             engine_running: boolean(s, "engine_running")?,
             front_arb_connected: boolean(s, "front_arb_connected")?,
@@ -1324,7 +1356,7 @@ mod tests {
     fn parses_vertical_only_unified_config() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\ncode='x'\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
+        fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.configured_domains(), vec![Domain::Knc]);
     }
@@ -1405,11 +1437,11 @@ mod tests {
     fn parses_canonical_toml_role_files_and_signal_inheritance() {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("input.toml"), "[svc.simulation]\nfile='simulation.json'\n[svc.measurement]\nfile='reference.json'\n[knc.vertical.simulation]\nfile='simulation.h5'\n[knc.vertical.measurement]\nfile='measurement.h5'\n").unwrap();
-        fs::write(d.path().join("setup.toml"), "[knc.vertical]\ncode='v'\nbrakes_applied=false\nengine_running=false\nfront_arb_connected=true\n[knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n").unwrap();
+        fs::write(d.path().join("setup.toml"), "[knc.vertical]\nbrakes_applied=false\nengine_running=false\nfront_arb_connected=true\n[knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n").unwrap();
         fs::write(d.path().join("signals.toml"), "[svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[knc.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n[knc.vertical.signals.front_left_wheel_center_x]\nentity='fl'\ncomponent='x'\nunit='mm'\n").unwrap();
         fs::write(
             d.path().join("validation.toml"),
-            "[svc.validation.tolerances.absolute]\ntotal=1\n",
+            "[svc.validation.tolerances.absolute]\ntotal=1\n[knc.validation.tolerances.absolute]\nrear_left_wheel_center_x_mm=0.2\n[knc.vertical.tolerances.absolute]\nfront_left_wheel_center_x_mm=0.1\n",
         )
         .unwrap();
         let p = d.path().join("case.toml");
@@ -1419,5 +1451,60 @@ mod tests {
         let vertical = config.vertical.unwrap();
         assert_eq!(vertical.signals["front_left_travel"].component, "travel");
         assert_eq!(vertical.signals["front_left_wheel_center_x"].component, "x");
+        assert_eq!(
+            vertical.tolerances.absolute["front_left_wheel_center_x_mm"],
+            0.1
+        );
+        assert_eq!(
+            vertical.tolerances.absolute["rear_left_wheel_center_x_mm"],
+            0.2
+        );
+    }
+
+    #[test]
+    fn merges_knc_defaults_with_vertical_setup_and_tolerances() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("input.toml"),
+            "[knc.vertical.simulation]\nfile='simulation.h5'\n[knc.vertical.measurement]\nfile='measurement.h5'\n",
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("setup.toml"),
+            "[knc]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\nrear_arb_connected=true\n[knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n",
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("signals.toml"),
+            "[knc.vertical.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n",
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("validation.toml"),
+            "[knc.validation.tolerances.absolute]\nfront_left_wheel_center_x_mm=0.1\nrear_left_wheel_center_x_mm=0.1\n[knc.vertical.validation.tolerances.absolute]\nfront_left_wheel_center_x_mm=0.05\n[knc.vertical.validation.tolerances.relative_percent]\nrear_left_wheel_center_x_mm=2\n",
+        )
+        .unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[meta]\nname='n'\nloadcase='l'\n[input]\nfile='input.toml'\n[setup]\nfile='setup.toml'\n[signals]\nfile='signals.toml'\n[validation]\nfile='validation.toml'\n",
+        )
+        .unwrap();
+
+        let vertical = load_config(&p).unwrap().vertical.unwrap();
+
+        assert!(vertical.setup.brakes_applied);
+        assert_eq!(
+            vertical.tolerances.absolute["front_left_wheel_center_x_mm"],
+            0.05
+        );
+        assert_eq!(
+            vertical.tolerances.absolute["rear_left_wheel_center_x_mm"],
+            0.1
+        );
+        assert_eq!(
+            vertical.tolerances.relative_percent["rear_left_wheel_center_x_mm"],
+            2.0
+        );
     }
 }
