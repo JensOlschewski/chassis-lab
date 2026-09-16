@@ -107,7 +107,6 @@ pub(crate) fn validate(config: &CaseConfig, color: Color) -> Result<(Reports, bo
             validation.reference.display()
         )
     })?;
-    validate_identity(config, &reference)?;
     let metrics = compare(&actual, &reference, &validation.tolerances)?;
     let reports = Reports {
         json: report_json(config, &reference, &metrics)?,
@@ -115,23 +114,6 @@ pub(crate) fn validate(config: &CaseConfig, color: Color) -> Result<(Reports, bo
     };
     print_console(config, &reference, &metrics, color_enabled(color));
     Ok((reports, metrics.iter().any(|metric| !metric.passed)))
-}
-
-fn validate_identity(config: &CaseConfig, reference: &SvcReference) -> Result<()> {
-    if (
-        reference.case.name.as_str(),
-        reference.case.loadcase.as_str(),
-    ) != (config.name.as_str(), config.loadcase.as_str())
-    {
-        bail!(
-            "reference case identity does not match configuration: expected ({:?}, {:?}), found ({:?}, {:?})",
-            config.name,
-            config.loadcase,
-            reference.case.name,
-            reference.case.loadcase
-        );
-    }
-    Ok(())
 }
 
 pub(crate) fn preflight(config: &CaseConfig) -> Result<()> {
@@ -165,7 +147,6 @@ pub(crate) fn preflight(config: &CaseConfig) -> Result<()> {
             validation.reference.display()
         )
     })?;
-    validate_identity(config, &reference)?;
     compare(&actual, &reference, &validation.tolerances)?;
     Ok(())
 }
@@ -495,7 +476,7 @@ mod tests {
 
     use clab_core::{
         config::ValidationTolerances,
-        svc_reference::{SvcCoordinateSystem, SvcReference, SvcReferenceCase},
+        svc_reference::{SvcCoordinateSystem, SvcReference},
     };
 
     use super::Color;
@@ -555,10 +536,6 @@ mod tests {
         let reference = SvcReference {
             path: PathBuf::from("reference.json"),
             schema_version: 1,
-            case: SvcReferenceCase {
-                name: "case".into(),
-                loadcase: "CURB".into(),
-            },
             coordinate_system: SvcCoordinateSystem {
                 cg_x_origin: "front_axle_wheel_center".into(),
                 cg_x_positive: "rearward".into(),

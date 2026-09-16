@@ -22,6 +22,8 @@ const MINIMAL_RES: &str = r#"<Result>
 "#;
 
 const MINIMAL_ACD: &str = "FileInfo: ASCII3\nTime\tWheel\tstring\tDescription\n0\t10\tfloat\tOffset\ntime\ttravel\tstring\tName\ns\tmm\tstring\tUnits\nNaN\tNaN\tstring\tKPoly\n0\t1\n";
+const VEHICLE_HTML: &str = "<tr><td>Track Front/Rear:</td><td>1498 / 1463</td><td>Left Front:</td><td>413</td><td>449</td></tr><tr><td>Wheelbase:</td><td>2497</td><td>Right Front:</td><td>389</td><td>427</td></tr><tr><td>Hip Point:</td><td></td><td>Left Rear:</td><td>347</td><td>384</td></tr><tr><td>Other:</td><td></td><td>Right Rear:</td><td>351</td><td>383</td></tr>";
+const MOI_SEQUENCE: &str = "Inertia Units=kgm²\nBody Inertia Results:Complete Vehicle\nIxx Ground=508.4\nIyy Ground=1915.1\nIzz Ground=2014.7\nBody Inertia Results:Sprung Mass\nCG Ground Z=489.2\n";
 
 fn convert(input: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
@@ -81,6 +83,80 @@ fn converts_acd_to_default_measurement_hdf5() {
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
         format!("generated {} (measurement HDF5)\n", output.display())
+    );
+}
+
+#[test]
+fn converts_vehicle_info_for_selected_loadcase_with_derived_output_name() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("veh_inf.htm");
+    let moi = directory.path().join("moi.txt");
+    fs::write(&input, VEHICLE_HTML).unwrap();
+    fs::write(&moi, MOI_SEQUENCE).unwrap();
+
+    let curb = convert(&input)
+        .args(["--loadcase", "CURB", "--moi"])
+        .arg(&moi)
+        .output()
+        .unwrap();
+    assert!(curb.status.success());
+    let curb_path = directory.path().join("veh_inf.json");
+    let curb: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&curb_path).unwrap()).unwrap();
+    assert!(curb["case"].is_null());
+    assert_eq!(curb["values"]["front_left_mass_kg"], 413.0);
+    assert_eq!(curb["values"]["cg_height_mm"], 489.2);
+    assert!(!directory.path().join("2up.json").exists());
+
+    let output_dir = directory.path().join("output");
+    fs::create_dir(&output_dir).unwrap();
+    let two_up = convert(&input)
+        .args(["--loadcase", "2up", "--moi"])
+        .arg(&moi)
+        .arg("-o")
+        .arg(&output_dir)
+        .output()
+        .unwrap();
+    assert!(two_up.status.success());
+    let two_up: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output_dir.join("veh_inf.json")).unwrap())
+            .unwrap();
+    assert!(two_up["case"].is_null());
+    assert_eq!(two_up["values"]["front_left_mass_kg"], 449.0);
+    assert!(two_up["values"]["cg_height_mm"].is_null());
+
+    let explicit_path = directory.path().join("chosen/reference.json");
+    fs::create_dir(explicit_path.parent().unwrap()).unwrap();
+    let explicit_result = convert(&input)
+        .args(["--loadcase", "CURB", "-o"])
+        .arg(&explicit_path)
+        .output()
+        .unwrap();
+    assert!(explicit_result.status.success());
+    let explicit: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&explicit_path).unwrap()).unwrap();
+    assert!(explicit["case"].is_null());
+
+    let rejected = convert(&input)
+        .args(["--loadcase", "CURB", "-o"])
+        .arg(&explicit_path)
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(
+        String::from_utf8(rejected.stderr)
+            .unwrap()
+            .contains("already exists")
+    );
+    assert!(
+        convert(&input)
+            .args(["--loadcase", "CURB", "-o"])
+            .arg(&explicit_path)
+            .arg("--force")
+            .output()
+            .unwrap()
+            .status
+            .success()
     );
 }
 
