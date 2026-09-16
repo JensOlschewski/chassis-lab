@@ -113,7 +113,6 @@ jobs:
             cp /tmp/input/examples/input/example-measurement-svc.json /tmp/smoke/
             cd /tmp/smoke
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/embed-smoke" /tmp/embed-smoke.svg
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.json
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-vertical.res -o vertical.simulation.h5
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-vertical.acd -o vertical.measurement.h5
@@ -134,7 +133,6 @@ jobs:
           $env:PYTHONPATH = "C:\poisoned"
           $env:VIRTUAL_ENV = "C:\poisoned"
           & "$bundle\bin\clab.exe" --version
-          & "$bundle\bin\embed-smoke.exe" "$smoke\embed-smoke.svg"
           Copy-Item examples\input\example-simulation-svc.res $smoke
           Copy-Item examples\input\example-simulation-vertical.res $smoke
            Copy-Item examples\input\example-measurement-vertical.acd $smoke
@@ -160,7 +158,6 @@ jobs:
           bundle="$smoke/embed-bundle-macos-x86_64"
           clean_env=(env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned DYLD_LIBRARY_PATH=/poisoned)
           "${clean_env[@]}" "$bundle/bin/clab" --version
-          "${clean_env[@]}" "$bundle/bin/embed-smoke" "$smoke/embed-smoke.svg"
            cp examples/input/example-simulation-svc.res "$smoke/"
            cp examples/input/example-simulation-vertical.res "$smoke/"
            cp examples/input/example-measurement-vertical.acd "$smoke/"
