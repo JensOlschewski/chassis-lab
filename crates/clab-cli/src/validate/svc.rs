@@ -267,17 +267,6 @@ fn compare(
     reference: &SvcReference,
     tolerances: &clab_core::config::ValidationTolerances,
 ) -> Result<Vec<Metric>> {
-    let tolerance_names: std::collections::BTreeSet<_> = tolerances
-        .absolute
-        .keys()
-        .chain(tolerances.relative_percent.keys())
-        .collect();
-    if let Some(name) = tolerance_names
-        .into_iter()
-        .find(|name| !reference.values.contains_key(*name))
-    {
-        bail!("tolerance configured for unknown reference metric(s): {name}");
-    }
     let mut metrics = reference
         .values
         .iter()
@@ -502,8 +491,16 @@ fn color_enabled_for(color: Color, terminal: bool, no_color: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, path::PathBuf};
+
+    use clab_core::{
+        config::ValidationTolerances,
+        svc_reference::{SvcCoordinateSystem, SvcReference, SvcReferenceCase},
+    };
+
     use super::Color;
     use super::color_enabled_for;
+    use super::compare;
     use super::metric_order;
 
     #[test]
@@ -551,5 +548,33 @@ mod tests {
                 "wheelbase_mm",
             ]
         );
+    }
+
+    #[test]
+    fn ignores_tolerances_for_metrics_absent_from_reference() {
+        let reference = SvcReference {
+            path: PathBuf::from("reference.json"),
+            schema_version: 1,
+            case: SvcReferenceCase {
+                name: "case".into(),
+                loadcase: "CURB".into(),
+            },
+            coordinate_system: SvcCoordinateSystem {
+                cg_x_origin: "front_axle_wheel_center".into(),
+                cg_x_positive: "rearward".into(),
+            },
+            sources: vec![],
+            values: BTreeMap::from([("total_mass_kg".into(), 1000.0)]),
+        };
+        let actual = BTreeMap::from([("total_mass_kg".into(), 1000.0)]);
+        let tolerances = ValidationTolerances {
+            absolute: BTreeMap::from([("total_mass_kg".into(), 1.0), ("cg_height_mm".into(), 5.0)]),
+            relative_percent: BTreeMap::new(),
+        };
+
+        let metrics = compare(&actual, &reference, &tolerances).unwrap();
+
+        assert_eq!(metrics.len(), 1);
+        assert_eq!(metrics[0].name, "total_mass_kg");
     }
 }
