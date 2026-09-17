@@ -25,7 +25,6 @@ file = "input/example-simulation-vertical.h5"
 file = "input/example-measurement-vertical.h5"
 
 [setup.knc.vertical]
-code = "example-vertical"
 brakes_applied = false
 engine_running = false
 front_arb_connected = true

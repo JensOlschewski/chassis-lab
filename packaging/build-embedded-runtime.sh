@@ -47,12 +47,7 @@ RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,\$ORIGIN/../lib" \
     PYO3_CONFIG_FILE="$pyo3_config" \
     PYO3_PYTHON="$output/bin/python3.12" \
     cargo build --release --locked -p clab-cli
-RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,\$ORIGIN/../lib" \
-    PYO3_CONFIG_FILE="$pyo3_config" \
-    PYO3_PYTHON="$output/bin/python3.12" \
-    cargo build --release --locked -p clab-converter --example embed-smoke
 cp "$root/target/release/clab" "$output/bin/clab"
-cp "$root/target/release/examples/embed-smoke" "$output/bin/embed-smoke"
 rm "$pyo3_config"
 
 find "$output" -type d -name __pycache__ -prune -exec rm -rf {} +

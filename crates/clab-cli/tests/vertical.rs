@@ -163,7 +163,7 @@ fn config(path: &std::path::Path, measurement: &str, omit: bool) {
             signals.push_str(&format!("[vertical.signals.{corner}_{name}]\nentity = \"{corner}\"\ncomponent = \"{component}\"\nunit = \"mm\"\n"));
         }
     }
-    fs::write(path,format!("[case]\nname=\"fixture\"\nloadcase=\"L\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\ncode=\"b1e0f1\"\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
+    fs::write(path,format!("[case]\nname=\"fixture\"\nloadcase=\"L\"\n[vertical.inputs]\nmeasurement_hdf5=\"{measurement}\"\nsimulation_hdf5=\"simulation.h5\"\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
 }
 fn command(config: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
@@ -283,7 +283,7 @@ fn defaults_to_all_configured_domains() {
     let input = directory.path().join("input.json");
     fs::write(&input, format!(r#"{{"svc":{{"simulation":{{"input_file":"{}"}},"measurement":{{"input_file":"{}"}}}},"knc":{{"vertical":{{"simulation":{{"input_file":"{}"}},"measurement":{{"input_file":"{}"}}}}}}}}"#, examples.join("example-simulation-svc.json").display(), examples.join("example-measurement-svc.json").display(), directory.path().join("simulation.h5").display(), directory.path().join("measurement.h5").display())).unwrap();
     let setup = directory.path().join("setup.json");
-    fs::write(&setup, r#"{"knc":{"vertical":{"code":"example-vertical","brakes_applied":true,"engine_running":false,"front_arb_connected":true,"window":{"minimum_mm":-1,"maximum_mm":1,"step_mm":1}}}}"#).unwrap();
+    fs::write(&setup, r#"{"knc":{"vertical":{"brakes_applied":true,"engine_running":false,"front_arb_connected":true,"window":{"minimum_mm":-1,"maximum_mm":1,"step_mm":1}}}}"#).unwrap();
     let mappings = directory.path().join("mappings.toml");
     fs::write(
         &mappings,

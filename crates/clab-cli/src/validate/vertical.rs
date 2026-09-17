@@ -512,7 +512,7 @@ fn report(config: &CaseConfig, comparisons: &[Comparison]) -> Result<serde_json:
         inputs["signal_map"] = record(path)?;
     }
     Ok(
-        serde_json::json!({"schema_version": 1, "case": config.name, "loadcase": config.loadcase, "setup_code": v.setup.code, "metrics": comparisons, "inputs": inputs, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}}),
+        serde_json::json!({"schema_version": 1, "case": config.name, "loadcase": config.loadcase, "metrics": comparisons, "inputs": inputs, "software": {"chassis_lab": env!("CARGO_PKG_VERSION")}}),
     )
 }
 fn record(path: &Path) -> Result<serde_json::Value> {
@@ -527,7 +527,6 @@ fn csv_text(config: &CaseConfig, comparisons: &[Comparison]) -> Result<String> {
     writer.write_record([
         "case",
         "loadcase",
-        "setup_code",
         "corner",
         "axis",
         "measurement_baseline_mm",
@@ -550,7 +549,6 @@ fn csv_text(config: &CaseConfig, comparisons: &[Comparison]) -> Result<String> {
         writer.write_record([
             safe_cell(&config.name),
             safe_cell(&config.loadcase),
-            safe_cell(&v.setup.code),
             safe_cell(&c.corner),
             safe_cell(&c.axis),
             c.measurement_baseline_mm.to_string(),
