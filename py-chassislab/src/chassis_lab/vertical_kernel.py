@@ -1,9 +1,16 @@
 """Path-free numerical kernel for Rust-owned vertical validation."""
 
 import json
+from io import StringIO
 from math import sqrt
 
+import matplotlib
 import numpy as np
+
+matplotlib.use("svg")
+matplotlib.rcParams["svg.fonttype"] = "none"
+matplotlib.rcParams["svg.hashsalt"] = "chassis-lab"
+from matplotlib import pyplot as plt
 
 
 class VerticalKernelError(ValueError):
@@ -116,6 +123,114 @@ def _interpolate(
 
 def _at_zero(grid: np.ndarray, values: np.ndarray) -> float:
     return float(np.interp(0.0, grid, values))
+
+
+def plot(curves_json: str, source_label: str = "Simulation") -> str:
+    """Return English direct vertical SVG reports grouped by corner."""
+    curves = json.loads(curves_json)
+    reports = {}
+    corners = (
+        ("front_left", "Front left"),
+        ("front_right", "Front right"),
+        ("rear_left", "Rear left"),
+        ("rear_right", "Rear right"),
+    )
+    indexed = {(item["corner"], item["signal"]): item for item in curves}
+
+    for x_signal, y_signal in (
+        ("wheel_center_y", "wheel_center_z"),
+        ("wheel_center_x", "wheel_center_y"),
+        ("wheel_center_x", "wheel_center_z"),
+    ):
+        reports[
+            f"plots/knc/vertical/{y_signal.replace('_', '-')}-vs-{x_signal.replace('_', '-')}.svg"
+        ] = _plot_group(
+            corners,
+            indexed,
+            x_signal,
+            y_signal,
+            f"{_label(y_signal)} vs {_label(x_signal)}",
+            "mm",
+            source_label,
+        )
+
+    for signal, title, unit in (
+        ("wheel_load", "Wheel load vs Wheel center Z", "newton"),
+        ("toe", "Toe vs Wheel center Z", "deg"),
+        ("camber", "Camber vs Wheel center Z", "deg"),
+    ):
+        if all((corner, signal) in indexed for corner, _ in corners):
+            reports[f"plots/knc/vertical/{signal.replace('_', '-')}-vs-wheel-center-z.svg"] = _plot_group(
+                corners, indexed, "wheel_center_z", signal, title, unit, source_label
+            )
+            if signal == "wheel_load":
+                reports["plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg"] = _plot_group(
+                    corners,
+                    indexed,
+                    "wheel_center_z",
+                    signal,
+                    "Wheel rate vs Wheel center Z",
+                    "newton/mm",
+                    source_label,
+                    transform=_wheel_rate,
+                )
+    return json.dumps(reports)
+
+
+def _plot_group(
+    corners: tuple[tuple[str, str], ...],
+    indexed: dict[tuple[str, str], dict[str, object]],
+    x_signal: str,
+    y_signal: str,
+    title: str,
+    unit: str,
+    source_label: str,
+    transform: object = None,
+) -> str:
+    figure, panels = plt.subplots(2, 2, figsize=(11.69, 8.27), layout="constrained")
+    figure.suptitle(title, fontsize=16)
+    for panel, (corner, label) in zip(panels.flat, corners, strict=True):
+        x = np.asarray(indexed[(corner, x_signal)]["values"], dtype=np.float64)
+        y = np.asarray(indexed[(corner, y_signal)]["values"], dtype=np.float64)
+        if len(x) != len(y):
+            raise VerticalKernelError(f"{corner} {y_signal} and {x_signal} lengths differ")
+        if transform is not None:
+            x, y = transform(x, y)
+        panel.plot(x, y, color="#1f4e79", linewidth=1.8, label=source_label)
+        panel.set_title(label, loc="left", fontweight="bold")
+        panel.set_xlabel(f"{_label(x_signal)} [mm]")
+        panel.set_ylabel(f"{_label(y_signal)} [{unit}]")
+        panel.grid(True, color="#d9e2f3", linewidth=0.8)
+        panel.legend(loc="best", frameon=False)
+    output = StringIO()
+    figure.savefig(output, format="svg", metadata={"Date": None, "Creator": "ChassisLab"})
+    plt.close(figure)
+    return output.getvalue()
+
+
+def _wheel_rate(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    finite = np.isfinite(x) & np.isfinite(y)
+    if not np.any(finite):
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+    x_finite, y_finite = x[finite], y[finite]
+    order = np.argsort(x_finite, kind="stable")
+    x_sorted, y_sorted = x_finite[order], y_finite[order]
+    unique, starts, counts = np.unique(x_sorted, return_index=True, return_counts=True)
+    averaged = np.add.reduceat(y_sorted, starts) / counts
+    gradient = np.zeros_like(averaged) if len(unique) < 2 else np.gradient(averaged, unique)
+    return x_finite, np.interp(x_finite, unique, gradient)
+
+
+def _label(signal: str) -> str:
+    labels = {
+        "wheel_center_x": "Wheel center X",
+        "wheel_center_y": "Wheel center Y",
+        "wheel_center_z": "Wheel center Z",
+        "wheel_load": "Wheel load",
+        "toe": "Toe",
+        "camber": "Camber",
+    }
+    return labels[signal]
 
 
 def _svg(comparisons: list[dict[str, object]]) -> str:

@@ -9,11 +9,5 @@
 [svc.simulation]
 file = "input/example-simulation-svc.json"
 
-[svc.measurement]
-file = "input/example-measurement-svc.json"
-
 [knc.vertical.simulation]
 file = "input/example-simulation-vertical.h5"
-
-[knc.vertical.measurement]
-file = "input/example-measurement-vertical.h5"

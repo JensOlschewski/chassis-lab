@@ -42,7 +42,7 @@ fn inspects_measurement_hdf5_and_lists_channels() {
     if !path.is_file() {
         return;
     }
-    let output = inspect(&path, &["--signals"]);
+    let output = inspect(&path, &["--list"]);
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();

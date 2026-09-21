@@ -5,19 +5,9 @@ use tempfile::NamedTempFile;
 
 pub mod acd;
 pub mod hdf5_writer;
-pub mod json_writer;
 pub mod measurement_hdf5;
 pub mod model;
 pub mod parser;
-
-/// Converts an Adams RES result to readable SVC JSON.
-pub fn convert_svc_res(source: &Path, output: &Path, overwrite: bool) -> Result<()> {
-    let result = parser::parse_file(source)
-        .with_context(|| format!("failed to parse RES file '{}'", source.display()))?;
-    write_atomically(output, overwrite, |temporary| {
-        json_writer::write_file(temporary, source, &result)
-    })
-}
 
 /// Converts an Adams RES result to simulation HDF5 without leaving a partial output on failure.
 pub fn convert_res(source: &Path, output: &Path, overwrite: bool) -> Result<()> {

@@ -57,6 +57,7 @@ pub fn load_svc_reference(
         root,
         &[
             "schema_version",
+            "source_kind",
             "case",
             "coordinate_system",
             "sources",
@@ -64,7 +65,13 @@ pub fn load_svc_reference(
         ],
         "SVC reference",
     )?;
-    for key in ["schema_version", "coordinate_system", "sources", "values"] {
+    for key in [
+        "schema_version",
+        "source_kind",
+        "coordinate_system",
+        "sources",
+        "values",
+    ] {
         if !root.contains_key(key) {
             return Err(SvcReferenceError(format!("SVC reference missing key(s): {key}")).into());
         }
@@ -77,6 +84,11 @@ pub fn load_svc_reference(
         ))
         .into());
     };
+    if nonempty(root, "source_kind", "SVC reference")? != "measurement" {
+        return Err(
+            SvcReferenceError("SVC reference source_kind must be measurement".into()).into(),
+        );
+    }
 
     if let Some(case) = root.get("case") {
         validate_case(case)?;
@@ -417,7 +429,7 @@ mod tests {
     use super::*;
 
     fn data() -> String {
-        r#"{"schema_version":1,"coordinate_system":{"cg_x_origin":"front_axle_wheel_center","cg_x_positive":"rearward"},"sources":[{"file":"source.txt","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","result":"reviewed","test_date":"2019-09-06"}],"values":{"total_mass_kg":1500}}"#.into()
+        r#"{"schema_version":1,"source_kind":"measurement","coordinate_system":{"cg_x_origin":"front_axle_wheel_center","cg_x_positive":"rearward"},"sources":[{"file":"source.txt","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","result":"reviewed","test_date":"2019-09-06"}],"values":{"total_mass_kg":1500}}"#.into()
     }
 
     #[test]

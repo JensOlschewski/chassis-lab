@@ -69,6 +69,15 @@ impl SvcSimulationFile {
                 ),
             ));
         }
+        if raw.source_kind != "simulation" {
+            return Err(Self::format(
+                &path,
+                format!(
+                    "source_kind must be 'simulation', got '{}'",
+                    raw.source_kind
+                ),
+            ));
+        }
         if raw.source_file.is_empty() {
             return Err(Self::format(&path, "source_file must not be empty"));
         }
@@ -231,6 +240,7 @@ impl SvcSimulationFile {
 #[serde(deny_unknown_fields)]
 struct RawFile {
     schema_version: u32,
+    source_kind: String,
     source_file: String,
     sample_count: usize,
     values_per_sample: usize,

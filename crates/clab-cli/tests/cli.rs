@@ -15,7 +15,7 @@ fn emits_shell_completions() {
 #[test]
 fn lists_canonical_signals_and_generates_toml_template() {
     let output = Command::new(env!("CARGO_BIN_EXE_clab"))
-        .args(["signals", "--domain", "knc", "--test", "vertical"])
+        .args(["inspect", "--mapping", "knc", "--test", "vertical"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -29,7 +29,7 @@ fn lists_canonical_signals_and_generates_toml_template() {
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_clab"))
-        .args(["signals"])
+        .args(["inspect", "--mapping", "knc"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -38,7 +38,7 @@ fn lists_canonical_signals_and_generates_toml_template() {
     assert!(text.contains("  vertical:\n"));
 
     let output = Command::new(env!("CARGO_BIN_EXE_clab"))
-        .args(["signals", "--domain", "svc", "--template"])
+        .args(["inspect", "--mapping", "svc", "--template"])
         .output()
         .unwrap();
     assert!(output.status.success());

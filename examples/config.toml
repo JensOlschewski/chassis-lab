@@ -1,0 +1,15 @@
+[meta]
+name = "example-config"
+loadcase = "example-loadcase"
+
+[physics]
+gravity = 9.80665
+
+[setup]
+file = "example-setup.toml"
+
+[signals]
+file = "example-signal-mappings.toml"
+
+[validation]
+file = "example-validation-tolerances.toml"

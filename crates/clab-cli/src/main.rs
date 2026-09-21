@@ -4,11 +4,12 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 
-mod check;
+mod analysis;
+mod analyze;
+mod compare;
 mod convert;
 mod inspect;
 mod signals;
-mod validate;
 
 #[derive(Debug, Parser)]
 #[command(name = "clab", version, about = "ChassisLab vehicle analysis CLI")]
@@ -19,16 +20,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Validate a configured analysis domain.
-    Validate(validate::ValidateArgs),
-    /// Validate configuration and its referenced inputs.
-    Check(check::CheckArgs),
-    /// Inspect a supported input without writing output.
+    /// Analyze normalized input or run manifest.
+    Analyze(analyze::AnalyzeArgs),
+    /// Compare SVC baseline against one or more candidates.
+    Compare(compare::CompareArgs),
+    /// Inspect normalized input or canonical mapping requirements.
     Inspect(inspect::InspectArgs),
     /// Convert a supported input to HDF5.
     Convert(convert::ConvertArgs),
-    /// List canonical signals or generate a TOML mapping template.
-    Signals(signals::SignalsArgs),
     /// Generate shell completion scripts.
     Completion { shell: Shell },
 }
@@ -36,7 +35,7 @@ enum Command {
 fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error) if error.downcast_ref::<validate::ToleranceFailure>().is_some() => {
+        Err(error) if error.downcast_ref::<compare::ToleranceFailure>().is_some() => {
             ExitCode::from(1)
         }
         Err(error) => {
@@ -48,11 +47,10 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Validate(args) => validate::validate(args),
-        Command::Check(args) => check::check(args),
+        Command::Analyze(args) => analyze::analyze(args),
+        Command::Compare(args) => compare::compare(args),
         Command::Inspect(args) => inspect::inspect(args),
         Command::Convert(args) => convert::convert(args),
-        Command::Signals(args) => signals::signals(args),
         Command::Completion { shell } => {
             generate(shell, &mut Cli::command(), "clab", &mut std::io::stdout());
             Ok(())

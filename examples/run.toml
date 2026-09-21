@@ -1,0 +1,3 @@
+# Run role. Paths in this file resolve relative to this file.
+[input]
+file = "example-input.toml"

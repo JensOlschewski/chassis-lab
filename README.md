@@ -15,18 +15,18 @@ Convert an Adams result or Lommel measurement and validate it:
 ```bash
 target/release/clab convert input.res
 target/release/clab convert measurement.acd -o measurement.h5
-target/release/clab validate examples/example-config.toml
+target/release/clab analyze examples/config.toml examples/run.toml
 ```
 
-Default conversion output is `INPUT.json` for SVC `.res`, `INPUT.simulation.h5`
-for vertical `.res`, and `INPUT.measurement.h5` for `.acd`; use `--force` to
-replace an existing output.
+Default conversion output is `INPUT.simulation.h5` for every `.res` and
+`INPUT.measurement.h5` for `.acd`. Explicit output files must use `.h5` or
+`.hdf5`; an existing output directory receives derived filename. Use `--force`
+to replace an existing output.
 
 ## Input
 
 - Adams `.res` files are converted by `crates/clab-converter/`.
-- Converted SVC simulation JSON files use format version 1.
-- Converted vertical simulation HDF5 files use format version 3.
+- Converted simulation HDF5 files use format version 3.
 - Converted measurement HDF5 files use schema version 1.
 - Lommel `.acd` files provide physical measurements for conversion.
 - TOML files define combined cases, inputs, signal mappings, setup, and tolerances.
@@ -44,23 +44,26 @@ HDF5 file; together they are a small synthetic vertical measurement pair.
 Vertical validation consumes normalized inputs only:
 
 ```text
-clab validate case.toml -t vertical
+clab analyze config.toml simulation-vertical.h5 -o reports/vertical
 ```
 
-SVC validation consumes readable simulation JSON and reviewed reference JSON:
+SVC analysis consumes readable simulation JSON or a split config/run pair:
 
 ```text
-clab validate case.toml -d svc
+clab analyze examples/config.toml examples/run.toml -o reports/run
 ```
 
-Without `-d`, `validate` runs every configured domain. `-d svc` and `-d knc`
-select domains; `-t vertical` selects KnC vertical validation.
+SVC comparison evaluates baseline first, then one or more candidates. Optional
+TOML tolerances make configured signals pass or fail; all other signals remain
+informational:
 
-Without report options, validation prints comparisons only and writes no report
-files. Explicit report options enable reports.
+```text
+clab compare examples/config.toml baseline.json candidate-a.json candidate-b.json \
+  --tolerances examples/example-validation-tolerances.toml -o reports/compare
+```
 
 SVC evaluation, optional tolerance comparison, reporting, provenance, and output
-safety are Rust-owned. SVC references without tolerances are informational.
+safety are Rust-owned. SVC metrics without tolerances are informational.
 Final simulation sample is selected by default. Embedded Python
 is used only as a scientific kernel through the Rust CLI. Exit codes are 0 for
 pass, 1 for tolerance failure, and 2 for operational or configuration errors.
