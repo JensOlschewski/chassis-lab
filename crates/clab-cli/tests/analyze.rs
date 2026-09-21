@@ -78,11 +78,36 @@ fn analyze_force_rejects_output_containing_input() {
 fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let run = examples.join("run.toml");
-    if !config.is_file() || !run.is_file() {
+    let svc = examples.join("input/example-simulation-svc.json");
+    let vertical = examples.join("input/example-simulation-vertical.res");
+    if !config.is_file() || !svc.is_file() || !vertical.is_file() {
         return;
     }
     let directory = tempdir().unwrap();
+    let simulation = directory.path().join("vertical.h5");
+    let result = clab()
+        .args([
+            "convert",
+            vertical.to_str().unwrap(),
+            "-o",
+            simulation.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let run = directory.path().join("run.toml");
+    fs::write(
+        &run,
+        format!(
+            "[input.svc.simulation]\nfile = {:?}\n\n[input.knc.vertical.simulation]\nfile = {:?}\n",
+            svc, simulation
+        ),
+    )
+    .unwrap();
     let output = directory.path().join("analysis");
     let result = clab()
         .args([
