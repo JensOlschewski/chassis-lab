@@ -6,11 +6,11 @@ from math import sqrt
 
 import matplotlib
 import numpy as np
+from matplotlib import pyplot as plt
 
 matplotlib.use("svg")
 matplotlib.rcParams["svg.fonttype"] = "none"
 matplotlib.rcParams["svg.hashsalt"] = "chassis-lab"
-from matplotlib import pyplot as plt
 
 
 class VerticalKernelError(ValueError):
@@ -143,7 +143,8 @@ def plot(curves_json: str, source_label: str = "Simulation") -> str:
         ("wheel_center_x", "wheel_center_z"),
     ):
         reports[
-            f"plots/knc/vertical/{y_signal.replace('_', '-')}-vs-{x_signal.replace('_', '-')}.svg"
+            f"plots/knc/vertical/{y_signal.replace('_', '-')}-vs-"
+            f"{x_signal.replace('_', '-')}.svg"
         ] = _plot_group(
             corners,
             indexed,
@@ -160,11 +161,22 @@ def plot(curves_json: str, source_label: str = "Simulation") -> str:
         ("camber", "Camber vs Wheel center Z", "deg"),
     ):
         if all((corner, signal) in indexed for corner, _ in corners):
-            reports[f"plots/knc/vertical/{signal.replace('_', '-')}-vs-wheel-center-z.svg"] = _plot_group(
-                corners, indexed, "wheel_center_z", signal, title, unit, source_label
+            reports[
+                f"plots/knc/vertical/{signal.replace('_', '-')}-vs-"
+                "wheel-center-z.svg"
+            ] = _plot_group(
+                corners,
+                indexed,
+                "wheel_center_z",
+                signal,
+                title,
+                unit,
+                source_label,
             )
             if signal == "wheel_load":
-                reports["plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg"] = _plot_group(
+                reports[
+                    "plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg"
+                ] = _plot_group(
                     corners,
                     indexed,
                     "wheel_center_z",
@@ -187,23 +199,31 @@ def _plot_group(
     source_label: str,
     transform: object = None,
 ) -> str:
-    figure, panels = plt.subplots(2, 2, figsize=(11.69, 8.27), layout="constrained")
+    figure, panels = plt.subplots(
+        2, 2, figsize=(11.69, 8.27), layout="constrained"
+    )
     figure.suptitle(title, fontsize=16)
     for panel, (corner, label) in zip(panels.flat, corners, strict=True):
         x = np.asarray(indexed[(corner, x_signal)]["values"], dtype=np.float64)
         y = np.asarray(indexed[(corner, y_signal)]["values"], dtype=np.float64)
         if len(x) != len(y):
-            raise VerticalKernelError(f"{corner} {y_signal} and {x_signal} lengths differ")
+            raise VerticalKernelError(
+                f"{corner} {y_signal} and {x_signal} lengths differ"
+            )
         if transform is not None:
             x, y = transform(x, y)
-        panel.plot(x, y, color="#1f4e79", linewidth=1.8, label=source_label)
+        panel.plot(
+            x, y, color="#1f4e79", linewidth=1.8, label=source_label
+        )
         panel.set_title(label, loc="left", fontweight="bold")
         panel.set_xlabel(f"{_label(x_signal)} [mm]")
         panel.set_ylabel(f"{_label(y_signal)} [{unit}]")
         panel.grid(True, color="#d9e2f3", linewidth=0.8)
         panel.legend(loc="best", frameon=False)
     output = StringIO()
-    figure.savefig(output, format="svg", metadata={"Date": None, "Creator": "ChassisLab"})
+    figure.savefig(
+        output, format="svg", metadata={"Date": None, "Creator": "ChassisLab"}
+    )
     plt.close(figure)
     return output.getvalue()
 
@@ -215,9 +235,15 @@ def _wheel_rate(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     x_finite, y_finite = x[finite], y[finite]
     order = np.argsort(x_finite, kind="stable")
     x_sorted, y_sorted = x_finite[order], y_finite[order]
-    unique, starts, counts = np.unique(x_sorted, return_index=True, return_counts=True)
+    unique, starts, counts = np.unique(
+        x_sorted, return_index=True, return_counts=True
+    )
     averaged = np.add.reduceat(y_sorted, starts) / counts
-    gradient = np.zeros_like(averaged) if len(unique) < 2 else np.gradient(averaged, unique)
+    gradient = (
+        np.zeros_like(averaged)
+        if len(unique) < 2
+        else np.gradient(averaged, unique)
+    )
     return x_finite, np.interp(x_finite, unique, gradient)
 
 
