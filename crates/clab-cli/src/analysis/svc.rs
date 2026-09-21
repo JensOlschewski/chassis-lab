@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use clab_core::{
     config::CaseConfig,
     conventions::{apply_convention_for_final_sample, svc_conventions},
+    simulation_hdf5::SimulationFile,
     svc_simulation_json::SvcSimulationFile,
 };
 use sha2::{Digest, Sha256};
@@ -49,52 +50,7 @@ pub(crate) struct Reports {
 }
 
 pub(crate) fn analyze(config: &CaseConfig) -> Result<Reports> {
-    let values = evaluate_case(config)?;
-    let metrics = values
-        .iter()
-        .filter_map(|(name, value)| {
-            metric_unit(name).ok().map(|unit| {
-                serde_json::json!({
-                    "domain": "svc",
-                    "test": null,
-                    "metric": name,
-                    "unit": unit,
-                    "value": value,
-                })
-            })
-        })
-        .collect::<Vec<_>>();
-    let inputs = serde_json::json!({
-        "config": provenance(&config.path)?,
-        "simulation_json": provenance(&config.simulation_json)?,
-    });
-    let metric_count = metrics.len();
-    let detail = serde_json::json!({
-        "schema_version": 1,
-        "command": "analyze",
-        "case": {"name": config.name, "loadcase": config.loadcase},
-        "inputs": inputs,
-        "software": {"chassis_lab": env!("CARGO_PKG_VERSION")},
-        "metrics": metrics,
-    });
-    let mut csv = csv::WriterBuilder::new().from_writer(Vec::new());
-    csv.write_record(["run", "domain", "test", "metric", "unit", "value"])?;
-    for metric in detail["metrics"].as_array().unwrap() {
-        csv.write_record([
-            safe_cell(&config.name),
-            "svc".into(),
-            String::new(),
-            safe_cell(metric["metric"].as_str().unwrap()),
-            metric["unit"].as_str().unwrap().into(),
-            metric["value"].as_f64().unwrap().to_string(),
-        ])?;
-    }
-    Ok(Reports {
-        report: detail.clone(),
-        detail: serde_json::to_string_pretty(&detail)? + "\n",
-        csv: String::from_utf8(csv.into_inner()?)?,
-        metric_count,
-    })
+    reports(config, evaluate_case(config)?)
 }
 
 pub(crate) fn evaluate_case(config: &CaseConfig) -> Result<BTreeMap<String, f64>> {
@@ -104,10 +60,46 @@ pub(crate) fn evaluate_case(config: &CaseConfig) -> Result<BTreeMap<String, f64>
             config.simulation_json.display()
         )
     })?;
-    evaluate(config, &simulation)
+    evaluate(config, |entity, component, unit| {
+        Ok(simulation.read_signal(entity, component, unit)?.values)
+    })
 }
 
-fn evaluate(config: &CaseConfig, simulation: &SvcSimulationFile) -> Result<BTreeMap<String, f64>> {
+pub(crate) fn analyze_hdf5(config: &CaseConfig) -> Result<Reports> {
+    let values = evaluate_hdf5(config)?;
+    reports(config, values)
+}
+
+pub(crate) fn supports_hdf5(config: &CaseConfig, simulation: &SimulationFile) -> bool {
+    WHEEL_LOADS.into_iter().chain(GEOMETRY).all(|name| {
+        config.signals.get(name).is_some_and(|reference| {
+            simulation
+                .read_signal(
+                    &reference.entity,
+                    &reference.component,
+                    Some(&reference.unit),
+                )
+                .is_ok()
+        })
+    })
+}
+
+fn evaluate_hdf5(config: &CaseConfig) -> Result<BTreeMap<String, f64>> {
+    let simulation = SimulationFile::open(&config.simulation_json).with_context(|| {
+        format!(
+            "failed to read SVC simulation HDF5 '{}'",
+            config.simulation_json.display()
+        )
+    })?;
+    evaluate(config, |entity, component, unit| {
+        Ok(simulation.read_signal(entity, component, unit)?.values)
+    })
+}
+
+fn evaluate(
+    config: &CaseConfig,
+    read_signal: impl Fn(&str, &str, Option<&str>) -> Result<Vec<f64>>,
+) -> Result<BTreeMap<String, f64>> {
     let conventions = svc_conventions();
     let mut values = BTreeMap::new();
     for name in WHEEL_LOADS.into_iter().chain(GEOMETRY) {
@@ -120,13 +112,13 @@ fn evaluate(config: &CaseConfig, simulation: &SvcSimulationFile) -> Result<BTree
             .ok_or_else(|| anyhow::anyhow!("missing SVC signal convention: {name}"))?;
         let mut convention = convention.clone();
         convention.source_unit = reference.unit.clone();
-        let signal = simulation.read_signal(
+        let signal = read_signal(
             &reference.entity,
             &reference.component,
             Some(&reference.unit),
         )?;
         let transformed = apply_convention_for_final_sample(
-            &signal.values,
+            &signal,
             name,
             format!(
                 "{}:{}/{}",
@@ -197,6 +189,54 @@ fn evaluate(config: &CaseConfig, simulation: &SvcSimulationFile) -> Result<BTree
         values.insert(name.into(), value);
     }
     Ok(values)
+}
+
+fn reports(config: &CaseConfig, values: BTreeMap<String, f64>) -> Result<Reports> {
+    let metrics = values
+        .iter()
+        .filter_map(|(name, value)| {
+            metric_unit(name).ok().map(|unit| {
+                serde_json::json!({
+                    "domain": "svc",
+                    "test": null,
+                    "metric": name,
+                    "unit": unit,
+                    "value": value,
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    let inputs = serde_json::json!({
+        "config": provenance(&config.path)?,
+        "simulation_json": provenance(&config.simulation_json)?,
+    });
+    let metric_count = metrics.len();
+    let detail = serde_json::json!({
+        "schema_version": 1,
+        "command": "analyze",
+        "case": {"name": config.name, "loadcase": config.loadcase},
+        "inputs": inputs,
+        "software": {"chassis_lab": env!("CARGO_PKG_VERSION")},
+        "metrics": metrics,
+    });
+    let mut csv = csv::WriterBuilder::new().from_writer(Vec::new());
+    csv.write_record(["run", "domain", "test", "metric", "unit", "value"])?;
+    for metric in detail["metrics"].as_array().unwrap() {
+        csv.write_record([
+            safe_cell(&config.name),
+            "svc".into(),
+            String::new(),
+            safe_cell(metric["metric"].as_str().unwrap()),
+            metric["unit"].as_str().unwrap().into(),
+            metric["value"].as_f64().unwrap().to_string(),
+        ])?;
+    }
+    Ok(Reports {
+        report: detail.clone(),
+        detail: serde_json::to_string_pretty(&detail)? + "\n",
+        csv: String::from_utf8(csv.into_inner()?)?,
+        metric_count,
+    })
 }
 
 pub(crate) fn metric_unit(name: &str) -> Result<String> {

@@ -43,6 +43,55 @@ fn analyzes_svc_with_report_bundle() {
 }
 
 #[test]
+fn analyzes_svc_hdf5_with_report_bundle() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let config = examples.join("config.toml");
+    let source = examples.join("input/example-simulation-svc.res");
+    if !config.is_file() || !source.is_file() {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("svc.simulation.h5");
+    let result = clab()
+        .args([
+            "convert",
+            source.to_str().unwrap(),
+            "-o",
+            input.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let output = directory.path().join("analysis");
+    let result = clab()
+        .args([
+            "analyze",
+            config.to_str().unwrap(),
+            input.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).contains("SVC analysis"));
+    assert!(!String::from_utf8_lossy(&result.stdout).contains("KnC"));
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("warning:"));
+    for name in ["report.json", "metrics.csv", "svc.json"] {
+        assert!(output.join(name).is_file(), "missing {name}");
+    }
+    assert!(!output.join("knc-vertical.json").exists());
+}
+
+#[test]
 fn analyze_force_rejects_output_containing_input() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("example-config.toml");

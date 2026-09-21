@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use clab_core::input_hdf5::{Hdf5Input, open_hdf5_input};
 use clab_core::svc_reference::load_svc_reference;
 use clap::Args;
 use sha2::{Digest, Sha256};
@@ -37,7 +38,7 @@ pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
     match extension.as_deref() {
         Some("toml") => analyze_run(&args),
         Some("json") => analyze_svc(&args),
-        Some("h5" | "hdf5") => analyze_vertical(&args),
+        Some("h5" | "hdf5") => analyze_hdf5(&args),
         _ => bail!("analyze accepts run TOML, SVC JSON, or normalized HDF5 input"),
     }
 }
@@ -170,6 +171,19 @@ fn analyze_svc(args: &AnalyzeArgs) -> Result<()> {
     write_svc(&config, args, None)
 }
 
+fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
+    let input = open_hdf5_input(&args.input)
+        .with_context(|| format!("failed to read HDF5 '{}'", args.input.display()))?;
+    if let Hdf5Input::Simulation(simulation) = input
+        && let Ok(config) =
+            clab_core::config::load_config_with_input(&args.config, &args.input, false)
+        && svc::supports_hdf5(&config, &simulation)
+    {
+        return write_svc_hdf5(&config, args);
+    }
+    analyze_vertical(args)
+}
+
 fn write_svc_reference(
     reference: &clab_core::svc_reference::SvcReference,
     args: &AnalyzeArgs,
@@ -241,7 +255,19 @@ fn write_svc(
     args: &AnalyzeArgs,
     run: Option<&Path>,
 ) -> Result<()> {
-    let report = svc::analyze(config)?;
+    write_svc_report(config, args, run, svc::analyze(config)?)
+}
+
+fn write_svc_hdf5(config: &clab_core::config::CaseConfig, args: &AnalyzeArgs) -> Result<()> {
+    write_svc_report(config, args, None, svc::analyze_hdf5(config)?)
+}
+
+fn write_svc_report(
+    config: &clab_core::config::CaseConfig,
+    args: &AnalyzeArgs,
+    run: Option<&Path>,
+    report: svc::Reports,
+) -> Result<()> {
     println!("SVC analysis: {} metrics", report.metric_count);
     if args.verbose {
         for metric in report.report["metrics"].as_array().unwrap() {
