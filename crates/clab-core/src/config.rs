@@ -160,19 +160,18 @@ pub fn load_config_with_input(
         svc.insert("simulation".into(), Value::Table(file));
         role.insert("svc".into(), Value::Table(svc));
     }
-    if vertical {
-        if let Some(existing) = root
+    if vertical
+        && let Some(existing) = root
             .get_mut("input")
             .and_then(Value::as_table_mut)
             .and_then(|input| input.get_mut("knc"))
             .and_then(Value::as_table_mut)
             .and_then(|knc| knc.get_mut("vertical"))
             .and_then(Value::as_table_mut)
-        {
-            // Direct input replaces active source, but keeps configured static input.
-            existing.remove("simulation");
-            existing.remove("measurement");
-        }
+    {
+        // Direct input replaces active source, but keeps configured static input.
+        existing.remove("simulation");
+        existing.remove("measurement");
     }
     match root.get_mut("input") {
         Some(Value::Table(existing)) => merge_map(existing, &role),
