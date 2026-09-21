@@ -34,12 +34,12 @@ to replace an existing output.
 See [`examples/example-config.toml`](examples/example-config.toml) and its
 external role files. `[meta]` identifies case; `[input]`, `[setup]`,
 `[mappings]`, and `[validation]` point to role files resolved relative to main
-config. Input JSON combines SVC and KnC vertical paths. Mapping TOML uses
+config. Input TOML assigns normalized SVC and KnC vertical paths. Mapping TOML uses
 `base` plus test overrides, with shared KnC mappings inherited by vertical.
 Inline function-first sections remain supported. All files use synthetic names
 and values as templates for private vehicle data.
-`examples/example-measurement-vertical.acd` converts to a matching
-HDF5 file; together they are a small synthetic vertical measurement pair.
+`examples/input/example-measurement-knc-vertical.acd` converts to a normalized
+measurement HDF5 file; it is a small synthetic vertical measurement fixture.
 
 Vertical validation consumes normalized inputs only:
 
@@ -47,7 +47,7 @@ Vertical validation consumes normalized inputs only:
 clab analyze config.toml simulation-vertical.h5 -o reports/vertical
 ```
 
-SVC analysis consumes readable simulation JSON or a split config/run pair:
+SVC analysis consumes JSON or HDF5. Run manifests assign input by domain:
 
 ```text
 clab analyze examples/config.toml examples/run.toml -o reports/run
@@ -68,10 +68,11 @@ Final simulation sample is selected by default. Embedded Python
 is used only as a scientific kernel through the Rust CLI. Exit codes are 0 for
 pass, 1 for tolerance failure, and 2 for operational or configuration errors.
 
-Vertical configs use `[input.knc.vertical.measurement].input_file` for normalized
-HDF5. Replace legacy `measurement_acd` entries by converting the ACD first with
-`clab convert`; raw ACD is not accepted by validation. Legacy domain-first
-configuration remains accepted during migration.
+Run manifests use `[input.svc]`, `[input.knc.vertical]`, and optional
+`[input.knc.static]`, each with `file = "..."`. HDF5 `source_kind` is optional
+and absent means simulation; SVC JSON must declare it. Static is simulation HDF5
+baseline for vertical normalization. Replace raw ACD with `clab convert`; raw ACD
+is not accepted. Legacy domain-first configuration remains accepted during migration.
 
 ## Output
 

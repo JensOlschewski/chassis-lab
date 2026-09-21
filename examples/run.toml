@@ -1,3 +1,6 @@
-# Run role. Paths in this file resolve relative to this file.
-[input]
-file = "example-input.toml"
+# Run manifest. Input paths resolve relative to this file.
+#
+# Convert committed raw result first:
+# clab convert input/example-simulation-svc.res -o input/generated-simulation-svc.h5
+[input.svc]
+file = "input/generated-simulation-svc.h5"

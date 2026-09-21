@@ -121,7 +121,12 @@ pub fn load_config_and_run(
     let (config_path, config_root) = load_toml(config.as_ref())?;
     let (run_path, run_root) = load_toml(run.as_ref())?;
     let config_root = load_function_role_files(&config_root, &config_path)?;
-    let run_root = load_function_role_files(&run_root, &run_path)?;
+    let mut run_root = Value::Table(run_root);
+    resolve_external_paths(
+        &mut run_root,
+        run_path.parent().unwrap_or_else(|| Path::new(".")),
+    )?;
+    let run_root = load_function_role_files(table(&run_root, "run manifest")?, &run_path)?;
     let mut root = config_root;
     merge_map(&mut root, &run_root);
     parse_root(&root, &config_path)
@@ -140,24 +145,15 @@ pub fn load_config_with_input(
     let mut root = load_function_role_files(&raw, &path)?;
     let input = absolute(&expand(input.as_ref())?)?.display().to_string();
     let mut role = Map::new();
-    let mut file = Map::new();
-    file.insert("file".into(), Value::String(input.clone()));
     if vertical {
         let mut vertical_role = Map::new();
-        match crate::input_hdf5::open_hdf5_input(input.as_str())? {
-            crate::input_hdf5::Hdf5Input::Simulation(_) => {
-                vertical_role.insert("simulation".into(), Value::Table(file));
-            }
-            crate::input_hdf5::Hdf5Input::Measurement(_) => {
-                vertical_role.insert("measurement".into(), Value::Table(file));
-            }
-        }
+        vertical_role.insert("file".into(), Value::String(input.clone()));
         let mut knc = Map::new();
         knc.insert("vertical".into(), Value::Table(vertical_role));
         role.insert("knc".into(), Value::Table(knc));
     } else {
         let mut svc = Map::new();
-        svc.insert("simulation".into(), Value::Table(file));
+        svc.insert("file".into(), Value::String(input));
         role.insert("svc".into(), Value::Table(svc));
     }
     if vertical
@@ -170,6 +166,7 @@ pub fn load_config_with_input(
             .and_then(Value::as_table_mut)
     {
         // Direct input replaces active source, but keeps configured static input.
+        existing.remove("file");
         existing.remove("simulation");
         existing.remove("measurement");
     }
@@ -344,7 +341,7 @@ fn resolve_external_paths(
     match value {
         Value::Table(table) => {
             for (key, value) in table {
-                if matches!(key.as_str(), "file" | "input_file") {
+                if matches!(key.as_str(), "file" | "input_file" | "static_file") {
                     if let Some(path) = value.as_str() {
                         let path = expand(Path::new(path))?;
                         if !path.is_absolute() {
@@ -414,26 +411,43 @@ fn function_svc(
         return Ok(None);
     };
     let svc = table(raw, "[input.svc]")?;
-    let simulation = function_input(svc, "simulation", "[input.svc]")?
-        .map(|p| {
-            resolve(
-                &Value::String(p.to_string_lossy().into()),
-                path,
-                "[input.svc.simulation].file",
-            )
-        })
-        .transpose()?;
-    let measurement = function_input(svc, "measurement", "[input.svc]")?;
-    let (simulation, source_kind) = match (simulation, measurement) {
-        (Some(_), Some(_)) => {
-            return Err(ConfigError(
-                "[input.svc] must define exactly one of simulation or measurement".into(),
-            )
-            .into());
+    keys(
+        svc,
+        &["file", "input_file", "simulation", "measurement"],
+        "[input.svc]",
+    )?;
+    let direct = svc.get("file").or_else(|| svc.get("input_file"));
+    let (simulation, source_kind) = if let Some(file) = direct {
+        if svc.len() != 1 {
+            return Err(
+                ConfigError("[input.svc].file cannot be combined with role tables".into()).into(),
+            );
         }
-        (Some(path), None) => (path, SourceKind::Simulation),
-        (None, Some(path)) => (path, SourceKind::Measurement),
-        (None, None) => return Ok(None),
+        let source = resolve(file, path, "[input.svc].file")?;
+        let kind = source_kind(&source, Domain::Svc)?;
+        (source, kind)
+    } else {
+        let simulation = function_input(svc, "simulation", "[input.svc]")?
+            .map(|p| {
+                resolve(
+                    &Value::String(p.to_string_lossy().into()),
+                    path,
+                    "[input.svc.simulation].file",
+                )
+            })
+            .transpose()?;
+        let measurement = function_input(svc, "measurement", "[input.svc]")?;
+        match (simulation, measurement) {
+            (Some(_), Some(_)) => {
+                return Err(ConfigError(
+                    "[input.svc] must define exactly one of simulation or measurement".into(),
+                )
+                .into());
+            }
+            (Some(path), None) => (path, SourceKind::Simulation),
+            (None, Some(path)) => (path, SourceKind::Measurement),
+            (None, None) => return Ok(None),
+        }
     };
     let mappings = merged_mapping(root, "svc", None, path)?;
     let signals = parse_signals(Some(&Value::Table(mappings.clone())), "[signals.svc]")?;
@@ -461,38 +475,140 @@ fn function_vertical(
         return Ok(None);
     };
     let knc = table(raw, "[input.knc]")?;
+    keys(knc, &["vertical", "static"], "[input.knc]")?;
     let Some(raw) = knc.get("vertical") else {
+        if knc.contains_key("static") {
+            return Err(
+                ConfigError("[input.knc.static] requires [input.knc.vertical]".into()).into(),
+            );
+        }
         return Ok(None);
     };
     let test = table(raw, "[input.knc.vertical]")?;
-    let measurement = function_input(test, "measurement", "[input.knc.vertical]")?;
-    let simulation = function_input(test, "simulation", "[input.knc.vertical]")?;
-    let static_simulation = function_input(test, "static_simulation", "[input.knc.vertical]")?;
-    let (source, source_kind) = match (simulation, measurement) {
-        (Some(_), Some(_)) => {
+    keys(
+        test,
+        &[
+            "file",
+            "input_file",
+            "static_file",
+            "simulation",
+            "measurement",
+            "static_simulation",
+        ],
+        "[input.knc.vertical]",
+    )?;
+    let direct = test.get("file").or_else(|| test.get("input_file"));
+    let static_baseline = knc
+        .get("static")
+        .map(|raw| function_input_table(raw, "[input.knc.static]"))
+        .transpose()?
+        .flatten()
+        .map(|file| {
+            resolve(
+                &Value::String(file.to_string_lossy().into()),
+                path,
+                "[input.knc.static].file",
+            )
+        })
+        .transpose()?;
+    if let Some(static_baseline) = &static_baseline
+        && source_kind(static_baseline, Domain::Knc)? != SourceKind::Simulation
+    {
+        return Err(ConfigError(format!(
+            "[input.knc.static] '{}' source_kind must be simulation",
+            static_baseline.display()
+        ))
+        .into());
+    }
+    let has_static_baseline = static_baseline.is_some();
+    let (source_kind, source, static_simulation) = if let Some(file) = direct {
+        if test.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "file" | "input_file" | "static_file" | "static_simulation"
+            )
+        }) {
             return Err(ConfigError(
-                "[input.knc.vertical] must define exactly one of simulation or measurement".into(),
+                "[input.knc.vertical].file cannot be combined with role tables".into(),
             )
             .into());
         }
-        (Some(path), None) => (path, SourceKind::Simulation),
-        (None, Some(path)) => {
-            if static_simulation.is_some() {
+        let source = resolve(file, path, "[input.knc.vertical].file")?;
+        let input_kind = source_kind(&source, Domain::Knc)?;
+        let static_file = test
+            .get("static_file")
+            .map(|file| resolve(file, path, "[input.knc.vertical].static_file"))
+            .transpose()?;
+        let static_simulation = function_input(test, "static_simulation", "[input.knc.vertical]")?;
+        if static_file.is_some() && static_simulation.is_some() {
+            return Err(ConfigError(
+                "[input.knc.vertical].static_file cannot be combined with static_simulation".into(),
+            )
+            .into());
+        }
+        if (static_file.is_some() || static_simulation.is_some()) && static_baseline.is_some() {
+            return Err(ConfigError(
+                "[input.knc.vertical] static input cannot be combined with [input.knc.static]"
+                    .into(),
+            )
+            .into());
+        }
+        let static_file = static_baseline.or(static_file).or(static_simulation);
+        if let Some(static_file) = &static_file
+            && source_kind(static_file, Domain::Knc)? != SourceKind::Simulation
+        {
+            return Err(ConfigError(format!(
+                "vertical static_file '{}' source_kind must be simulation",
+                static_file.display()
+            ))
+            .into());
+        }
+        (input_kind, source, static_file)
+    } else {
+        let measurement = function_input(test, "measurement", "[input.knc.vertical]")?;
+        let simulation = function_input(test, "simulation", "[input.knc.vertical]")?;
+        let static_simulation = function_input(test, "static_simulation", "[input.knc.vertical]")?;
+        let (source, source_kind) = match (simulation, measurement) {
+            (Some(_), Some(_)) => {
                 return Err(ConfigError(
-                    "[input.knc.vertical.static_simulation] requires simulation input".into(),
+                    "[input.knc.vertical] must define exactly one of simulation or measurement"
+                        .into(),
                 )
                 .into());
             }
-            (path, SourceKind::Measurement)
-        }
-        (None, None) => {
+            (Some(path), None) => (path, SourceKind::Simulation),
+            (None, Some(path)) => {
+                if static_simulation.is_some() {
+                    return Err(ConfigError(
+                        "[input.knc.vertical.static_simulation] requires simulation input".into(),
+                    )
+                    .into());
+                }
+                (path, SourceKind::Measurement)
+            }
+            (None, None) => {
+                return Err(ConfigError(
+                    "[input.knc.vertical] must define simulation or measurement".into(),
+                )
+                .into());
+            }
+        };
+        validate_vertical_hdf5_source(&source, source_kind, "vertical input")?;
+        if static_simulation.is_some() && static_baseline.is_some() {
             return Err(ConfigError(
-                "[input.knc.vertical] must define simulation or measurement".into(),
+                "[input.knc.vertical.static_simulation] cannot be combined with [input.knc.static]"
+                    .into(),
             )
             .into());
         }
+        (source_kind, source, static_baseline.or(static_simulation))
     };
-    validate_vertical_hdf5_source(&source, source_kind, "vertical input")?;
+    if has_static_baseline && source_kind != SourceKind::Simulation {
+        return Err(ConfigError(
+            "[input.knc.static] requires simulation [input.knc.vertical]".into(),
+        )
+        .into());
+    }
     if let Some(static_simulation) = &static_simulation {
         validate_vertical_hdf5_source(
             static_simulation,
@@ -619,6 +735,21 @@ fn function_input(
     )?)))
 }
 
+fn function_input_table(
+    raw: &Value,
+    where_: &str,
+) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+    let table = table(raw, where_)?;
+    keys(table, &["file", "input_file"], where_)?;
+    let Some(file) = table.get("file").or_else(|| table.get("input_file")) else {
+        return Err(ConfigError(format!("{where_} requires file")).into());
+    };
+    Ok(Some(PathBuf::from(string_value(
+        file,
+        &format!("{where_}.file"),
+    )?)))
+}
+
 fn validate_vertical_hdf5_source(
     path: &Path,
     expected: SourceKind,
@@ -674,6 +805,79 @@ fn validate_vertical_hdf5_source(
         .into());
     }
     Ok(())
+}
+
+fn source_kind(path: &Path, domain: Domain) -> Result<SourceKind, Box<dyn std::error::Error>> {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        // Config templates may name a normalized simulation output before conversion.
+        Some("h5" | "hdf5") if !path.exists() => Ok(SourceKind::Simulation),
+        Some("h5" | "hdf5") => hdf5_source_kind(path, "input"),
+        Some("json") if domain == Domain::Svc => {
+            let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)
+                .map_err(|error| {
+                    ConfigError(format!("invalid SVC JSON '{}': {error}", path.display()))
+                })?;
+            match value.get("source_kind").and_then(serde_json::Value::as_str) {
+                Some("simulation") => Ok(SourceKind::Simulation),
+                Some("measurement") => Ok(SourceKind::Measurement),
+                Some(value) => Err(ConfigError(format!(
+                    "SVC JSON '{}' has unsupported source_kind '{value}'",
+                    path.display()
+                ))
+                .into()),
+                None => Err(ConfigError(format!(
+                    "SVC JSON '{}' is missing required source_kind",
+                    path.display()
+                ))
+                .into()),
+            }
+        }
+        _ => Err(ConfigError(format!(
+            "input '{}' must be {}",
+            path.display(),
+            if domain == Domain::Svc {
+                "SVC JSON or HDF5"
+            } else {
+                "HDF5"
+            }
+        ))
+        .into()),
+    }
+}
+
+fn hdf5_source_kind(path: &Path, role: &str) -> Result<SourceKind, Box<dyn std::error::Error>> {
+    let file = hdf5::File::open(path).map_err(|error| {
+        ConfigError(format!(
+            "failed to open {role} '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let source_kind = if file.attr_names()?.iter().any(|name| name == "source_kind") {
+        use hdf5::types::VarLenUnicode;
+        Some(
+            file.attr("source_kind")?
+                .read_scalar::<VarLenUnicode>()
+                .map_err(|_| {
+                    ConfigError(format!(
+                        "{role} '{}' has invalid source_kind",
+                        path.display()
+                    ))
+                })?
+                .as_str()
+                .to_owned(),
+        )
+    } else {
+        None
+    };
+    match source_kind.as_deref() {
+        None => Ok(SourceKind::Simulation),
+        Some("measurement") => Ok(SourceKind::Measurement),
+        Some(value) => Err(ConfigError(format!(
+            "{role} '{}' has unsupported source_kind '{value}'",
+            path.display()
+        ))
+        .into()),
+    }
 }
 
 fn merged_mapping(
@@ -1553,9 +1757,45 @@ mod tests {
 
     fn source_kind(path: &Path, value: &str) {
         let file = File::create(path).unwrap();
+        match value {
+            "simulation" => {
+                scalar(&file, "format_version", 3_u32);
+                scalar(&file, "sample_count", 0_u64);
+                scalar(&file, "signal_count", 0_u64);
+                string(&file, "source_file", "result.res");
+                file.create_group("results").unwrap();
+            }
+            "measurement" => {
+                scalar(&file, "format_version", 1_u32);
+                scalar(&file, "sample_count", 0_u64);
+                scalar(&file, "channel_count", 0_u64);
+                string(&file, "source_kind", "measurement");
+                string(&file, "source_file", "measurement.acd");
+                let measurements = file.create_group("measurements").unwrap();
+                measurements
+                    .new_dataset_builder()
+                    .with_data(&[] as &[f64])
+                    .create("sample_axis")
+                    .unwrap();
+                measurements.create_group("channels").unwrap();
+            }
+            _ => panic!("unsupported source kind {value}"),
+        }
+        file.flush().unwrap();
+    }
+
+    fn scalar<T: hdf5::H5Type>(file: &File, name: &str, value: T) {
+        file.new_attr::<T>()
+            .create(name)
+            .unwrap()
+            .write_scalar(&value)
+            .unwrap();
+    }
+
+    fn string(file: &File, name: &str, value: &str) {
         file.new_attr::<VarLenUnicode>()
             .shape(())
-            .create("source_kind")
+            .create(name)
             .unwrap()
             .write_scalar(&VarLenUnicode::from_str(value).unwrap())
             .unwrap();
@@ -1802,13 +2042,127 @@ mod tests {
     }
 
     #[test]
+    fn derives_direct_input_kinds_and_rejects_mixed_domains() {
+        let d = tempfile::tempdir().unwrap();
+        let svc = d.path().join("svc.h5");
+        let vertical = d.path().join("vertical.h5");
+        source_kind(&svc, "measurement");
+        source_kind(&vertical, "simulation");
+        let config = d.path().join("case.toml");
+        fs::write(
+            &config,
+            format!(
+                "[meta]\nname='n'\nloadcase='l'\n[input.svc]\nfile={:?}\n[input.knc.vertical]\nfile={:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.svc.signals.x]\nentity='e'\ncomponent='c'\nunit='kg'\n[signals.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n",
+                svc, vertical
+            ),
+        )
+        .unwrap();
+        assert!(
+            load_config(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("mixes simulation and measurement")
+        );
+    }
+
+    #[test]
+    fn resolves_static_baseline_relative_to_run() {
+        let d = tempfile::tempdir().unwrap();
+        let run_dir = d.path().join("run");
+        fs::create_dir(&run_dir).unwrap();
+        let input = run_dir.join("vertical.h5");
+        let static_input = run_dir.join("static.h5");
+        source_kind(&input, "simulation");
+        source_kind(&static_input, "simulation");
+        let config = d.path().join("case.toml");
+        fs::write(&config, "[meta]\nname='n'\nloadcase='l'\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
+        let run = run_dir.join("run.toml");
+        fs::write(
+            &run,
+            "[input.knc.static]\nfile='static.h5'\n[input.knc.vertical]\nfile='vertical.h5'\n",
+        )
+        .unwrap();
+        let vertical = load_config_and_run(&config, &run)
+            .unwrap()
+            .vertical
+            .unwrap();
+        assert_eq!(vertical.simulation_hdf5, input);
+        assert_eq!(vertical.static_simulation_hdf5, Some(static_input));
+    }
+
+    #[test]
+    fn rejects_static_baseline_with_measurement_source_kind() {
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("vertical.h5");
+        let static_input = d.path().join("static.h5");
+        source_kind(&input, "simulation");
+        source_kind(&static_input, "measurement");
+        let config = d.path().join("case.toml");
+        fs::write(
+            &config,
+            format!(
+                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
+            ),
+        )
+        .unwrap();
+        assert!(
+            load_config(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("source_kind must be simulation")
+        );
+    }
+
+    #[test]
+    fn rejects_static_baseline_with_measurement_vertical_input() {
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("vertical.h5");
+        let static_input = d.path().join("static.h5");
+        source_kind(&input, "measurement");
+        source_kind(&static_input, "simulation");
+        let config = d.path().join("case.toml");
+        fs::write(
+            &config,
+            format!(
+                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
+            ),
+        )
+        .unwrap();
+        assert!(
+            load_config(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("requires simulation [input.knc.vertical]")
+        );
+    }
+
+    #[test]
+    fn rejects_svc_json_without_source_kind() {
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("svc.json");
+        fs::write(&input, "{}").unwrap();
+        let config = d.path().join("case.toml");
+        fs::write(
+            &config,
+            format!(
+                "[meta]\nname='n'\nloadcase='l'\n[input.svc]\nfile={input:?}\n[signals.svc.signals.x]\nentity='e'\ncomponent='c'\nunit='kg'\n"
+            ),
+        )
+        .unwrap();
+        assert!(
+            load_config(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("missing required source_kind")
+        );
+    }
+
+    #[test]
     fn direct_vertical_input_keeps_configured_static_simulation() {
         let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-        let simulation = examples.join("input/example-simulation-vertical.h5");
-        if !simulation.is_file() {
-            return;
-        }
         let d = tempfile::tempdir().unwrap();
+        let simulation = d.path().join("simulation.h5");
+        source_kind(&simulation, "simulation");
         let config = d.path().join("case.toml");
         fs::write(
             &config,
@@ -1831,6 +2185,16 @@ mod tests {
                 .canonicalize()
                 .unwrap(),
             simulation.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn example_templates_load_before_generated_outputs_exist() {
+        let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+
+        assert!(load_config(examples.join("example-config-flat.toml")).is_ok());
+        assert!(
+            load_config_and_run(examples.join("config.toml"), examples.join("run.toml")).is_ok()
         );
     }
 }

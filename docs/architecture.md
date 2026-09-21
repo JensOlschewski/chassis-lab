@@ -155,17 +155,14 @@ using channel name exactly `time` for sample axis and retaining that channel.
 Canonical configuration is function-first:
 
 ```toml
-[input.svc.simulation]
-input_file = "...json"
+[input.svc]
+file = "svc.h5-or-json"
 
-[input.svc.measurement]
-input_file = "...json"
+[input.knc.static]
+file = "static-simulation.h5"
 
-[input.knc.vertical.simulation]
-input_file = "...h5"
-
-[input.knc.vertical.measurement]
-input_file = "...h5"
+[input.knc.vertical]
+file = "vertical.h5"
 
 [mappings.svc]
 file = "example-signals.toml"
@@ -177,6 +174,10 @@ file = "example-vertical-signals.toml"
 # inline values add to or override domain mappings
 ```
 
+Source kind comes from input metadata: HDF5 `source_kind` is optional and absent
+means simulation; SVC JSON must declare it. SVC and vertical must have same source
+kind. `[input.knc.static]` is run-relative simulation HDF5 baseline for vertical
+normalization. Nested simulation/measurement role tables remain compatible.
 External role files can replace inline sections. Input JSON combines SVC and
 KnC paths; setup JSON contains setup and window data; mappings TOML contains
 `[svc]` and `[knc]` bases plus test overrides; validation TOML contains optional

@@ -2,8 +2,11 @@
 #
 # Single-file approach:
 # Every section is inline. Paths are relative to this file.
-# Convert raw .res/.acd files before validation when converted artifacts are
-# not already available.
+# Convert raw .res files before analysis. These generated output paths are not
+# committed; run `clab convert input/example-simulation-svc.res -o
+# input/generated-simulation-svc.h5` and `clab convert
+# input/example-simulation-knc-vertical.res -o
+# input/generated-simulation-knc-vertical.h5` first.
 
 [meta]
 name = "example-config"
@@ -12,17 +15,11 @@ loadcase = "example-loadcase"
 [physics]
 gravity = 9.80665 # m/s²
 
-[input.svc.simulation]
-file = "input/example-simulation-svc.json"
+[input.svc]
+file = "input/generated-simulation-svc.h5"
 
-[input.svc.measurement]
-file = "input/example-measurement-svc.json"
-
-[input.knc.vertical.simulation]
-file = "input/example-simulation-vertical.h5"
-
-[input.knc.vertical.measurement]
-file = "input/example-measurement-vertical.h5"
+[input.knc.vertical]
+file = "input/generated-simulation-knc-vertical.h5"
 
 [setup.knc.vertical]
 brakes_applied = false

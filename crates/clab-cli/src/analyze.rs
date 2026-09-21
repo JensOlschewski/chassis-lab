@@ -24,9 +24,6 @@ pub(crate) struct AnalyzeArgs {
     /// Replace report files already in output directory.
     #[arg(long)]
     force: bool,
-    /// Print every calculated metric.
-    #[arg(long)]
-    verbose: bool,
 }
 
 pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
@@ -61,6 +58,15 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
         });
     match (has_svc, vertical_path) {
         (true, Some(vertical_path)) => write_combined_run(&config, vertical_path, args),
+        (true, None) if is_hdf5(&config.simulation_json) => {
+            if config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement) {
+                bail!(
+                    "SVC analysis does not support measurement HDF5 input '{}'; provide an SVC measurement JSON reference or a simulation HDF5 input",
+                    config.simulation_json.display()
+                );
+            }
+            write_svc_hdf5_run(&config, args, &args.input)
+        }
         (true, None) => match config.svc_source_kind {
             Some(clab_core::config::SourceKind::Simulation) => {
                 write_svc(&config, args, Some(&args.input))
@@ -84,26 +90,44 @@ fn write_combined_run(
     vertical_path: &Path,
     args: &AnalyzeArgs,
 ) -> Result<()> {
-    let (svc_report, svc_detail, svc_csv, svc_metrics, svc_warnings) = match config.svc_source_kind
-    {
-        Some(clab_core::config::SourceKind::Simulation) => {
-            let report = svc::analyze(config)?;
-            (
-                report.report,
-                report.detail,
-                report.csv,
-                report.metric_count,
-                report.warnings,
-            )
+    let (svc_report, svc_detail, svc_csv, svc_metrics, svc_warnings) = if is_hdf5(
+        &config.simulation_json,
+    ) {
+        if config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement) {
+            bail!(
+                "SVC analysis does not support measurement HDF5 input '{}'; provide an SVC measurement JSON reference or a simulation HDF5 input",
+                config.simulation_json.display()
+            );
         }
-        Some(clab_core::config::SourceKind::Measurement) => {
-            let reference = load_svc_reference(&config.simulation_json)
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-            let (report, detail, csv) = svc_reference_reports(&reference, &args.config)?;
-            let metrics = report["metrics"].as_array().unwrap().len();
-            (report, detail, csv, metrics, Vec::new())
+        let report = svc::analyze_hdf5(config)?;
+        (
+            report.report,
+            report.detail,
+            report.csv,
+            report.metric_count,
+            report.warnings,
+        )
+    } else {
+        match config.svc_source_kind {
+            Some(clab_core::config::SourceKind::Simulation) => {
+                let report = svc::analyze(config)?;
+                (
+                    report.report,
+                    report.detail,
+                    report.csv,
+                    report.metric_count,
+                    report.warnings,
+                )
+            }
+            Some(clab_core::config::SourceKind::Measurement) => {
+                let reference = load_svc_reference(&config.simulation_json)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let (report, detail, csv) = svc_reference_reports(&reference, &args.config)?;
+                let metrics = report["metrics"].as_array().unwrap().len();
+                (report, detail, csv, metrics, Vec::new())
+            }
+            None => unreachable!(),
         }
-        None => unreachable!(),
     };
     let vertical_report = vertical::analyze_input(config, vertical_path)?;
     println!("SVC analysis: {svc_metrics} metrics");
@@ -114,16 +138,7 @@ fn write_combined_run(
     for warning in &warnings {
         eprintln!("warning: {warning}");
     }
-    if args.verbose {
-        for metric in svc_report["metrics"].as_array().unwrap() {
-            println!(
-                "  {} = {} {}",
-                metric["metric"].as_str().unwrap(),
-                metric["value"],
-                metric["unit"].as_str().unwrap()
-            );
-        }
-    }
+    print_svc_metrics(svc_report["metrics"].as_array().unwrap());
     let Some(output) = &args.output else {
         return Ok(());
     };
@@ -163,23 +178,60 @@ fn write_combined_run(
     Ok(())
 }
 
+fn is_hdf5(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("h5" | "hdf5")
+    )
+}
+
 fn analyze_svc(args: &AnalyzeArgs) -> Result<()> {
-    if let Ok(reference) = load_svc_reference(&args.input) {
-        return write_svc_reference(&reference, args);
+    let input: serde_json::Value = serde_json::from_reader(
+        fs::File::open(&args.input)
+            .with_context(|| format!("failed to read JSON input '{}'", args.input.display()))?,
+    )
+    .with_context(|| format!("failed to parse JSON input '{}'", args.input.display()))?;
+    match input.get("source_kind").and_then(serde_json::Value::as_str) {
+        Some("measurement") => {
+            let reference = load_svc_reference(&args.input)
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            write_svc_reference(&reference, args)
+        }
+        Some("simulation") => {
+            let config =
+                clab_core::config::load_config_with_input(&args.config, &args.input, false)
+                    .map_err(|error| {
+                        anyhow::anyhow!(
+                            "failed to load analysis config '{}': {error}",
+                            args.config.display()
+                        )
+                    })?;
+            write_svc(&config, args, None)
+        }
+        None => bail!(
+            "input '{}': source_kind is required; allowed values: simulation, measurement",
+            args.input.display()
+        ),
+        Some(value) => bail!(
+            "input '{}': unsupported source_kind '{value}'; allowed values: simulation, measurement",
+            args.input.display()
+        ),
     }
-    let config = clab_core::config::load_config_with_input(&args.config, &args.input, false)
-        .map_err(|error| {
-            anyhow::anyhow!(
-                "failed to load analysis config '{}': {error}",
-                args.config.display()
-            )
-        })?;
-    write_svc(&config, args, None)
 }
 
 fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
     let input = open_hdf5_input(&args.input)
         .with_context(|| format!("failed to read HDF5 '{}'", args.input.display()))?;
+    if matches!(&input, Hdf5Input::Measurement(_))
+        && let Ok(config) =
+            clab_core::config::load_config_with_input(&args.config, &args.input, false)
+        && config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement)
+    {
+        bail!(
+            "SVC analysis does not support measurement HDF5 input '{}'; provide an SVC measurement JSON reference or a simulation HDF5 input",
+            args.input.display()
+        );
+    }
     if let Hdf5Input::Simulation(simulation) = input
         && let Ok(config) =
             clab_core::config::load_config_with_input(&args.config, &args.input, false)
@@ -199,6 +251,7 @@ fn write_svc_reference(
         "SVC reference analysis: {} metrics",
         report["metrics"].as_array().unwrap().len()
     );
+    print_svc_metrics(report["metrics"].as_array().unwrap());
     if let Some(output) = &args.output {
         write_bundle(
             output,
@@ -245,7 +298,9 @@ fn svc_reference_reports(
 }
 
 fn svc_unit(name: &str) -> &'static str {
-    if name.ends_with("_percent") {
+    if name.ends_with("_kg_mm2") {
+        "kg*mm^2"
+    } else if name.ends_with("_percent") {
         "%"
     } else if name.ends_with("_kg") {
         "kg"
@@ -268,6 +323,14 @@ fn write_svc_hdf5(config: &clab_core::config::CaseConfig, args: &AnalyzeArgs) ->
     write_svc_report(config, args, None, svc::analyze_hdf5(config)?)
 }
 
+fn write_svc_hdf5_run(
+    config: &clab_core::config::CaseConfig,
+    args: &AnalyzeArgs,
+    run: &Path,
+) -> Result<()> {
+    write_svc_report(config, args, Some(run), svc::analyze_hdf5(config)?)
+}
+
 fn write_svc_report(
     config: &clab_core::config::CaseConfig,
     args: &AnalyzeArgs,
@@ -278,16 +341,7 @@ fn write_svc_report(
     for warning in &report.warnings {
         eprintln!("warning: {warning}");
     }
-    if args.verbose {
-        for metric in report.report["metrics"].as_array().unwrap() {
-            println!(
-                "  {} = {} {}",
-                metric["metric"].as_str().unwrap(),
-                metric["value"],
-                metric["unit"].as_str().unwrap()
-            );
-        }
-    }
+    print_svc_metrics(report.report["metrics"].as_array().unwrap());
     if let Some(output) = &args.output {
         let mut bundle = report.report;
         if let Some(run) = run {
@@ -306,6 +360,17 @@ fn write_svc_report(
         println!("report: {}", output.display());
     }
     Ok(())
+}
+
+fn print_svc_metrics(metrics: &[serde_json::Value]) {
+    for metric in metrics {
+        println!(
+            "  {} = {} {}",
+            metric["metric"].as_str().unwrap(),
+            metric["value"],
+            metric["unit"].as_str().unwrap()
+        );
+    }
 }
 
 fn analyze_vertical(args: &AnalyzeArgs) -> Result<()> {
