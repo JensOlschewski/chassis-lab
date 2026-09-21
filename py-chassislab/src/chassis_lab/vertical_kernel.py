@@ -212,9 +212,7 @@ def _plot_group(
             )
         if transform is not None:
             x, y = transform(x, y)
-        panel.plot(
-            x, y, color="#1f4e79", linewidth=1.8, label=source_label
-        )
+        panel.plot(x, y, color="#1f4e79", linewidth=1.8, label=source_label)
         panel.set_title(label, loc="left", fontweight="bold")
         panel.set_xlabel(f"{_label(x_signal)} [mm]")
         panel.set_ylabel(f"{_label(y_signal)} [{unit}]")

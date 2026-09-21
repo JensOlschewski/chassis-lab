@@ -91,9 +91,10 @@ def test_plot_groups_direct_vertical_corner_panels() -> None:
         "plots/knc/vertical/wheel-center-y-vs-wheel-center-x.svg",
         "plots/knc/vertical/wheel-center-z-vs-wheel-center-x.svg",
     }
-    assert "Simulation" in reports[
-        "plots/knc/vertical/wheel-center-z-vs-wheel-center-y.svg"
-    ]
+    assert (
+        "Simulation"
+        in reports["plots/knc/vertical/wheel-center-z-vs-wheel-center-y.svg"]
+    )
 
 
 def test_plot_adds_optional_direct_vertical_curves_and_wheel_rate() -> None:
@@ -122,6 +123,7 @@ def test_plot_adds_optional_direct_vertical_curves_and_wheel_rate() -> None:
     reports = json.loads(plot(json.dumps(curves)))
     assert "plots/knc/vertical/wheel-load-vs-wheel-center-z.svg" in reports
     assert "plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg" in reports
-    assert "[newton/mm]" in reports[
-        "plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg"
-    ]
+    assert (
+        "[newton/mm]"
+        in reports["plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg"]
+    )
