@@ -84,7 +84,8 @@ fn write_combined_run(
     vertical_path: &Path,
     args: &AnalyzeArgs,
 ) -> Result<()> {
-    let (svc_report, svc_detail, svc_csv, svc_metrics) = match config.svc_source_kind {
+    let (svc_report, svc_detail, svc_csv, svc_metrics, svc_warnings) = match config.svc_source_kind
+    {
         Some(clab_core::config::SourceKind::Simulation) => {
             let report = svc::analyze(config)?;
             (
@@ -92,6 +93,7 @@ fn write_combined_run(
                 report.detail,
                 report.csv,
                 report.metric_count,
+                report.warnings,
             )
         }
         Some(clab_core::config::SourceKind::Measurement) => {
@@ -99,13 +101,17 @@ fn write_combined_run(
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             let (report, detail, csv) = svc_reference_reports(&reference, &args.config)?;
             let metrics = report["metrics"].as_array().unwrap().len();
-            (report, detail, csv, metrics)
+            (report, detail, csv, metrics, Vec::new())
         }
         None => unreachable!(),
     };
     let vertical_report = vertical::analyze_input(config, vertical_path)?;
     println!("SVC analysis: {svc_metrics} metrics");
-    for warning in &vertical_report.warnings {
+    let mut warnings = svc_warnings;
+    warnings.extend(vertical_report.warnings.iter().cloned());
+    warnings.sort();
+    warnings.dedup();
+    for warning in &warnings {
         eprintln!("warning: {warning}");
     }
     if args.verbose {
@@ -130,7 +136,7 @@ fn write_combined_run(
             {"domain": "knc", "test": "vertical", "metric_count": 0, "curve_count": vertical_report.curve_count}
         ],
         "metrics": svc_report["metrics"],
-        "warnings": vertical_report.warnings,
+        "warnings": warnings,
         "normalization": vertical_report.normalization,
     });
     let mut files = vec![
@@ -269,6 +275,9 @@ fn write_svc_report(
     report: svc::Reports,
 ) -> Result<()> {
     println!("SVC analysis: {} metrics", report.metric_count);
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
     if args.verbose {
         for metric in report.report["metrics"].as_array().unwrap() {
             println!(

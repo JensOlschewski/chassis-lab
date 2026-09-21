@@ -47,10 +47,11 @@ pub(crate) struct Reports {
     pub detail: String,
     pub csv: String,
     pub metric_count: usize,
+    pub warnings: Vec<String>,
 }
 
 pub(crate) fn analyze(config: &CaseConfig) -> Result<Reports> {
-    reports(config, evaluate_case(config)?)
+    reports(config, evaluate_case(config)?, Vec::new())
 }
 
 pub(crate) fn evaluate_case(config: &CaseConfig) -> Result<BTreeMap<String, f64>> {
@@ -66,8 +67,8 @@ pub(crate) fn evaluate_case(config: &CaseConfig) -> Result<BTreeMap<String, f64>
 }
 
 pub(crate) fn analyze_hdf5(config: &CaseConfig) -> Result<Reports> {
-    let values = evaluate_hdf5(config)?;
-    reports(config, values)
+    let (values, warnings) = evaluate_hdf5(config)?;
+    reports(config, values, warnings)
 }
 
 pub(crate) fn supports_hdf5(config: &CaseConfig, simulation: &SimulationFile) -> bool {
@@ -84,21 +85,33 @@ pub(crate) fn supports_hdf5(config: &CaseConfig, simulation: &SimulationFile) ->
     })
 }
 
-fn evaluate_hdf5(config: &CaseConfig) -> Result<BTreeMap<String, f64>> {
+fn evaluate_hdf5(config: &CaseConfig) -> Result<(BTreeMap<String, f64>, Vec<String>)> {
     let simulation = SimulationFile::open(&config.simulation_json).with_context(|| {
         format!(
             "failed to read SVC simulation HDF5 '{}'",
             config.simulation_json.display()
         )
     })?;
-    evaluate(config, |entity, component, unit| {
-        Ok(simulation.read_signal(entity, component, unit)?.values)
-    })
+    let mut warnings = Vec::new();
+    let values = evaluate(config, |entity, component, unit| {
+        let signal = simulation.read_signal(entity, component, unit)?;
+        if signal.info.unit.is_empty() {
+            warnings.push(missing_unit_warning(
+                entity,
+                component,
+                unit.unwrap_or_default(),
+            ));
+        }
+        Ok(signal.values)
+    })?;
+    warnings.sort();
+    warnings.dedup();
+    Ok((values, warnings))
 }
 
 fn evaluate(
     config: &CaseConfig,
-    read_signal: impl Fn(&str, &str, Option<&str>) -> Result<Vec<f64>>,
+    mut read_signal: impl FnMut(&str, &str, Option<&str>) -> Result<Vec<f64>>,
 ) -> Result<BTreeMap<String, f64>> {
     let conventions = svc_conventions();
     let mut values = BTreeMap::new();
@@ -191,7 +204,11 @@ fn evaluate(
     Ok(values)
 }
 
-fn reports(config: &CaseConfig, values: BTreeMap<String, f64>) -> Result<Reports> {
+fn reports(
+    config: &CaseConfig,
+    values: BTreeMap<String, f64>,
+    warnings: Vec<String>,
+) -> Result<Reports> {
     let metrics = values
         .iter()
         .filter_map(|(name, value)| {
@@ -218,6 +235,7 @@ fn reports(config: &CaseConfig, values: BTreeMap<String, f64>) -> Result<Reports
         "inputs": inputs,
         "software": {"chassis_lab": env!("CARGO_PKG_VERSION")},
         "metrics": metrics,
+        "warnings": warnings,
     });
     let mut csv = csv::WriterBuilder::new().from_writer(Vec::new());
     csv.write_record(["run", "domain", "test", "metric", "unit", "value"])?;
@@ -236,7 +254,19 @@ fn reports(config: &CaseConfig, values: BTreeMap<String, f64>) -> Result<Reports
         detail: serde_json::to_string_pretty(&detail)? + "\n",
         csv: String::from_utf8(csv.into_inner()?)?,
         metric_count,
+        warnings: detail["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str().map(str::to_owned))
+            .collect(),
     })
+}
+
+fn missing_unit_warning(entity: &str, component: &str, declared_unit: &str) -> String {
+    format!(
+        "simulation signal '{entity}/{component}' has no HDF5 unit metadata; using mapped unit '{declared_unit}'"
+    )
 }
 
 pub(crate) fn metric_unit(name: &str) -> Result<String> {

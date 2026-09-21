@@ -37,30 +37,38 @@ pub(crate) struct Reports {
 }
 
 pub(crate) fn analyze_input(config: &CaseConfig, path: &Path) -> Result<Reports> {
-    let (curves, source, warnings, normalization) = match open_hdf5_input(path)
+    let (curves, source, mut warnings, normalization) = match open_hdf5_input(path)
         .with_context(|| format!("failed to read HDF5 '{}'", path.display()))?
     {
         Hdf5Input::Simulation(file) => {
-            let mut curves = simulation_curves(config, &file)?;
+            let (mut curves, mut warnings) = simulation_curves(config, &file)?;
             if let Some(static_path) = config
                 .vertical
                 .as_ref()
                 .and_then(|v| v.static_simulation_hdf5.as_ref())
             {
-                subtract_static(config, &mut curves, &SimulationFile::open(static_path)?)?;
+                warnings.extend(subtract_static(
+                    config,
+                    &mut curves,
+                    &SimulationFile::open(static_path)?,
+                )?);
                 (
                     curves,
                     "Simulation",
-                    Vec::<String>::new(),
+                    warnings,
                     serde_json::json!({"static_simulation": static_path, "method": "subtract_final_sample"}),
                 )
             } else {
                 (
                     curves,
                     "Simulation",
-                    vec![
-                        "KnC simulation has no static_simulation; curves are not normalized".into(),
-                    ],
+                    {
+                        warnings.push(
+                            "KnC simulation has no static_simulation; curves are not normalized"
+                                .into(),
+                        );
+                        warnings
+                    },
                     serde_json::json!({"static_simulation": null, "method": "none"}),
                 )
             }
@@ -72,6 +80,8 @@ pub(crate) fn analyze_input(config: &CaseConfig, path: &Path) -> Result<Reports>
             serde_json::json!({"method": "measurement_native"}),
         ),
     };
+    warnings.sort();
+    warnings.dedup();
     let detail = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
@@ -101,23 +111,32 @@ fn subtract_static(
     config: &CaseConfig,
     curves: &mut [Curve],
     static_file: &SimulationFile,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let vertical = config
         .vertical
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("KnC vertical configuration is required"))?;
     let conventions = vertical_conventions();
+    let mut warnings = Vec::new();
     for curve in curves {
         let name = format!("{}_{}", curve.corner, curve.signal);
         let reference = mapping(vertical, &name)?;
-        let convention = convention(&conventions, &name)?;
-        let expected_unit = (curve.signal.starts_with("wheel_center_")
-            || curve.signal == "wheel_load")
-            .then_some(convention.source_unit.as_str());
+        let mut convention = convention(&conventions, &name)?;
+        convention.source_unit = reference.unit.clone();
+        let signal = static_file.read_signal(
+            &reference.entity,
+            &reference.component,
+            Some(&convention.source_unit),
+        )?;
+        if signal.info.unit.is_empty() {
+            warnings.push(missing_unit_warning(
+                &reference.entity,
+                &reference.component,
+                &convention.source_unit,
+            ));
+        }
         let static_value = apply_convention(
-            &static_file
-                .read_signal(&reference.entity, &reference.component, expected_unit)?
-                .values,
+            &signal.values,
             &name,
             format!("{}/{}", reference.entity, reference.component),
             convention,
@@ -131,29 +150,40 @@ fn subtract_static(
             *value -= static_value;
         }
     }
-    Ok(())
+    Ok(warnings)
 }
 
-fn simulation_curves(config: &CaseConfig, simulation: &SimulationFile) -> Result<Vec<Curve>> {
+fn simulation_curves(
+    config: &CaseConfig,
+    simulation: &SimulationFile,
+) -> Result<(Vec<Curve>, Vec<String>)> {
     let vertical = config
         .vertical
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("KnC vertical configuration is required"))?;
     let conventions = vertical_conventions();
     let mut curves = Vec::new();
+    let mut warnings = Vec::new();
     for corner in CORNERS {
         for axis in AXES {
             let name = format!("{corner}_wheel_center_{axis}");
             let reference = mapping(vertical, &name)?;
-            let convention = convention(&conventions, &name)?;
+            let mut convention = convention(&conventions, &name)?;
+            convention.source_unit = reference.unit.clone();
+            let signal = simulation.read_signal(
+                &reference.entity,
+                &reference.component,
+                Some(&convention.source_unit),
+            )?;
+            if signal.info.unit.is_empty() {
+                warnings.push(missing_unit_warning(
+                    &reference.entity,
+                    &reference.component,
+                    &convention.source_unit,
+                ));
+            }
             let value = apply_convention(
-                &simulation
-                    .read_signal(
-                        &reference.entity,
-                        &reference.component,
-                        Some(&convention.source_unit),
-                    )?
-                    .values,
+                &signal.values,
                 &name,
                 format!("{}/{}", reference.entity, reference.component),
                 convention,
@@ -174,9 +204,10 @@ fn simulation_curves(config: &CaseConfig, simulation: &SimulationFile) -> Result
             &conventions,
             corner,
             &mut curves,
+            &mut warnings,
         )?;
     }
-    Ok(curves)
+    Ok((curves, warnings))
 }
 
 fn measurement_curves(measurement: &MeasurementFile) -> Result<Vec<Curve>> {
@@ -207,21 +238,30 @@ fn optional_simulation_curves(
     conventions: &BTreeMap<String, clab_core::conventions::SignalConvention>,
     corner: &str,
     curves: &mut Vec<Curve>,
+    warnings: &mut Vec<String>,
 ) -> Result<()> {
     for suffix in ["wheel_load", "toe", "camber"] {
         let name = format!("{corner}_{suffix}");
         let Some(reference) = vertical.signals.get(&name) else {
             continue;
         };
-        let convention = convention(conventions, &name)?;
+        let mut convention = convention(conventions, &name)?;
+        convention.source_unit = reference.unit.clone();
         let unit = convention.unit.as_str().into();
-        // ADAMS writes toe/camber values without HDF5 unit metadata. Their
-        // configured mapping still declares the canonical degree convention.
-        let expected_unit = (suffix == "wheel_load").then_some(convention.source_unit.as_str());
+        let signal = simulation.read_signal(
+            &reference.entity,
+            &reference.component,
+            Some(&convention.source_unit),
+        )?;
+        if signal.info.unit.is_empty() {
+            warnings.push(missing_unit_warning(
+                &reference.entity,
+                &reference.component,
+                &convention.source_unit,
+            ));
+        }
         let values = apply_convention(
-            &simulation
-                .read_signal(&reference.entity, &reference.component, expected_unit)?
-                .values,
+            &signal.values,
             &name,
             format!("{}/{}", reference.entity, reference.component),
             convention,
@@ -236,6 +276,12 @@ fn optional_simulation_curves(
         });
     }
     Ok(())
+}
+
+fn missing_unit_warning(entity: &str, component: &str, declared_unit: &str) -> String {
+    format!(
+        "simulation signal '{entity}/{component}' has no HDF5 unit metadata; using mapped unit '{declared_unit}'"
+    )
 }
 
 fn optional_measurement_curves(

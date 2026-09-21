@@ -66,6 +66,31 @@ fn simulation(path: &std::path::Path) {
     drop(results);
     file.close().unwrap();
 }
+
+fn clear_simulation_units(path: &std::path::Path) {
+    let staging = path.with_extension("units.h5");
+    fs::copy(path, &staging).unwrap();
+    let file = File::open_rw(&staging).unwrap();
+    let results = file.group("results").unwrap();
+    for name in results.member_names().unwrap() {
+        let group = results.group(&name).unwrap();
+        let count = group.dataset("component_names").unwrap().size();
+        group.unlink("units").unwrap();
+        let units = (0..count)
+            .map(|_| VarLenUnicode::from_str("").unwrap())
+            .collect::<Vec<_>>();
+        group
+            .new_dataset_builder()
+            .with_data(&units)
+            .create("units")
+            .unwrap();
+        drop(group);
+    }
+    drop(results);
+    file.close().unwrap();
+    fs::copy(&staging, path).unwrap();
+    fs::remove_file(staging).unwrap();
+}
 fn channel(channels: &Group, name: &str, values: &[f64], offset: f64) {
     let group = channels.create_group(name).unwrap();
     group
@@ -241,6 +266,35 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
         .unwrap();
     assert_eq!(missing_result.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&missing_result.stderr).contains("mapping missing"));
+}
+
+#[test]
+fn analyzes_simulation_with_missing_units_and_warns() {
+    let directory = tempdir().unwrap();
+    let simulation_path = directory.path().join("simulation.h5");
+    closed_fixture(&simulation_path, simulation);
+    clear_simulation_units(&simulation_path);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    let output = directory.path().join("reports");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "analyze",
+            config_path.to_str().unwrap(),
+            simulation_path.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stderr).contains("no HDF5 unit metadata"));
+    let report = fs::read_to_string(output.join("report.json")).unwrap();
+    assert!(report.contains("no HDF5 unit metadata"));
 }
 
 #[test]

@@ -1,10 +1,37 @@
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path, process::Command, str::FromStr};
 
+use hdf5::types::VarLenUnicode;
+use hdf5::{File, Group};
 use serde_json::Value;
 use tempfile::tempdir;
 
 fn clab() -> Command {
     Command::new(env!("CARGO_BIN_EXE_clab"))
+}
+
+fn clear_simulation_units(path: &Path) {
+    let staging = path.with_extension("units.h5");
+    fs::copy(path, &staging).unwrap();
+    let file = File::open_rw(&staging).unwrap();
+    let results = file.group("results").unwrap();
+    for name in results.member_names().unwrap() {
+        let group: Group = results.group(&name).unwrap();
+        let count = group.dataset("component_names").unwrap().size();
+        group.unlink("units").unwrap();
+        let units = (0..count)
+            .map(|_| VarLenUnicode::from_str("").unwrap())
+            .collect::<Vec<_>>();
+        group
+            .new_dataset_builder()
+            .with_data(&units)
+            .create("units")
+            .unwrap();
+        drop(group);
+    }
+    drop(results);
+    file.close().unwrap();
+    fs::copy(&staging, path).unwrap();
+    fs::remove_file(staging).unwrap();
 }
 
 #[test]
@@ -89,6 +116,64 @@ fn analyzes_svc_hdf5_with_report_bundle() {
         assert!(output.join(name).is_file(), "missing {name}");
     }
     assert!(!output.join("knc-vertical.json").exists());
+}
+
+#[test]
+fn analyzes_svc_hdf5_with_missing_units_and_warns() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let config = examples.join("config.toml");
+    let source = examples.join("input/example-simulation-svc.res");
+    if !config.is_file() || !source.is_file() {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("svc.simulation.h5");
+    let converted = clab()
+        .args([
+            "convert",
+            source.to_str().unwrap(),
+            "-o",
+            input.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(converted.status.success());
+    clear_simulation_units(&input);
+
+    let output = directory.path().join("analysis");
+    let result = clab()
+        .args([
+            "analyze",
+            config.to_str().unwrap(),
+            input.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).contains("SVC analysis"));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("no HDF5 unit metadata"));
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    let warnings = report["warnings"].as_array().unwrap();
+    assert!(!warnings.is_empty());
+    assert!(
+        warnings
+            .iter()
+            .all(|warning| warning.as_str().unwrap().contains("mapped unit"))
+    );
+    assert_eq!(
+        warnings.len(),
+        warnings
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    );
 }
 
 #[test]
