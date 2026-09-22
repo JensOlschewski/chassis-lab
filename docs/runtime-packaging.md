@@ -8,7 +8,6 @@ produce equivalent paths and metadata.
 clab-vVERSION-PLATFORM/
 ├── bin/
 │   ├── clab                 # clab.exe on Windows
-│   ├── embed-smoke
 │   └── python3.12           # platform-specific Python launcher when exposed
 ├── lib/python3.12/          # embedded Python and native libraries
 ├── licenses/                # dependency license inventory

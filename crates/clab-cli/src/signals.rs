@@ -1,39 +1,26 @@
 use anyhow::{Result, bail};
 use clab_core::conventions::{SignalConvention, svc_conventions, vertical_conventions};
-use clap::{Args, ValueEnum};
+use clap::ValueEnum;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-enum Domain {
+pub(crate) enum Domain {
     Svc,
     Knc,
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct SignalsArgs {
-    /// Restrict output to one domain.
-    #[arg(long)]
-    domain: Option<Domain>,
-    /// Restrict KnC output to one test.
-    #[arg(long)]
-    test: Option<String>,
-    /// Emit editable TOML skeleton instead of text list.
-    #[arg(long)]
-    template: bool,
-}
-
-pub(crate) fn signals(args: SignalsArgs) -> Result<()> {
-    if args.test.as_deref().is_some_and(|test| test != "vertical") {
+pub(crate) fn mapping(domain: Option<Domain>, test: Option<&str>, template: bool) -> Result<()> {
+    if test.is_some_and(|test| test != "vertical") {
         bail!("unsupported KnC test; expected vertical");
     }
-    if args.test.is_some() && matches!(args.domain, Some(Domain::Svc)) {
+    if test.is_some() && matches!(domain, Some(Domain::Svc)) {
         bail!("--test requires --domain knc");
     }
     let svc = svc_conventions();
     let knc = vertical_conventions();
-    if args.template {
-        print_template(args.domain, args.test.is_some(), &svc, &knc);
+    if template {
+        print_template(domain, test.is_some(), &svc, &knc);
     } else {
-        print_list(args.domain, args.test.is_some(), &svc, &knc);
+        print_list(domain, test.is_some(), &svc, &knc);
     }
     Ok(())
 }
