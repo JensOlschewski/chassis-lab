@@ -8,6 +8,8 @@ use std::{
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::conventions::SVC_METRICS;
+
 #[derive(Debug, Clone, PartialEq, Error)]
 #[error("{0}")]
 pub struct SvcReferenceError(pub String);
@@ -238,37 +240,7 @@ fn parse_values(v: &Value) -> Result<BTreeMap<String, f64>, Box<dyn std::error::
         return Err(SvcReferenceError("values must define at least one metric".into()).into());
     };
 
-    let allowed = [
-        "front_left_mass_kg",
-        "front_right_mass_kg",
-        "rear_left_mass_kg",
-        "rear_right_mass_kg",
-        "front_mass_kg",
-        "rear_mass_kg",
-        "total_mass_kg",
-        "front_distribution_percent",
-        "rear_distribution_percent",
-        "wheelbase_mm",
-        "front_track_mm",
-        "rear_track_mm",
-        "cg_x_from_front_axle_mm",
-        "cg_height_mm",
-        "inertia_xx_kg_mm2",
-        "inertia_yy_kg_mm2",
-        "inertia_zz_kg_mm2",
-        "ride_height_front_left_mm",
-        "ride_height_front_right_mm",
-        "ride_height_rear_left_mm",
-        "ride_height_rear_right_mm",
-        "toe_front_left_deg",
-        "toe_front_right_deg",
-        "toe_rear_left_deg",
-        "toe_rear_right_deg",
-        "camber_front_left_deg",
-        "camber_front_right_deg",
-        "camber_rear_left_deg",
-        "camber_rear_right_deg",
-    ];
+    let allowed = SVC_METRICS.map(|(name, _)| name);
 
     reject(t, &allowed, "SVC reference metric")?;
 

@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use clab_core::{
     config::CaseConfig,
-    conventions::{apply_convention_for_final_sample, svc_conventions},
+    conventions::{SVC_METRICS, apply_convention_for_final_sample, svc_conventions},
     simulation_hdf5::SimulationFile,
     svc_simulation_json::SvcSimulationFile,
 };
@@ -209,17 +209,15 @@ fn reports(
     values: BTreeMap<String, f64>,
     warnings: Vec<String>,
 ) -> Result<Reports> {
-    let metrics = values
+    let metrics = SVC_METRICS
         .iter()
-        .filter_map(|(name, value)| {
-            metric_unit(name).ok().map(|unit| {
-                serde_json::json!({
-                    "domain": "svc",
-                    "test": null,
-                    "metric": name,
-                    "unit": unit,
-                    "value": value,
-                })
+        .map(|(name, unit)| {
+            serde_json::json!({
+                "domain": "svc",
+                "test": null,
+                "metric": name,
+                "unit": unit,
+                "value": values[*name],
             })
         })
         .collect::<Vec<_>>();
@@ -267,21 +265,6 @@ fn missing_unit_warning(entity: &str, component: &str, declared_unit: &str) -> S
     format!(
         "simulation signal '{entity}/{component}' has no HDF5 unit metadata; using mapped unit '{declared_unit}'"
     )
-}
-
-pub(crate) fn metric_unit(name: &str) -> Result<String> {
-    for (suffix, unit) in [
-        ("_kg_mm2", "kg*mm^2"),
-        ("_percent", "%"),
-        ("_kg", "kg"),
-        ("_mm", "mm"),
-        ("_deg", "deg"),
-    ] {
-        if name.ends_with(suffix) {
-            return Ok(unit.into());
-        }
-    }
-    bail!("no report unit defined for SVC metric: {name}")
 }
 
 fn safe_cell(value: &str) -> String {

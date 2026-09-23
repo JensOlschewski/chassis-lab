@@ -1,10 +1,11 @@
 use std::{
     fs,
-    io::Write,
+    io::{IsTerminal, Write},
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, bail};
+use clab_core::conventions::SVC_METRICS;
 use clab_core::input_hdf5::{Hdf5Input, open_hdf5_input};
 use clab_core::svc_reference::load_svc_reference;
 use clap::Args;
@@ -27,6 +28,13 @@ pub(crate) struct AnalyzeArgs {
     /// Print individual analysis warnings.
     #[arg(short, long)]
     verbose: bool,
+}
+
+struct SvcReferenceReports {
+    report: serde_json::Value,
+    detail: String,
+    csv: String,
+    warnings: Vec<String>,
 }
 
 pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
@@ -131,9 +139,15 @@ fn write_combined_run(
             Some(clab_core::config::SourceKind::Measurement) => {
                 let reference = load_svc_reference(&config.simulation_json)
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                let (report, detail, csv) = svc_reference_reports(&reference, &args.config)?;
-                let metrics = report["metrics"].as_array().unwrap().len();
-                (report, detail, csv, metrics, Vec::new())
+                let reports = svc_reference_reports(&reference, &args.config)?;
+                let metrics = reports.report["metrics"].as_array().unwrap().len();
+                (
+                    reports.report,
+                    reports.detail,
+                    reports.csv,
+                    metrics,
+                    reports.warnings,
+                )
             }
             None => unreachable!(),
         }
@@ -253,19 +267,20 @@ fn write_svc_reference(
     reference: &clab_core::svc_reference::SvcReference,
     args: &AnalyzeArgs,
 ) -> Result<()> {
-    let (report, detail, csv) = svc_reference_reports(reference, &args.config)?;
+    let reports = svc_reference_reports(reference, &args.config)?;
     println!(
         "SVC reference analysis: {} metrics",
-        report["metrics"].as_array().unwrap().len()
+        reports.report["metrics"].as_array().unwrap().len()
     );
-    print_svc_metrics(report["metrics"].as_array().unwrap());
+    print_missing_svc_metrics(&reports.warnings, args);
+    print_svc_metrics(reports.report["metrics"].as_array().unwrap());
     if let Some(output) = &args.output {
         write_bundle(
             output,
             &[
-                ("report.json", detail.clone()),
-                ("metrics.csv", csv),
-                ("svc.json", detail),
+                ("report.json", reports.detail.clone()),
+                ("metrics.csv", reports.csv),
+                ("svc.json", reports.detail),
             ],
             args.force,
             &[&args.config, &args.input, &reference.path],
@@ -278,44 +293,47 @@ fn write_svc_reference(
 fn svc_reference_reports(
     reference: &clab_core::svc_reference::SvcReference,
     config: &Path,
-) -> Result<(serde_json::Value, String, String)> {
-    let metrics = reference.values.iter().map(|(name, value)| serde_json::json!({
-        "domain": "svc", "test": null, "metric": name, "unit": svc_unit(name), "value": value,
-    })).collect::<Vec<_>>();
+) -> Result<SvcReferenceReports> {
+    let mut warnings = Vec::new();
+    let metrics = SVC_METRICS
+        .iter()
+        .map(|(name, unit)| {
+            let value = reference.values.get(*name).copied();
+            if value.is_none() {
+                warnings.push(format!(
+                    "SVC metric '{name}' is missing from measurement reference"
+                ));
+            }
+            serde_json::json!({
+                "domain": "svc", "test": null, "metric": name, "unit": unit, "value": value,
+            })
+        })
+        .collect::<Vec<_>>();
     let report = serde_json::json!({
-        "schema_version": 1, "command": "analyze", "inputs": {"config": provenance(config)?, "reference": provenance(&reference.path)?}, "metrics": metrics,
+        "schema_version": 1, "command": "analyze", "inputs": {"config": provenance(config)?, "reference": provenance(&reference.path)?}, "metrics": metrics, "warnings": warnings,
     });
     let mut csv = csv::Writer::from_writer(Vec::new());
     csv.write_record(["run", "domain", "test", "metric", "unit", "value"])?;
     for metric in report["metrics"].as_array().unwrap() {
+        let value = metric["value"]
+            .as_f64()
+            .map(|value| value.to_string())
+            .unwrap_or_default();
         csv.write_record([
             "reference",
             "svc",
             "",
             metric["metric"].as_str().unwrap(),
             metric["unit"].as_str().unwrap(),
-            &metric["value"].to_string(),
+            value.as_str(),
         ])?;
     }
-    Ok((
-        report.clone(),
-        serde_json::to_string_pretty(&report)? + "\n",
-        String::from_utf8(csv.into_inner()?)?,
-    ))
-}
-
-fn svc_unit(name: &str) -> &'static str {
-    if name.ends_with("_kg_mm2") {
-        "kg*mm^2"
-    } else if name.ends_with("_percent") {
-        "%"
-    } else if name.ends_with("_kg") {
-        "kg"
-    } else if name.ends_with("_mm") {
-        "mm"
-    } else {
-        ""
-    }
+    Ok(SvcReferenceReports {
+        detail: serde_json::to_string_pretty(&report)? + "\n",
+        report,
+        csv: String::from_utf8(csv.into_inner()?)?,
+        warnings,
+    })
 }
 
 fn write_svc(
@@ -369,10 +387,19 @@ fn write_svc_report(
 
 fn print_svc_metrics(metrics: &[serde_json::Value]) {
     for metric in metrics {
+        let value = if metric["value"].is_null() {
+            if std::io::stdout().is_terminal() {
+                "\x1b[38;5;208mmissing\x1b[0m".into()
+            } else {
+                "missing".into()
+            }
+        } else {
+            metric["value"].to_string()
+        };
         println!(
             "  {} = {} {}",
             metric["metric"].as_str().unwrap(),
-            metric["value"],
+            value,
             metric["unit"].as_str().unwrap()
         );
     }
@@ -398,6 +425,33 @@ fn print_warnings(warnings: &[String], args: &AnalyzeArgs) {
     } else {
         eprintln!(
             "warning: {} analysis warning{suffix}; rerun with --verbose for details",
+            warnings.len()
+        );
+    }
+}
+
+fn print_missing_svc_metrics(warnings: &[String], args: &AnalyzeArgs) {
+    if warnings.is_empty() {
+        return;
+    }
+    if args.verbose {
+        print_warnings(warnings, args);
+        return;
+    }
+    let noun = if warnings.len() == 1 {
+        "metric is"
+    } else {
+        "metrics are"
+    };
+    if let Some(output) = &args.output {
+        eprintln!(
+            "warning: {} SVC {noun} missing; details in {}/report.json",
+            warnings.len(),
+            output.display()
+        );
+    } else {
+        eprintln!(
+            "warning: {} SVC {noun} missing; rerun with --verbose for details",
             warnings.len()
         );
     }

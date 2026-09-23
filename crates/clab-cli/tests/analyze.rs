@@ -138,8 +138,16 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     if !config.is_file() || !input.is_file() {
         return;
     }
+    let directory = tempdir().unwrap();
+    let output = directory.path().join("analysis");
     let result = clab()
-        .args(["analyze", config.to_str().unwrap(), input.to_str().unwrap()])
+        .args([
+            "analyze",
+            config.to_str().unwrap(),
+            input.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(
@@ -148,7 +156,37 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
         String::from_utf8_lossy(&result.stderr)
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stdout.contains("SVC reference analysis: 29 metrics"));
     assert!(stdout.contains("  front_left_mass_kg = 420.0 kg"));
+    assert!(stdout.contains("  cg_height_mm = missing mm"));
+    assert!(stderr.contains("16 SVC metrics are missing; details in"));
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    let metrics = report["metrics"].as_array().unwrap();
+    assert_eq!(metrics.len(), 29);
+    assert_eq!(metrics[0]["metric"], "front_left_mass_kg");
+    assert!(
+        metrics
+            .iter()
+            .any(|metric| { metric["metric"] == "cg_height_mm" && metric["value"].is_null() })
+    );
+    assert_eq!(report["warnings"].as_array().unwrap().len(), 16);
+
+    let verbose = clab()
+        .args([
+            "analyze",
+            config.to_str().unwrap(),
+            input.to_str().unwrap(),
+            "--verbose",
+        ])
+        .output()
+        .unwrap();
+    assert!(verbose.status.success());
+    assert!(
+        String::from_utf8_lossy(&verbose.stderr)
+            .contains("SVC metric 'cg_height_mm' is missing from measurement reference")
+    );
 }
 
 #[test]
@@ -545,6 +583,10 @@ fn compares_svc_inputs_and_protects_reports_and_inputs() {
     assert_eq!(report["status"], "informational");
     assert!(report.get("passed").is_none());
     assert_eq!(report["candidates"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        report["candidates"][0]["metrics"][0]["metric"],
+        "front_left_mass_kg"
+    );
     assert!(
         report["candidates"][0]["metrics"]
             .as_array()

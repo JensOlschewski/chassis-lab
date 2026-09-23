@@ -58,6 +58,38 @@ impl fmt::Display for Unit {
     }
 }
 
+pub const SVC_METRICS: [(&str, &str); 29] = [
+    ("front_left_mass_kg", "kg"),
+    ("front_right_mass_kg", "kg"),
+    ("rear_left_mass_kg", "kg"),
+    ("rear_right_mass_kg", "kg"),
+    ("front_mass_kg", "kg"),
+    ("rear_mass_kg", "kg"),
+    ("total_mass_kg", "kg"),
+    ("front_distribution_percent", "%"),
+    ("rear_distribution_percent", "%"),
+    ("wheelbase_mm", "mm"),
+    ("front_track_mm", "mm"),
+    ("rear_track_mm", "mm"),
+    ("cg_x_from_front_axle_mm", "mm"),
+    ("cg_height_mm", "mm"),
+    ("inertia_xx_kg_mm2", "kg*mm^2"),
+    ("inertia_yy_kg_mm2", "kg*mm^2"),
+    ("inertia_zz_kg_mm2", "kg*mm^2"),
+    ("ride_height_front_left_mm", "mm"),
+    ("ride_height_front_right_mm", "mm"),
+    ("ride_height_rear_left_mm", "mm"),
+    ("ride_height_rear_right_mm", "mm"),
+    ("toe_front_left_deg", "deg"),
+    ("toe_front_right_deg", "deg"),
+    ("toe_rear_left_deg", "deg"),
+    ("toe_rear_right_deg", "deg"),
+    ("camber_front_left_deg", "deg"),
+    ("camber_front_right_deg", "deg"),
+    ("camber_rear_left_deg", "deg"),
+    ("camber_rear_right_deg", "deg"),
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Corner {
     FrontLeft,
@@ -517,6 +549,9 @@ mod tests {
     #[test]
     fn canonical_mappings_cover_svc_and_vertical_signals() {
         assert!(svc_conventions().contains_key("front_left_wheel_load"));
+        assert_eq!(SVC_METRICS.len(), 29);
+        assert_eq!(SVC_METRICS[0], ("front_left_mass_kg", "kg"));
+        assert_eq!(SVC_METRICS[28], ("camber_rear_right_deg", "deg"));
         assert_eq!(vertical_conventions().len(), 28);
         assert_eq!(vertical_conventions()["front_right_toe"].sign, -1);
     }

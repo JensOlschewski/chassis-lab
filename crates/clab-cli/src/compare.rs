@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Result, bail};
+use clab_core::conventions::SVC_METRICS;
 use clap::Args;
 use serde::Serialize;
 use sha2::Digest;
@@ -213,10 +214,10 @@ fn compare_metrics(
     tolerances: &clab_core::config::ValidationTolerances,
 ) -> Result<Vec<Metric>> {
     let mut metrics = Vec::new();
-    for (name, baseline) in baseline {
-        let Ok(unit) = svc::metric_unit(name) else {
-            continue;
-        };
+    for (name, unit) in SVC_METRICS {
+        let baseline = *baseline
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("baseline SVC metric missing: {name}"))?;
         let candidate = *candidate
             .get(name)
             .ok_or_else(|| anyhow::anyhow!("candidate SVC metric missing: {name}"))?;
@@ -234,9 +235,9 @@ fn compare_metrics(
         metrics.push(Metric {
             domain: "svc",
             test: None,
-            metric: name.clone(),
-            unit,
-            baseline_value: *baseline,
+            metric: name.into(),
+            unit: unit.into(),
+            baseline_value: baseline,
             candidate_value: candidate,
             difference,
             absolute_tolerance: absolute,
