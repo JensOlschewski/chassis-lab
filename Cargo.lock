@@ -112,7 +112,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "clab-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "clab-converter",
@@ -126,13 +126,12 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "thiserror",
  "toml",
 ]
 
 [[package]]
 name = "clab-converter"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "clab-core",
@@ -140,14 +139,13 @@ dependencies = [
  "encoding_rs",
  "hdf5-metno",
  "pyo3",
- "serde_json",
  "tempfile",
  "thiserror",
 ]
 
 [[package]]
 name = "clab-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "hdf5-metno",
  "serde",

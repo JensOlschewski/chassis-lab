@@ -86,8 +86,8 @@ channel too. Non-finite sample values are preserved.
 Only synthetic examples belong in Git. Put private or large `.res`, `.acd`,
 `.h5`, and `.hdf5` files under repository-root `local-test-data/`; it is
 ignored. Tests generate their small RES fixture in temporary directories.
-`examples/example-measurement-vertical.acd` and its matching HDF5 file demonstrate the
-measurement schema without vehicle data.
+`examples/input/example-measurement-knc-vertical.acd` demonstrates the measurement
+schema without vehicle data; convert it to generate HDF5 output.
 
 ## Build on Ubuntu or WSL
 
@@ -102,8 +102,8 @@ cargo build --release
 
 ## Usage
 
-Use the workspace `clab` command to convert raw inputs. SVC `.res` files become
-readable JSON; vertical `.res` and `.acd` files become normalized HDF5.
+Use the workspace `clab` command to convert raw inputs. Every `.res` file becomes
+simulation HDF5; every `.acd` file becomes measurement HDF5.
 
 Convert a file next to the source file:
 
@@ -111,12 +111,12 @@ Convert a file next to the source file:
 target/release/clab convert BeFlex2upLoa_svc.res
 ```
 
-This creates `BeFlex2upLoa_svc.json`.
+This creates `BeFlex2upLoa_svc.simulation.h5`.
 
 Choose another output path:
 
 ```bash
-target/release/clab convert BeFlex2upLoa_svc.res --output results/BeFlex2upLoa_svc.json
+target/release/clab convert BeFlex2upLoa_svc.res --output results/BeFlex2upLoa_svc.h5
 ```
 
 Replace an existing output file:
@@ -128,7 +128,7 @@ target/release/clab convert BeFlex2upLoa_svc.res --force
 Inspect converted signals:
 
 ```bash
-target/release/clab inspect BeFlex2upLoa_svc.json --signals
+target/release/clab inspect BeFlex2upLoa_svc.h5 --signals
 ```
 
 The tab-separated output contains the entity path, component name, unit, and

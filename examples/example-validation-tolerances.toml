@@ -5,7 +5,7 @@
 # - Relative tolerances are percentages of the reference value.
 # - If both are defined, validation uses the stricter tolerance.
 #
-# Signals without a tolerance are reported by `clab validate`
+# Signals without a tolerance are informational in `clab compare`
 
 # SVC tolerances.
 
