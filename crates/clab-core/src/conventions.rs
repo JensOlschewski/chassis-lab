@@ -396,6 +396,32 @@ pub fn vertical_conventions() -> BTreeMap<String, SignalConvention> {
                 .expect("canonical convention is valid"),
             );
         }
+        for (suffix, unit, sign) in [
+            ("wheel_load", Unit::Newton, 1),
+            (
+                "toe",
+                Unit::Degree,
+                if matches!(corner, Corner::FrontRight | Corner::RearRight) {
+                    -1
+                } else {
+                    1
+                },
+            ),
+            ("camber", Unit::Degree, 1),
+        ] {
+            conventions.insert(
+                format!("{}_{}", corner.as_str(), suffix),
+                SignalConvention::new(
+                    unit,
+                    unit.as_str(),
+                    1.0,
+                    sign,
+                    Some(corner),
+                    BaselinePolicy::StaticSimulation,
+                )
+                .expect("canonical convention is valid"),
+            );
+        }
     }
     conventions
 }
@@ -491,6 +517,7 @@ mod tests {
     #[test]
     fn canonical_mappings_cover_svc_and_vertical_signals() {
         assert!(svc_conventions().contains_key("front_left_wheel_load"));
-        assert_eq!(vertical_conventions().len(), 16);
+        assert_eq!(vertical_conventions().len(), 28);
+        assert_eq!(vertical_conventions()["front_right_toe"].sign, -1);
     }
 }

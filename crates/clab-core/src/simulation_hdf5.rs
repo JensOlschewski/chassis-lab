@@ -194,6 +194,7 @@ impl SimulationFile {
     ) -> Result<Signal, SimulationHdf5Error> {
         let info = self.resolve_signal(entity, component)?;
         if let Some(expected_unit) = expected_unit
+            && !info.unit.is_empty()
             && info.unit != expected_unit
         {
             return Err(SimulationHdf5Error::Unit(SignalUnitError(format!(
@@ -579,6 +580,38 @@ mod tests {
         ));
         assert!(matches!(
             file.read_signal("/results/front", "force", Some("mm")),
+            Err(SimulationHdf5Error::Unit(_))
+        ));
+    }
+
+    #[test]
+    fn accepts_missing_unit_metadata_but_rejects_nonempty_mismatch() {
+        let (_directory, path) = fixture();
+        let writable = File::open_rw(&path).unwrap();
+        let group = writable.group("results/front").unwrap();
+        group.unlink("units").unwrap();
+        let units = ["", "mm"]
+            .into_iter()
+            .map(|value| VarLenUnicode::from_str(value).unwrap())
+            .collect::<Vec<_>>();
+        group
+            .new_dataset_builder()
+            .with_data(&units)
+            .create("units")
+            .unwrap();
+        drop(writable);
+
+        let file = SimulationFile::open(&path).unwrap();
+        assert!(
+            file.read_signal("/vehicle/front", "force", Some("newton"))
+                .is_ok()
+        );
+        assert!(
+            file.read_signal("/vehicle/front", "force", Some("mm"))
+                .is_ok()
+        );
+        assert!(matches!(
+            file.read_signal("/vehicle/front", "travel", Some("newton")),
             Err(SimulationHdf5Error::Unit(_))
         ));
     }

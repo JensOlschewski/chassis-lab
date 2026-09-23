@@ -13,12 +13,6 @@ use thiserror::Error;
 pub struct SvcReferenceError(pub String);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SvcReferenceCase {
-    pub name: String,
-    pub loadcase: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct SvcCoordinateSystem {
     pub cg_x_origin: String,
     pub cg_x_positive: String,
@@ -36,7 +30,6 @@ pub struct SvcReferenceSource {
 pub struct SvcReference {
     pub path: PathBuf,
     pub schema_version: i64,
-    pub case: SvcReferenceCase,
     pub coordinate_system: SvcCoordinateSystem,
     pub sources: Vec<SvcReferenceSource>,
     pub values: BTreeMap<String, f64>,
@@ -60,10 +53,11 @@ pub fn load_svc_reference(
         .map_err(|e| SvcReferenceError(format!("invalid JSON in {}: {e}", path.display())))?;
     let root = obj(&raw, "SVC reference")?;
 
-    exact(
+    reject(
         root,
         &[
             "schema_version",
+            "source_kind",
             "case",
             "coordinate_system",
             "sources",
@@ -71,6 +65,17 @@ pub fn load_svc_reference(
         ],
         "SVC reference",
     )?;
+    for key in [
+        "schema_version",
+        "source_kind",
+        "coordinate_system",
+        "sources",
+        "values",
+    ] {
+        if !root.contains_key(key) {
+            return Err(SvcReferenceError(format!("SVC reference missing key(s): {key}")).into());
+        }
+    }
 
     let version = num(root, "schema_version")?;
     if version != 1 {
@@ -79,8 +84,15 @@ pub fn load_svc_reference(
         ))
         .into());
     };
+    if nonempty(root, "source_kind", "SVC reference")? != "measurement" {
+        return Err(
+            SvcReferenceError("SVC reference source_kind must be measurement".into()).into(),
+        );
+    }
 
-    let c = parse_case(root.get("case").unwrap())?;
+    if let Some(case) = root.get("case") {
+        validate_case(case)?;
+    }
     let co = parse_coordinates(root.get("coordinate_system").unwrap())?;
     let sources = parse_sources(root.get("sources").unwrap())?;
     let values = parse_values(root.get("values").unwrap())?;
@@ -89,20 +101,18 @@ pub fn load_svc_reference(
     Ok(SvcReference {
         path,
         schema_version: version,
-        case: c,
         coordinate_system: co,
         sources,
         values,
     })
 }
 
-fn parse_case(v: &Value) -> Result<SvcReferenceCase, Box<dyn std::error::Error>> {
+fn validate_case(v: &Value) -> Result<(), Box<dyn std::error::Error>> {
     let t = obj(v, "case")?;
     exact(t, &["name", "loadcase"], "case")?;
-    Ok(SvcReferenceCase {
-        name: nonempty(t, "name", "case")?,
-        loadcase: nonempty(t, "loadcase", "case")?,
-    })
+    nonempty(t, "name", "case")?;
+    nonempty(t, "loadcase", "case")?;
+    Ok(())
 }
 
 fn parse_coordinates(v: &Value) -> Result<SvcCoordinateSystem, Box<dyn std::error::Error>> {
@@ -419,7 +429,7 @@ mod tests {
     use super::*;
 
     fn data() -> String {
-        r#"{"schema_version":1,"case":{"name":"n","loadcase":"l"},"coordinate_system":{"cg_x_origin":"front_axle_wheel_center","cg_x_positive":"rearward"},"sources":[{"file":"source.txt","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","result":"reviewed","test_date":"2019-09-06"}],"values":{"total_mass_kg":1500}}"#.into()
+        r#"{"schema_version":1,"source_kind":"measurement","coordinate_system":{"cg_x_origin":"front_axle_wheel_center","cg_x_positive":"rearward"},"sources":[{"file":"source.txt","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","result":"reviewed","test_date":"2019-09-06"}],"values":{"total_mass_kg":1500}}"#.into()
     }
 
     #[test]
@@ -438,6 +448,21 @@ mod tests {
                 .to_string()
                 .contains("unknown")
         );
+    }
+
+    #[test]
+    fn accepts_legacy_case_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reference.json");
+        fs::write(
+            &path,
+            data().replace(
+                "\"coordinate_system\"",
+                "\"case\":{\"name\":\"n\",\"loadcase\":\"l\"},\"coordinate_system\"",
+            ),
+        )
+        .unwrap();
+        assert!(load_svc_reference(&path).is_ok());
     }
 
     #[test]
