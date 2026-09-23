@@ -31,6 +31,28 @@ to replace an existing output.
 - Lommel `.acd` files provide physical measurements for conversion.
 - TOML files define combined cases, inputs, signal mappings, setup, and tolerances.
 
+### Canonical HDF5 layout
+
+```text
+/
+  attrs: schema_version, source_kind, source_file, sample_count, signal_count
+/axis
+  attrs: kind, unit
+  values: sample indices for simulations, physical time for measurements
+/signals/<safe-name>
+  attrs: original_name, unit, optional source-specific metadata
+  values: float64[sample_count]
+/simulation
+  attrs: source-format metadata
+/measurement/test_info/<safe-name>
+  attrs: measurement test metadata
+```
+
+Simulation axes use unitless sample indices when a RES file has no physical time;
+conversion never invents time values. Signal records share one layout while retaining
+simulation entity/component/ID metadata or measurement descriptions, offsets, and
+test metadata as applicable.
+
 See [`examples/example-config.toml`](examples/example-config.toml) and its
 external role files. `[meta]` identifies case; `[input]`, `[setup]`,
 `[mappings]`, and `[validation]` point to role files resolved relative to main
