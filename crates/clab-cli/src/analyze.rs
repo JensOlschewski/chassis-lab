@@ -27,6 +27,12 @@ pub(crate) struct AnalyzeArgs {
 }
 
 pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
+    if !args.input.is_file() {
+        bail!(
+            "input file does not exist or is not a file: {}",
+            args.input.display()
+        );
+    }
     let extension = args
         .input
         .extension()

@@ -172,6 +172,26 @@ fn rejects_svc_json_without_source_kind() {
 }
 
 #[test]
+fn rejects_missing_normalized_input_without_hdf5_diagnostics() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let config = examples.join("config.toml");
+    assert!(config.is_file(), "missing {}", config.display());
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("missing.h5");
+
+    let result = clab()
+        .args(["analyze", config.to_str().unwrap(), input.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert_eq!(result.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("input file does not exist or is not a file"));
+    assert!(stderr.contains(input.to_str().unwrap()));
+    assert!(!stderr.contains("H5Fopen"));
+}
+
+#[test]
 fn rejects_svc_measurement_hdf5_without_json_reference_parsing() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
