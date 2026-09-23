@@ -1,4 +1,5 @@
 use clab_converter::{hdf5_writer, parser};
+use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
 use hdf5::types::VarLenUnicode;
 use tempfile::tempdir;
 
@@ -14,7 +15,7 @@ fn converts_a_result_file_to_hdf5() {
 
     hdf5_writer::write_file(&output, &source, &result).unwrap();
 
-    let file = hdf5::File::open(output).unwrap();
+    let file = hdf5::File::open(&output).unwrap();
     assert_eq!(
         file.attr("sample_count")
             .unwrap()
@@ -24,8 +25,19 @@ fn converts_a_result_file_to_hdf5() {
     );
 
     assert_eq!(
-        file.group("results").unwrap().member_names().unwrap().len(),
-        2
+        file.attr("schema_version")
+            .unwrap()
+            .read_scalar::<u32>()
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        file.attr("source_kind")
+            .unwrap()
+            .read_scalar::<VarLenUnicode>()
+            .unwrap()
+            .as_str(),
+        "simulation"
     );
     assert_eq!(
         file.attr("signal_count")
@@ -35,7 +47,9 @@ fn converts_a_result_file_to_hdf5() {
         result.signal_count() as u64
     );
 
-    let group = file.group("results/vehicle.ride_heights").unwrap();
+    let group = file
+        .group("signals/vehicle_ride_heights_front_left")
+        .unwrap();
     assert_eq!(
         group
             .attr("object_id")
@@ -46,56 +60,39 @@ fn converts_a_result_file_to_hdf5() {
     );
 
     let dataset = group.dataset("values").unwrap();
-    assert_eq!(dataset.shape(), vec![2, 2]);
-    assert_eq!(
-        dataset.read_raw::<f64>().unwrap(),
-        vec![361.0, 360.0, 360.5, 359.5]
-    );
+    assert_eq!(dataset.shape(), vec![2]);
+    assert_eq!(dataset.read_raw::<f64>().unwrap(), vec![361.0, 360.5]);
     assert_eq!(
         group
-            .dataset("adams_ids")
+            .attr("adams_id")
             .unwrap()
-            .read_raw::<u64>()
+            .read_scalar::<u64>()
             .unwrap(),
-        vec![2, 1]
+        2
     );
 
-    let component_names = group
-        .dataset("component_names")
-        .unwrap()
-        .read_raw::<VarLenUnicode>()
-        .unwrap();
     assert_eq!(
-        component_names
-            .iter()
-            .map(|name| name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["front_left", "front_right"]
+        file.group("signals").unwrap().member_names().unwrap().len(),
+        result.signal_count()
     );
 
-    let units = group
-        .dataset("units")
-        .unwrap()
-        .read_raw::<VarLenUnicode>()
-        .unwrap();
+    let axis = file.group("axis").unwrap();
     assert_eq!(
-        units.iter().map(|unit| unit.as_str()).collect::<Vec<_>>(),
-        vec!["mm", "mm"]
+        axis.attr("kind")
+            .unwrap()
+            .read_scalar::<VarLenUnicode>()
+            .unwrap()
+            .as_str(),
+        "sample_index"
     );
+    assert_eq!(
+        axis.dataset("values").unwrap().read_raw::<u64>().unwrap(),
+        vec![0, 1]
+    );
+    drop(axis);
+    drop(file);
 
-    let written_value_count = file
-        .group("results")
-        .unwrap()
-        .member_names()
-        .unwrap()
-        .into_iter()
-        .map(|name| {
-            file.group(&format!("results/{name}"))
-                .unwrap()
-                .dataset("values")
-                .unwrap()
-                .shape()[1]
-        })
-        .sum::<usize>();
-    assert_eq!(written_value_count, result.signal_count());
+    let canonical = CanonicalFile::open(&output).unwrap();
+    assert_eq!(canonical.summary().source_kind, SourceKind::Simulation);
+    assert_eq!(canonical.read_axis().unwrap(), vec![0.0, 1.0]);
 }

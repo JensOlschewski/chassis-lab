@@ -4,8 +4,8 @@ Rust import library for Adams/Car result files (`.res`) and Lommel measurement
 files (`.acd`) used by the `clab` CLI.
 
 The library also exposes `measurement_hdf5::import_acd` for Lommel ACD files.
-It writes measurement schema version 1, retaining every channel and using the
-channel named exactly `time` as `/measurements/sample_axis`; imports without
+It writes canonical HDF5 schema version 1, retaining every channel and using the
+channel named exactly `time` as `/axis/values`; imports without
 that channel fail clearly.
 
 The parser follows the structure used by the MATLAB `ResImportTool_20160629.m` reader, but it:
@@ -19,67 +19,37 @@ The parser follows the structure used by the MATLAB `ResImportTool_20160629.m` r
 
 ## HDF5 layout
 
-### Simulation HDF5
+### Canonical HDF5
 
 ```text
 /
 ├── attributes
-│   ├── format_version = 3
+│   ├── schema_version = 1
+│   ├── source_kind = simulation | measurement
 │   ├── sample_count
 │   ├── signal_count
-│   ├── values_per_sample
 │   └── source_file
-└── results/
-    └── <entity>/
-        ├── attributes
-        │   ├── original_name
-        │   ├── source_path      # when present in the Adams file
-        │   └── object_id        # when present in the Adams file
-        ├── values               # f64 [sample, component]
-        ├── component_names      # UTF-8 [component]
-        ├── units                # UTF-8 [component]
-        └── adams_ids            # u64 [component]
-```
-
-Each entity has one dense matrix. Rows are Adams `<Step>` samples and columns correspond to `component_names`, `units`, and `adams_ids`. The group name uses the Adams `entity` path when available because display names are not always unique; otherwise it uses the display name. Slashes are replaced with underscores and duplicate names receive `_2`, `_3`, and so on.
-
-Read one signal and its unit with Python:
-
-```python
-import h5py
-import numpy as np
-
-with h5py.File("results.h5", "r") as h5:
-    entity = h5["results/B479_FDJ3_16z_front_whl.whl_wheel"]
-    names = entity["component_names"].asstr()[:]
-    column = int(np.flatnonzero(names == "VX")[0])
-
-    signal = entity["values"][:, column]
-    unit = entity["units"].asstr()[column]
-```
-
-Adams IDs remain available for validation and advanced lookup, but normal access uses the entity group and component name.
-
-### Measurement HDF5
-
-ACD imports write a separate measurement HDF5 v1 file. It is never combined
-with simulation results.
-
-```text
-/
-├── attributes: format_version, source_kind, source_file, sample_count,
-│               channel_count, encoding, dialect
-└── measurements/
-    ├── sample_axis
-    ├── channels/<safe-name>/
-    │   ├── values
-    │   └── attributes: original_name, description, unit, offset, column
+├── axis/
+│   ├── attributes: kind, unit
+│   └── values                   # u64 sample index or f64 time
+├── signals/<safe-name>/
+│   ├── values                   # f64 [sample]
+│   └── attributes: original_name, unit
+├── simulation/                  # simulation-only metadata
+└── measurement/                 # measurement-only metadata
     └── test_info/<safe-name>/
         └── attributes: name, description, data_type, unit, value
 ```
 
-The ACD channel named exactly `time` becomes `sample_axis`; it remains a normal
-channel too. Non-finite sample values are preserved.
+Simulation signal attributes additionally retain `source_path`, `entity_name`,
+`component`, `adams_id`, and optional `object_id`. Measurement signal attributes
+retain `description`, `offset`, and `column`. Every signal is independently
+addressable at `/signals/<safe-name>/values`; safe names use ASCII letters,
+digits, `_`, and `-`, with suffixes resolving collisions.
+
+The simulation axis is an ordinal sample index, not fabricated time. The ACD
+channel named exactly `time` is the measurement axis and remains a normal signal.
+Non-finite sample values are preserved.
 
 ## Local test data
 

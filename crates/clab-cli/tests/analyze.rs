@@ -1,7 +1,6 @@
-use std::{fs, path::Path, process::Command, str::FromStr};
+use std::{fs, path::Path, process::Command};
 
-use hdf5::types::VarLenUnicode;
-use hdf5::{File, Group};
+use hdf5::File;
 use serde_json::Value;
 use tempfile::tempdir;
 
@@ -13,22 +12,17 @@ fn clear_simulation_units(path: &Path) {
     let staging = path.with_extension("units.h5");
     fs::copy(path, &staging).unwrap();
     let file = File::open_rw(&staging).unwrap();
-    let results = file.group("results").unwrap();
-    for name in results.member_names().unwrap() {
-        let group: Group = results.group(&name).unwrap();
-        let count = group.dataset("component_names").unwrap().size();
-        group.unlink("units").unwrap();
-        let units = (0..count)
-            .map(|_| VarLenUnicode::from_str("").unwrap())
-            .collect::<Vec<_>>();
+    let signals = file.group("signals").unwrap();
+    for name in signals.member_names().unwrap() {
+        let group = signals.group(&name).unwrap();
         group
-            .new_dataset_builder()
-            .with_data(&units)
-            .create("units")
+            .attr("unit")
+            .unwrap()
+            .write_scalar(&"".parse::<hdf5::types::VarLenUnicode>().unwrap())
             .unwrap();
         drop(group);
     }
-    drop(results);
+    drop(signals);
     file.close().unwrap();
     fs::copy(&staging, path).unwrap();
     fs::remove_file(staging).unwrap();

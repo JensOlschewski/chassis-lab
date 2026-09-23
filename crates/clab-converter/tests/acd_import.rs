@@ -2,7 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use clab_converter::measurement_hdf5;
-use clab_core::measurement_hdf5::MeasurementFile;
+use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
+use hdf5::types::VarLenUnicode;
 use tempfile::tempdir;
 
 fn write_acd(path: &std::path::Path, names: &str) {
@@ -24,25 +25,38 @@ fn imports_acd_into_measurement_schema_without_normalizing_values() {
 
     measurement_hdf5::import_acd(&source, &output, false).unwrap();
 
-    let measurement = MeasurementFile::open(&output).unwrap();
-    assert_eq!(measurement.summary().format_version, 1);
+    let measurement = CanonicalFile::open(&output).unwrap();
+    assert_eq!(measurement.summary().schema_version, 1);
+    assert_eq!(measurement.summary().source_kind, SourceKind::Measurement);
     assert_eq!(
         measurement.summary().source_file,
         source.display().to_string()
     );
-    assert_eq!(measurement.summary().encoding.as_deref(), Some("utf-8-sig"));
-    assert_eq!(measurement.summary().dialect.as_deref(), Some("ascii3"));
-    assert_eq!(measurement.read_sample_axis().unwrap(), vec![0.0, 1.0]);
+    assert_eq!(measurement.read_axis().unwrap(), vec![0.0, 1.0]);
+    let raw = hdf5::File::open(&output).unwrap();
+    let axis = raw.group("axis").unwrap();
+    assert_eq!(
+        axis.attr("kind")
+            .unwrap()
+            .read_scalar::<VarLenUnicode>()
+            .unwrap()
+            .as_str(),
+        "time"
+    );
+    assert_eq!(
+        axis.dataset("values").unwrap().read_raw::<f64>().unwrap(),
+        vec![0.0, 1.0]
+    );
     let travel = measurement
-        .read_channel("wheel/travel", Some("mm"))
+        .read_signal("wheel/travel", None, Some("mm"))
         .unwrap();
     assert!(travel.values[0].is_nan());
     assert!(travel.values[1].is_infinite());
-    assert_eq!(travel.info.group_name, "wheel_travel");
-    assert_eq!(measurement.channels()[2].group_name, "wheel_travel_2");
+    assert_eq!(travel.info.safe_name, "wheel_travel");
+    assert_eq!(measurement.signals()[2].safe_name, "wheel_travel_2");
     assert!(
         measurement
-            .read_channel("wheel travel", None)
+            .read_signal("wheel travel", None, None)
             .unwrap()
             .values[0]
             .is_infinite()
@@ -70,9 +84,9 @@ fn committed_vertical_measurement_example_imports() {
     let output = directory.path().join("example-vertical.h5");
 
     measurement_hdf5::import_acd(&source, &output, false).unwrap();
-    let imported = MeasurementFile::open(output).unwrap();
+    let imported = CanonicalFile::open(output).unwrap();
 
-    assert_eq!(imported.read_sample_axis().unwrap().len(), 6);
-    assert_eq!(imported.channels().len(), 17);
+    assert_eq!(imported.read_axis().unwrap().len(), 6);
+    assert_eq!(imported.signals().len(), 17);
     assert_eq!(imported.test_info().len(), 5);
 }

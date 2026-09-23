@@ -10,7 +10,7 @@ Adams .res / Lommel .acd
         ↓
           crates/clab-converter/ — Rust result converter
         ↓
-simulation HDF5 v3 / measurement HDF5 v1
+canonical HDF5 v1 (`simulation` or `measurement`)
         ↓
    Rust `clab analyze` — canonical analysis and report bundles
         ↓
@@ -125,28 +125,28 @@ remain compatible until an explicitly versioned contract change.
 
 ## HDF5 contract
 
-Supported format version: `3`.
+Supported canonical schema version: `1`.
 
 ```text
 /
-├── attrs: format_version, sample_count, signal_count, source_file
-└── results/<entity>/
-    ├── values             float64 [sample, component]
-    ├── component_names    UTF-8 [component]
-    ├── units              UTF-8 [component]
-    └── adams_ids          uint64 [component]
+├── attrs: schema_version, source_kind, sample_count, signal_count, source_file
+├── axis/attrs: kind, unit
+├── axis/values            uint64 [sample_index] or float64 [time]
+├── signals/<safe-name>/values
+└── measurement/test_info/<safe-name>/
 ```
 
-Signal lookup uses source path plus component. Adams IDs remain diagnostic
-metadata, not stable configuration identifiers. `AdamsHdf5` rejects unsupported
-versions and malformed dimensions.
+Signal lookup uses source path plus component for simulations and original or
+safe name for measurements. Adams IDs remain diagnostic metadata, not stable
+configuration identifiers. Canonical reader rejects unsupported versions and
+malformed dimensions.
 
 ## Measurements
 
 Lommel `.acd` files contain metadata, offsets, channel names, units, and numeric
 samples. The reader detects data boundaries instead of relying on VARB/VARC line
 numbers. It preserves `NaN` and `Inf`; evaluators decide whether they are valid.
-`clab-converter` imports ACD to measurement HDF5 v1 through its library API,
+`clab-converter` imports ACD to canonical HDF5 v1 through its library API,
 using channel name exactly `time` for sample axis and retaining that channel.
 
 ## Configuration
@@ -174,8 +174,8 @@ file = "example-vertical-signals.toml"
 # inline values add to or override domain mappings
 ```
 
-Source kind comes from input metadata: HDF5 `source_kind` is optional and absent
-means simulation; SVC JSON must declare it. SVC and vertical must have same source
+Source kind comes from required input metadata: HDF5 and SVC JSON `source_kind`
+must declare it. SVC and vertical must have same source
 kind. `[input.knc.static]` is run-relative simulation HDF5 baseline for vertical
 normalization. Nested simulation/measurement role tables remain compatible.
 External role files can replace inline sections. Input JSON combines SVC and
@@ -199,7 +199,7 @@ only normalized arrays with explicit units to Python. Missing source units remai
 unverified and cannot be converted implicitly.
 
 Rust SVC evaluation uses the final HDF5 sample by default and reads normalized
-simulation files through `SimulationFile`; it does not initialize Python.
+simulation files through `CanonicalFile`; it does not initialize Python.
 Vertical evaluation compares
 measurement-offset and static-simulation X/Y/Z trajectories for all four corners
 on the configured travel grid. Incomplete coverage and setup mismatches fail.

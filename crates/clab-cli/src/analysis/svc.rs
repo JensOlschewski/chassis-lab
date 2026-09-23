@@ -6,9 +6,9 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clab_core::{
+    canonical_hdf5::CanonicalFile,
     config::CaseConfig,
     conventions::{SVC_METRICS, apply_convention_for_final_sample, svc_conventions},
-    simulation_hdf5::SimulationFile,
     svc_simulation_json::SvcSimulationFile,
 };
 use sha2::{Digest, Sha256};
@@ -71,13 +71,13 @@ pub(crate) fn analyze_hdf5(config: &CaseConfig) -> Result<Reports> {
     reports(config, values, warnings)
 }
 
-pub(crate) fn supports_hdf5(config: &CaseConfig, simulation: &SimulationFile) -> bool {
+pub(crate) fn supports_hdf5(config: &CaseConfig, simulation: &CanonicalFile) -> bool {
     WHEEL_LOADS.into_iter().chain(GEOMETRY).all(|name| {
         config.signals.get(name).is_some_and(|reference| {
             simulation
                 .read_signal(
                     &reference.entity,
-                    &reference.component,
+                    Some(&reference.component),
                     Some(&reference.unit),
                 )
                 .is_ok()
@@ -86,7 +86,7 @@ pub(crate) fn supports_hdf5(config: &CaseConfig, simulation: &SimulationFile) ->
 }
 
 fn evaluate_hdf5(config: &CaseConfig) -> Result<(BTreeMap<String, f64>, Vec<String>)> {
-    let simulation = SimulationFile::open(&config.simulation_json).with_context(|| {
+    let simulation = CanonicalFile::open(&config.simulation_json).with_context(|| {
         format!(
             "failed to read SVC simulation HDF5 '{}'",
             config.simulation_json.display()
@@ -94,7 +94,7 @@ fn evaluate_hdf5(config: &CaseConfig) -> Result<(BTreeMap<String, f64>, Vec<Stri
     })?;
     let mut warnings = Vec::new();
     let values = evaluate(config, |entity, component, unit| {
-        let signal = simulation.read_signal(entity, component, unit)?;
+        let signal = simulation.read_signal(entity, Some(component), unit)?;
         if signal.info.unit.is_empty() {
             warnings.push(missing_unit_warning(
                 entity,
