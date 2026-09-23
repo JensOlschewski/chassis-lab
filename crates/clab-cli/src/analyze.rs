@@ -24,6 +24,9 @@ pub(crate) struct AnalyzeArgs {
     /// Replace report files already in output directory.
     #[arg(long)]
     force: bool,
+    /// Print individual analysis warnings.
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
@@ -141,9 +144,7 @@ fn write_combined_run(
     warnings.extend(vertical_report.warnings.iter().cloned());
     warnings.sort();
     warnings.dedup();
-    for warning in &warnings {
-        eprintln!("warning: {warning}");
-    }
+    print_warnings(&warnings, args);
     print_svc_metrics(svc_report["metrics"].as_array().unwrap());
     let Some(output) = &args.output else {
         return Ok(());
@@ -344,9 +345,7 @@ fn write_svc_report(
     report: svc::Reports,
 ) -> Result<()> {
     println!("SVC analysis: {} metrics", report.metric_count);
-    for warning in &report.warnings {
-        eprintln!("warning: {warning}");
-    }
+    print_warnings(&report.warnings, args);
     print_svc_metrics(report.report["metrics"].as_array().unwrap());
     if let Some(output) = &args.output {
         let mut bundle = report.report;
@@ -379,6 +378,31 @@ fn print_svc_metrics(metrics: &[serde_json::Value]) {
     }
 }
 
+fn print_warnings(warnings: &[String], args: &AnalyzeArgs) {
+    if warnings.is_empty() {
+        return;
+    }
+    if args.verbose {
+        for warning in warnings {
+            eprintln!("warning: {warning}");
+        }
+        return;
+    }
+    let suffix = if warnings.len() == 1 { "" } else { "s" };
+    if let Some(output) = &args.output {
+        eprintln!(
+            "warning: {} analysis warning{suffix}; details in {}/report.json",
+            warnings.len(),
+            output.display()
+        );
+    } else {
+        eprintln!(
+            "warning: {} analysis warning{suffix}; rerun with --verbose for details",
+            warnings.len()
+        );
+    }
+}
+
 fn analyze_vertical(args: &AnalyzeArgs) -> Result<()> {
     let config = clab_core::config::load_config_with_input(&args.config, &args.input, true)
         .map_err(|error| {
@@ -397,9 +421,7 @@ fn write_vertical(
     run: Option<&Path>,
 ) -> Result<()> {
     let report = vertical::analyze_input(config, input)?;
-    for warning in &report.warnings {
-        eprintln!("warning: {warning}");
-    }
+    print_warnings(&report.warnings, args);
     let Some(output) = &args.output else {
         return Ok(());
     };

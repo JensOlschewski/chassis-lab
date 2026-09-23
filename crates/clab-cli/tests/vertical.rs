@@ -222,7 +222,9 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
     let report = fs::read_to_string(output.join("report.json")).unwrap();
     assert!(report.contains("no static_simulation"));
     assert!(report.contains("\"method\": \"none\""));
-    assert!(String::from_utf8_lossy(&success.stderr).contains("no static_simulation"));
+    let stderr = String::from_utf8_lossy(&success.stderr);
+    assert!(stderr.contains("1 analysis warning; details in"));
+    assert!(!stderr.contains("no static_simulation"));
     assert!(
         output
             .join("plots/knc/vertical/wheel-center-y-vs-wheel-center-x.svg")
@@ -292,9 +294,23 @@ fn analyzes_simulation_with_missing_units_and_warns() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert!(String::from_utf8_lossy(&result.stderr).contains("no HDF5 unit metadata"));
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("analysis warnings; details in"));
+    assert!(!stderr.contains("no HDF5 unit metadata"));
     let report = fs::read_to_string(output.join("report.json")).unwrap();
     assert!(report.contains("no HDF5 unit metadata"));
+
+    let verbose = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "analyze",
+            config_path.to_str().unwrap(),
+            simulation_path.to_str().unwrap(),
+            "--verbose",
+        ])
+        .output()
+        .unwrap();
+    assert!(verbose.status.success());
+    assert!(String::from_utf8_lossy(&verbose.stderr).contains("no HDF5 unit metadata"));
 }
 
 #[test]

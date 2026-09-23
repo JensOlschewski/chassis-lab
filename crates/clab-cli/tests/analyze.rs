@@ -358,7 +358,9 @@ fn analyzes_svc_hdf5_with_missing_units_and_warns() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert!(String::from_utf8_lossy(&result.stdout).contains("SVC analysis"));
-    assert!(String::from_utf8_lossy(&result.stderr).contains("no HDF5 unit metadata"));
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("analysis warnings; details in"));
+    assert!(!stderr.contains("no HDF5 unit metadata"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     let warnings = report["warnings"].as_array().unwrap();
@@ -375,6 +377,18 @@ fn analyzes_svc_hdf5_with_missing_units_and_warns() {
             .collect::<std::collections::HashSet<_>>()
             .len()
     );
+
+    let verbose = clab()
+        .args([
+            "analyze",
+            config.to_str().unwrap(),
+            input.to_str().unwrap(),
+            "--verbose",
+        ])
+        .output()
+        .unwrap();
+    assert!(verbose.status.success());
+    assert!(String::from_utf8_lossy(&verbose.stderr).contains("no HDF5 unit metadata"));
 }
 
 #[test]
