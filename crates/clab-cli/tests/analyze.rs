@@ -160,7 +160,7 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     assert!(stdout.contains("SVC reference analysis: 29 metrics"));
     assert!(stdout.contains("  front_left_mass_kg = 420.0 kg"));
     assert!(stdout.contains("  cg_height_mm = missing mm"));
-    assert!(stderr.contains("16 SVC metrics are missing; details in"));
+    assert!(stderr.contains("16 analysis warnings; details in"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     let metrics = report["metrics"].as_array().unwrap();

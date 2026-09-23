@@ -272,7 +272,7 @@ fn write_svc_reference(
         "SVC reference analysis: {} metrics",
         reports.report["metrics"].as_array().unwrap().len()
     );
-    print_missing_svc_metrics(&reports.warnings, args);
+    print_warnings(&reports.warnings, args);
     print_svc_metrics(reports.report["metrics"].as_array().unwrap());
     if let Some(output) = &args.output {
         write_bundle(
@@ -425,33 +425,6 @@ fn print_warnings(warnings: &[String], args: &AnalyzeArgs) {
     } else {
         eprintln!(
             "warning: {} analysis warning{suffix}; rerun with --verbose for details",
-            warnings.len()
-        );
-    }
-}
-
-fn print_missing_svc_metrics(warnings: &[String], args: &AnalyzeArgs) {
-    if warnings.is_empty() {
-        return;
-    }
-    if args.verbose {
-        print_warnings(warnings, args);
-        return;
-    }
-    let noun = if warnings.len() == 1 {
-        "metric is"
-    } else {
-        "metrics are"
-    };
-    if let Some(output) = &args.output {
-        eprintln!(
-            "warning: {} SVC {noun} missing; details in {}/report.json",
-            warnings.len(),
-            output.display()
-        );
-    } else {
-        eprintln!(
-            "warning: {} SVC {noun} missing; rerun with --verbose for details",
             warnings.len()
         );
     }
