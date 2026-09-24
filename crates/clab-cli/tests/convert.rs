@@ -43,7 +43,10 @@ fn converts_res_to_default_simulation_hdf5() {
     assert!(output.is_file());
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        format!("generated {} (simulation HDF5)\n", output.display())
+        format!(
+            "generated {} (canonical simulation HDF5)\n",
+            output.display()
+        )
     );
 }
 
@@ -61,15 +64,18 @@ fn converts_svc_res_to_default_simulation_hdf5() {
     assert_eq!(
         File::open(&output)
             .unwrap()
-            .attr("format_version")
+            .attr("schema_version")
             .unwrap()
             .read_scalar::<u32>()
             .unwrap(),
-        3
+        1
     );
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        format!("generated {} (simulation HDF5)\n", output.display())
+        format!(
+            "generated {} (canonical simulation HDF5)\n",
+            output.display()
+        )
     );
 }
 
@@ -86,7 +92,10 @@ fn converts_acd_to_default_measurement_hdf5() {
     assert!(output.is_file());
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        format!("generated {} (measurement HDF5)\n", output.display())
+        format!(
+            "generated {} (canonical measurement HDF5)\n",
+            output.display()
+        )
     );
 }
 

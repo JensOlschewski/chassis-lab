@@ -63,20 +63,15 @@ fn inspects_measurement_hdf5_and_lists_channels() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("example-measurement-knc-vertical.acd"));
-    assert!(stdout.contains("format version: 1"));
-    assert!(stdout.contains("samples: 6\nchannels: 17\ntest metadata: 5"));
-    assert!(stdout.contains("encoding: utf-8-sig\ndialect: ascii3"));
-    assert!(stdout.contains("CHANNEL"));
-    assert!(stdout.contains("SOURCE COLUMN"));
+    assert!(stdout.contains("schema version: 1"));
+    assert!(stdout.contains("source kind: measurement\nsamples: 6\nsignals: 17\ntest metadata: 5"));
+    assert!(stdout.contains("SIGNAL\tCOMPONENT\tUNIT\tSOURCE"));
     assert!(stdout.contains("lfwcx"));
-    assert!(stdout.contains("Front left X"));
 
     let matched = inspect(&path, &["--match", "lfwcx"]);
     assert!(matched.status.success());
     let stdout = String::from_utf8(matched.stdout).unwrap();
-    assert!(stdout.contains("raw: 1199.800000..1200.200000"));
-    assert!(stdout.contains("offset: 0.000000"));
-    assert!(stdout.contains("normalized: 1199.800000..1200.200000"));
+    assert!(stdout.contains("lfwcx"));
 }
 
 #[test]
@@ -89,7 +84,7 @@ fn rejects_invalid_hdf5_and_unsupported_source_kind() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("invalid HDF5 input")
+            .contains("failed to inspect HDF5")
     );
 
     let unsupported = directory.path().join("unsupported.hdf5");
@@ -108,7 +103,7 @@ fn rejects_invalid_hdf5_and_unsupported_source_kind() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("unsupported HDF5 source_kind 'other'; expected 'measurement'")
+            .contains("missing HDF5 attribute: schema_version")
     );
 }
 

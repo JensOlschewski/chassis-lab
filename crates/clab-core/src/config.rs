@@ -783,8 +783,15 @@ fn validate_vertical_hdf5_source(
         None
     };
     let actual = match source_kind.as_deref() {
-        None => SourceKind::Simulation,
+        Some("simulation") => SourceKind::Simulation,
         Some("measurement") => SourceKind::Measurement,
+        None => {
+            return Err(ConfigError(format!(
+                "{role} '{}' is missing required source_kind",
+                path.display()
+            ))
+            .into());
+        }
         Some(value) => {
             return Err(ConfigError(format!(
                 "{role} '{}' has unsupported source_kind '{value}'",
@@ -870,8 +877,13 @@ fn hdf5_source_kind(path: &Path, role: &str) -> Result<SourceKind, Box<dyn std::
         None
     };
     match source_kind.as_deref() {
-        None => Ok(SourceKind::Simulation),
+        Some("simulation") => Ok(SourceKind::Simulation),
         Some("measurement") => Ok(SourceKind::Measurement),
+        None => Err(ConfigError(format!(
+            "{role} '{}' is missing required source_kind",
+            path.display()
+        ))
+        .into()),
         Some(value) => Err(ConfigError(format!(
             "{role} '{}' has unsupported source_kind '{value}'",
             path.display()
@@ -1762,6 +1774,7 @@ mod tests {
                 scalar(&file, "format_version", 3_u32);
                 scalar(&file, "sample_count", 0_u64);
                 scalar(&file, "signal_count", 0_u64);
+                string(&file, "source_kind", "simulation");
                 string(&file, "source_file", "result.res");
                 file.create_group("results").unwrap();
             }

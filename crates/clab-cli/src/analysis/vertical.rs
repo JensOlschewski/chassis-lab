@@ -8,11 +8,9 @@ use std::{
 
 use anyhow::{Context, Result};
 use clab_core::{
+    canonical_hdf5::{CanonicalFile, SourceKind},
     config::{CaseConfig, SignalRef},
     conventions::{apply_convention, vertical_conventions},
-    input_hdf5::{Hdf5Input, open_hdf5_input},
-    measurement_hdf5::MeasurementFile,
-    simulation_hdf5::SimulationFile,
 };
 use pyo3::{prelude::*, types::PyModule};
 use serde::Serialize;
@@ -37,10 +35,10 @@ pub(crate) struct Reports {
 }
 
 pub(crate) fn analyze_input(config: &CaseConfig, path: &Path) -> Result<Reports> {
-    let (curves, source, mut warnings, normalization) = match open_hdf5_input(path)
-        .with_context(|| format!("failed to read HDF5 '{}'", path.display()))?
-    {
-        Hdf5Input::Simulation(file) => {
+    let file = CanonicalFile::open(path)
+        .with_context(|| format!("failed to read HDF5 '{}'", path.display()))?;
+    let (curves, source, mut warnings, normalization) = match file.summary().source_kind {
+        SourceKind::Simulation => {
             let (mut curves, mut warnings) = simulation_curves(config, &file)?;
             if let Some(static_path) = config
                 .vertical
@@ -50,7 +48,7 @@ pub(crate) fn analyze_input(config: &CaseConfig, path: &Path) -> Result<Reports>
                 warnings.extend(subtract_static(
                     config,
                     &mut curves,
-                    &SimulationFile::open(static_path)?,
+                    &CanonicalFile::open(static_path)?,
                 )?);
                 (
                     curves,
@@ -73,7 +71,7 @@ pub(crate) fn analyze_input(config: &CaseConfig, path: &Path) -> Result<Reports>
                 )
             }
         }
-        Hdf5Input::Measurement(file) => (
+        SourceKind::Measurement => (
             measurement_curves(&file)?,
             "Measurement",
             Vec::new(),
@@ -110,7 +108,7 @@ pub(crate) fn analyze_input(config: &CaseConfig, path: &Path) -> Result<Reports>
 fn subtract_static(
     config: &CaseConfig,
     curves: &mut [Curve],
-    static_file: &SimulationFile,
+    static_file: &CanonicalFile,
 ) -> Result<Vec<String>> {
     let vertical = config
         .vertical
@@ -125,7 +123,7 @@ fn subtract_static(
         convention.source_unit = reference.unit.clone();
         let signal = static_file.read_signal(
             &reference.entity,
-            &reference.component,
+            Some(&reference.component),
             Some(&convention.source_unit),
         )?;
         if signal.info.unit.is_empty() {
@@ -155,7 +153,7 @@ fn subtract_static(
 
 fn simulation_curves(
     config: &CaseConfig,
-    simulation: &SimulationFile,
+    simulation: &CanonicalFile,
 ) -> Result<(Vec<Curve>, Vec<String>)> {
     let vertical = config
         .vertical
@@ -172,7 +170,7 @@ fn simulation_curves(
             convention.source_unit = reference.unit.clone();
             let signal = simulation.read_signal(
                 &reference.entity,
-                &reference.component,
+                Some(&reference.component),
                 Some(&convention.source_unit),
             )?;
             if signal.info.unit.is_empty() {
@@ -210,18 +208,19 @@ fn simulation_curves(
     Ok((curves, warnings))
 }
 
-fn measurement_curves(measurement: &MeasurementFile) -> Result<Vec<Curve>> {
+fn measurement_curves(measurement: &CanonicalFile) -> Result<Vec<Curve>> {
     let mut curves = Vec::new();
     for (corner, prefix) in CORNERS.into_iter().zip(["lf", "rf", "lr", "rr"]) {
         for axis in AXES {
-            let channel = measurement.read_channel(&format!("{prefix}wc{axis}"), Some("mm"))?;
+            let channel =
+                measurement.read_signal(&format!("{prefix}wc{axis}"), None, Some("mm"))?;
             curves.push(Curve {
                 corner: corner.into(),
                 signal: format!("wheel_center_{axis}"),
                 values: channel
                     .values
                     .into_iter()
-                    .map(|value| value - channel.info.offset)
+                    .map(|value| value - channel.info.offset.unwrap_or_default())
                     .collect(),
                 unit: "mm".into(),
             });
@@ -233,7 +232,7 @@ fn measurement_curves(measurement: &MeasurementFile) -> Result<Vec<Curve>> {
 
 fn optional_simulation_curves(
     config: &CaseConfig,
-    simulation: &SimulationFile,
+    simulation: &CanonicalFile,
     vertical: &clab_core::config::VerticalConfig,
     conventions: &BTreeMap<String, clab_core::conventions::SignalConvention>,
     corner: &str,
@@ -250,7 +249,7 @@ fn optional_simulation_curves(
         let unit = convention.unit.as_str().into();
         let signal = simulation.read_signal(
             &reference.entity,
-            &reference.component,
+            Some(&reference.component),
             Some(&convention.source_unit),
         )?;
         if signal.info.unit.is_empty() {
@@ -285,7 +284,7 @@ fn missing_unit_warning(entity: &str, component: &str, declared_unit: &str) -> S
 }
 
 fn optional_measurement_curves(
-    measurement: &MeasurementFile,
+    measurement: &CanonicalFile,
     corner: &str,
     prefix: &str,
     curves: &mut Vec<Curve>,
@@ -296,13 +295,13 @@ fn optional_measurement_curves(
         ("camber", format!("{prefix}cam"), "deg"),
     ] {
         if !measurement
-            .channels()
+            .signals()
             .iter()
-            .any(|info| info.group_name == channel)
+            .any(|info| info.safe_name == channel)
         {
             continue;
         }
-        let channel = measurement.read_channel(&channel, Some(unit))?;
+        let channel = measurement.read_signal(&channel, None, Some(unit))?;
         let sign = if suffix == "toe" && matches!(corner, "front_right" | "rear_right") {
             -1.0
         } else {

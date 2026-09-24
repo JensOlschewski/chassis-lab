@@ -18,76 +18,57 @@ pub fn write_file(path: &Path, source: &Path, result: &AdamsResult) -> Result<()
     file.new_attr::<u64>()
         .create("signal_count")?
         .write_scalar(&(result.signal_count() as u64))?;
-    file.new_attr::<u64>()
-        .create("values_per_sample")?
-        .write_scalar(&(result.values_per_sample as u64))?;
     file.new_attr::<u32>()
-        .create("format_version")?
-        .write_scalar(&3u32)?;
+        .create("schema_version")?
+        .write_scalar(&1u32)?;
+    write_string_attribute(&file, "source_kind", "simulation")?;
     write_string_attribute(&file, "source_file", &source.display().to_string())?;
-
-    let results_group = file.create_group("results")?;
-    let mut used_entity_names = HashMap::new();
+    let axis = file.create_group("axis")?;
+    write_string_attribute(&axis, "kind", "sample_index")?;
+    write_string_attribute(&axis, "unit", "")?;
+    axis.new_dataset_builder()
+        .with_data(&(0..result.sample_count as u64).collect::<Vec<_>>())
+        .create("values")?;
+    let signals_group = file.create_group("signals")?;
+    let simulation = file.create_group("simulation")?;
+    let mut used_signal_names = HashMap::new();
 
     for entity in &result.entities {
-        let preferred_name = entity.source_path.as_deref().unwrap_or(&entity.name);
-        let group_name = unique_name(sanitize_group_name(preferred_name), &mut used_entity_names);
-        let entity_group = results_group.create_group(&group_name)?;
-
-        write_string_attribute(&entity_group, "original_name", &entity.name)?;
-        if let Some(source_path) = &entity.source_path {
-            write_string_attribute(&entity_group, "source_path", source_path)?;
-        }
-        if let Some(object_id) = entity.object_id {
-            entity_group
+        for component in &entity.components {
+            let preferred_name = format!(
+                "{}_{}",
+                entity.source_path.as_deref().unwrap_or(&entity.name),
+                component.name
+            );
+            let group_name =
+                unique_name(sanitize_group_name(&preferred_name), &mut used_signal_names);
+            let signal = signals_group.create_group(&group_name)?;
+            signal
+                .new_dataset_builder()
+                .with_data(&component.values)
+                .create("values")?;
+            write_string_attribute(&signal, "original_name", &component.name)?;
+            write_string_attribute(&signal, "unit", component.units.as_deref().unwrap_or(""))?;
+            write_string_attribute(
+                &signal,
+                "source_path",
+                entity.source_path.as_deref().unwrap_or(&entity.name),
+            )?;
+            write_string_attribute(&signal, "entity_name", &entity.name)?;
+            write_string_attribute(&signal, "component", &component.name)?;
+            signal
                 .new_attr::<u64>()
-                .create("object_id")?
-                .write_scalar(&object_id)?;
-        }
-
-        let component_count = entity.components.len();
-        let mut values = Vec::with_capacity(result.sample_count * component_count);
-        for sample_index in 0..result.sample_count {
-            for component in &entity.components {
-                values.push(component.values[sample_index]);
+                .create("adams_id")?
+                .write_scalar(&(component.adams_id as u64))?;
+            if let Some(object_id) = entity.object_id {
+                signal
+                    .new_attr::<u64>()
+                    .create("object_id")?
+                    .write_scalar(&object_id)?;
             }
         }
-
-        entity_group
-            .new_dataset::<f64>()
-            .shape((result.sample_count, component_count))
-            .create("values")?
-            .write_raw(&values)?;
-
-        let component_names = entity
-            .components
-            .iter()
-            .map(|component| as_hdf5_string(&component.name))
-            .collect::<Result<Vec<_>>>()?;
-        let units = entity
-            .components
-            .iter()
-            .map(|component| as_hdf5_string(component.units.as_deref().unwrap_or("")))
-            .collect::<Result<Vec<_>>>()?;
-        let adams_ids = entity
-            .components
-            .iter()
-            .map(|component| component.adams_id as u64)
-            .collect::<Vec<_>>();
-
-        entity_group
-            .new_dataset_builder()
-            .with_data(&component_names)
-            .create("component_names")?;
-        entity_group
-            .new_dataset_builder()
-            .with_data(&units)
-            .create("units")?;
-        entity_group
-            .new_dataset_builder()
-            .with_data(&adams_ids)
-            .create("adams_ids")?;
     }
+    write_string_attribute(&simulation, "format", "adams-res")?;
 
     file.flush()?;
     Ok(())
@@ -109,7 +90,17 @@ fn as_hdf5_string(value: &str) -> Result<VarLenUnicode> {
 }
 
 fn sanitize_group_name(name: &str) -> String {
-    let name = name.trim().replace(['/', '\0'], "_");
+    let name: String = name
+        .trim()
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-') {
+                byte as char
+            } else {
+                '_'
+            }
+        })
+        .collect();
     if name.is_empty() {
         "unnamed".to_owned()
     } else {

@@ -26,10 +26,32 @@ to replace an existing output.
 ## Input
 
 - Adams `.res` files are converted by `crates/clab-converter/`.
-- Converted simulation HDF5 files use format version 3.
-- Converted measurement HDF5 files use schema version 1.
+- Converted `.res` and `.acd` files use canonical HDF5 schema version 1.
+- Canonical files explicitly declare `source_kind` as `simulation` or `measurement`.
 - Lommel `.acd` files provide physical measurements for conversion.
 - TOML files define combined cases, inputs, signal mappings, setup, and tolerances.
+
+### Canonical HDF5 layout
+
+```text
+/
+  attrs: schema_version, source_kind, source_file, sample_count, signal_count
+/axis
+  attrs: kind, unit
+  values: sample indices for simulations, physical time for measurements
+/signals/<safe-name>
+  attrs: original_name, unit, optional source-specific metadata
+  values: float64[sample_count]
+/simulation
+  attrs: source-format metadata
+/measurement/test_info/<safe-name>
+  attrs: measurement test metadata
+```
+
+Simulation axes use unitless sample indices when a RES file has no physical time;
+conversion never invents time values. Signal records share one layout while retaining
+simulation entity/component/ID metadata or measurement descriptions, offsets, and
+test metadata as applicable.
 
 See [`examples/example-config.toml`](examples/example-config.toml) and its
 external role files. `[meta]` identifies case; `[input]`, `[setup]`,
@@ -69,8 +91,8 @@ is used only as a scientific kernel through the Rust CLI. Exit codes are 0 for
 pass, 1 for tolerance failure, and 2 for operational or configuration errors.
 
 Run manifests use `[input.svc]`, `[input.knc.vertical]`, and optional
-`[input.knc.static]`, each with `file = "..."`. HDF5 `source_kind` is optional
-and absent means simulation; SVC JSON must declare it. Static is simulation HDF5
+`[input.knc.static]`, each with `file = "..."`. HDF5 `source_kind` is required;
+SVC JSON must also declare it. Static is simulation HDF5
 baseline for vertical normalization. Replace raw ACD with `clab convert`; raw ACD
 is not accepted. Legacy domain-first configuration remains accepted during migration.
 

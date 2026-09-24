@@ -23,47 +23,42 @@ fn scalar<T: hdf5::H5Type>(location: &Location, name: &str, value: T) {
 }
 fn simulation(path: &std::path::Path) {
     let file = File::create(path).unwrap();
-    scalar(&file, "format_version", 3_u32);
+    scalar(&file, "schema_version", 1_u32);
     scalar(&file, "sample_count", 5_u64);
     scalar(&file, "signal_count", 16_u64);
+    string(&file, "source_kind", "simulation");
     string(&file, "source_file", "fixture.res");
-    let results = file.create_group("results").unwrap();
+    let axis = file.create_group("axis").unwrap();
+    string(&axis, "kind", "sample_index");
+    string(&axis, "unit", "");
+    axis.new_dataset_builder()
+        .with_data(&[0_u64, 1, 2, 3, 4])
+        .create("values")
+        .unwrap();
+    let signals = file.create_group("signals").unwrap();
     for corner in ["front_left", "front_right", "rear_left", "rear_right"] {
-        let group = results.create_group(corner).unwrap();
-        string(&group, "source_path", corner);
-        group
-            .new_dataset::<f64>()
-            .shape((5, 4))
-            .create("values")
-            .unwrap()
-            .write_raw(&[
-                0., 100., 200., 300., -1., 98., 197., 299., 0., 100., 200., 300., 1., 102., 203.,
-                301., 1., 102., 203., 301.,
-            ])
-            .unwrap();
-        let strings = |values: &[&str]| {
-            values
-                .iter()
-                .map(|v| VarLenUnicode::from_str(v).unwrap())
-                .collect::<Vec<_>>()
-        };
-        group
-            .new_dataset_builder()
-            .with_data(&strings(&["travel", "x", "y", "z"]))
-            .create("component_names")
-            .unwrap();
-        group
-            .new_dataset_builder()
-            .with_data(&strings(&["mm", "mm", "mm", "mm"]))
-            .create("units")
-            .unwrap();
-        group
-            .new_dataset_builder()
-            .with_data(&[1_u64, 2, 3, 4])
-            .create("adams_ids")
-            .unwrap();
+        for (component, values, id) in [
+            ("travel", [0., -1., 0., 1., 1.], 1_u64),
+            ("x", [100., 98., 100., 102., 102.], 2),
+            ("y", [200., 197., 200., 203., 203.], 3),
+            ("z", [300., 299., 300., 301., 301.], 4),
+        ] {
+            let group = signals
+                .create_group(&format!("{corner}_{component}"))
+                .unwrap();
+            group
+                .new_dataset_builder()
+                .with_data(&values)
+                .create("values")
+                .unwrap();
+            string(&group, "original_name", component);
+            string(&group, "unit", "mm");
+            string(&group, "source_path", corner);
+            string(&group, "component", component);
+            scalar(&group, "adams_id", id);
+        }
     }
-    drop(results);
+    drop(signals);
     file.close().unwrap();
 }
 
@@ -71,28 +66,23 @@ fn clear_simulation_units(path: &std::path::Path) {
     let staging = path.with_extension("units.h5");
     fs::copy(path, &staging).unwrap();
     let file = File::open_rw(&staging).unwrap();
-    let results = file.group("results").unwrap();
-    for name in results.member_names().unwrap() {
-        let group = results.group(&name).unwrap();
-        let count = group.dataset("component_names").unwrap().size();
-        group.unlink("units").unwrap();
-        let units = (0..count)
-            .map(|_| VarLenUnicode::from_str("").unwrap())
-            .collect::<Vec<_>>();
+    let signals = file.group("signals").unwrap();
+    for name in signals.member_names().unwrap() {
+        let group = signals.group(&name).unwrap();
         group
-            .new_dataset_builder()
-            .with_data(&units)
-            .create("units")
+            .attr("unit")
+            .unwrap()
+            .write_scalar(&VarLenUnicode::from_str("").unwrap())
             .unwrap();
         drop(group);
     }
-    drop(results);
+    drop(signals);
     file.close().unwrap();
     fs::copy(&staging, path).unwrap();
     fs::remove_file(staging).unwrap();
 }
-fn channel(channels: &Group, name: &str, values: &[f64], offset: f64) {
-    let group = channels.create_group(name).unwrap();
+fn channel(signals: &Group, name: &str, values: &[f64], offset: f64) {
+    let group = signals.create_group(name).unwrap();
     group
         .new_dataset_builder()
         .with_data(values)
@@ -110,45 +100,47 @@ fn channel(channels: &Group, name: &str, values: &[f64], offset: f64) {
 }
 fn measurement(path: &std::path::Path) {
     let file = File::create(path).unwrap();
-    scalar(&file, "format_version", 1_u32);
+    scalar(&file, "schema_version", 1_u32);
     scalar(&file, "sample_count", 6_u64);
-    scalar(&file, "channel_count", 16_u64);
+    scalar(&file, "signal_count", 16_u64);
     string(&file, "source_kind", "measurement");
     string(&file, "source_file", "fixture.acd");
-    let measurements = file.create_group("measurements").unwrap();
-    measurements
-        .new_dataset_builder()
+    let axis = file.create_group("axis").unwrap();
+    string(&axis, "kind", "time");
+    string(&axis, "unit", "s");
+    axis.new_dataset_builder()
         .with_data(&[0.; 6])
-        .create("sample_axis")
+        .create("values")
         .unwrap();
-    let channels = measurements.create_group("channels").unwrap();
+    let signals = file.create_group("signals").unwrap();
     for prefix in ["lf", "rf", "lr", "rr"] {
         channel(
-            &channels,
+            &signals,
             &format!("{prefix}slope"),
             &[2., 2., 2., 3., 3., 3.],
             0.,
         );
         channel(
-            &channels,
+            &signals,
             &format!("{prefix}wcx"),
             &[98., 100., 102., 102., 100., 98.],
             100.,
         );
         channel(
-            &channels,
+            &signals,
             &format!("{prefix}wcy"),
             &[197., 200., 203., 203., 200., 197.],
             200.,
         );
         channel(
-            &channels,
+            &signals,
             &format!("{prefix}wcz"),
             &[299., 300., 301., 301., 300., 299.],
             300.,
         );
     }
-    let info = measurements.create_group("test_info").unwrap();
+    let metadata = file.create_group("measurement").unwrap();
+    let info = metadata.create_group("test_info").unwrap();
     for (name, value) in [
         ("testtype", "vert"),
         ("brakeson", "1"),
@@ -163,8 +155,9 @@ fn measurement(path: &std::path::Path) {
         string(&group, "value", value);
     }
     drop(info);
-    drop(channels);
-    drop(measurements);
+    drop(signals);
+    drop(axis);
+    drop(metadata);
     file.close().unwrap();
 }
 fn closed_fixture(path: &std::path::Path, write: fn(&std::path::Path)) {

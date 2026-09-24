@@ -5,8 +5,8 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
 use clab_core::conventions::SVC_METRICS;
-use clab_core::input_hdf5::{Hdf5Input, open_hdf5_input};
 use clab_core::svc_reference::load_svc_reference;
 use clap::Args;
 use sha2::{Digest, Sha256};
@@ -241,9 +241,9 @@ fn analyze_svc(args: &AnalyzeArgs) -> Result<()> {
 }
 
 fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
-    let input = open_hdf5_input(&args.input)
+    let input = CanonicalFile::open(&args.input)
         .with_context(|| format!("failed to read HDF5 '{}'", args.input.display()))?;
-    if matches!(&input, Hdf5Input::Measurement(_))
+    if input.summary().source_kind == SourceKind::Measurement
         && let Ok(config) =
             clab_core::config::load_config_with_input(&args.config, &args.input, false)
         && config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement)
@@ -253,10 +253,10 @@ fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
             args.input.display()
         );
     }
-    if let Hdf5Input::Simulation(simulation) = input
+    if input.summary().source_kind == SourceKind::Simulation
         && let Ok(config) =
             clab_core::config::load_config_with_input(&args.config, &args.input, false)
-        && svc::supports_hdf5(&config, &simulation)
+        && svc::supports_hdf5(&config, &input)
     {
         return write_svc_hdf5(&config, args);
     }

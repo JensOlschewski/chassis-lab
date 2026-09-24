@@ -53,8 +53,8 @@ impl InputKind {
 
     fn output_type(self) -> &'static str {
         match self {
-            Self::Res => "simulation HDF5",
-            Self::Acd => "measurement HDF5",
+            Self::Res => "canonical simulation HDF5",
+            Self::Acd => "canonical measurement HDF5",
         }
     }
 }

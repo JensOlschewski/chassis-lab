@@ -8,9 +8,7 @@ use hdf5::{File, Location};
 
 use crate::acd::{self, AcdMeasurement};
 
-pub const FORMAT_VERSION: u32 = 1;
-
-/// Imports an ACD measurement into measurement HDF5. The exact `time` channel is sample axis.
+/// Imports an ACD measurement into canonical HDF5. The exact `time` channel is sample axis.
 pub fn import_acd(
     source: impl AsRef<Path>,
     output: impl AsRef<Path>,
@@ -45,24 +43,25 @@ pub fn write_file(path: &Path, source: &Path, measurement: &AcdMeasurement) -> R
 
     let file = File::create(path)
         .with_context(|| format!("failed to create HDF5 file '{}'", path.display()))?;
-    scalar(&file, "format_version", FORMAT_VERSION)?;
+    scalar(&file, "schema_version", 1_u32)?;
     scalar(&file, "sample_count", sample_count as u64)?;
-    scalar(&file, "channel_count", measurement.channels.len() as u64)?;
+    scalar(&file, "signal_count", measurement.channels.len() as u64)?;
     string(&file, "source_kind", "measurement")?;
     string(&file, "source_file", &source.display().to_string())?;
     string(&file, "encoding", &measurement.encoding)?;
     string(&file, "dialect", &measurement.dialect)?;
 
-    let measurements = file.create_group("measurements")?;
-    measurements
-        .new_dataset_builder()
+    let axis = file.create_group("axis")?;
+    string(&axis, "kind", "time")?;
+    string(&axis, "unit", &time.unit)?;
+    axis.new_dataset_builder()
         .with_data(&time.values)
-        .create("sample_axis")?;
-    let channels = measurements.create_group("channels")?;
+        .create("values")?;
+    let signals = file.create_group("signals")?;
     let mut used_names = HashMap::new();
     for channel in &measurement.channels {
         let group =
-            channels.create_group(&unique_name(safe_name(&channel.name), &mut used_names))?;
+            signals.create_group(&unique_name(safe_name(&channel.name), &mut used_names))?;
         group
             .new_dataset_builder()
             .with_data(&channel.values)
@@ -73,8 +72,9 @@ pub fn write_file(path: &Path, source: &Path, measurement: &AcdMeasurement) -> R
         scalar(&group, "offset", channel.offset)?;
         scalar(&group, "column", channel.column)?;
     }
+    let metadata = file.create_group("measurement")?;
     if !measurement.test_info.is_empty() {
-        let test_info = measurements.create_group("test_info")?;
+        let test_info = metadata.create_group("test_info")?;
         let mut used_names = HashMap::new();
         for info in &measurement.test_info {
             let group =
