@@ -1,5 +1,6 @@
 {
     "schema_version": 1,
+    "source_kind": "measurement",
     "case": {
         "name": "example-config",
         "loadcase": "example-loadcase"

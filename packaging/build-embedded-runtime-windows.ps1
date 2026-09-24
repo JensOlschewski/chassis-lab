@@ -64,11 +64,9 @@ $env:RUSTFLAGS = "$($env:RUSTFLAGS) -C link-arg=/LIBPATH:$($pythonRoot.Replace('
 $env:PYO3_CONFIG_FILE = $pyo3Config
 $env:PYO3_PYTHON = $python
 cargo build --release --locked --target x86_64-pc-windows-msvc -p clab-cli
-cargo build --release --locked --target x86_64-pc-windows-msvc -p clab-converter --example embed-smoke
 
 $bin = Join-Path $output "bin"
 Copy-Item (Join-Path $root "target/x86_64-pc-windows-msvc/release/clab.exe") (Join-Path $bin "clab.exe")
-Copy-Item (Join-Path $root "target/x86_64-pc-windows-msvc/release/examples/embed-smoke.exe") (Join-Path $bin "embed-smoke.exe")
 foreach ($dll in @("python3.dll", "python312.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
     $source = Join-Path $pythonRoot $dll
     if (Test-Path $source) { Copy-Item $source $bin -Force }

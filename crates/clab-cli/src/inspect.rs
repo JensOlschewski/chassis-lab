@@ -3,38 +3,76 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clab_core::input_hdf5::{Hdf5Input, open_hdf5_input};
 use clab_core::svc_simulation_json::SvcSimulationFile;
-use clap::Args;
+use clap::{Args, ValueEnum};
+
+use crate::signals;
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum Mapping {
+    Svc,
+    Knc,
+}
 
 #[derive(Debug, Args)]
 pub(crate) struct InspectArgs {
     /// Normalized SVC JSON or HDF5 simulation/measurement file.
-    file: PathBuf,
+    file: Option<PathBuf>,
+    /// Show canonical mapping requirements instead of inspecting a file.
+    #[arg(long, value_enum)]
+    mapping: Option<Mapping>,
     /// List all available signals or channels.
     #[arg(long)]
-    signals: bool,
+    list: bool,
     /// Filter signals or channels by case-insensitive catalog text.
     #[arg(long)]
     r#match: Option<String>,
+    /// Restrict KnC mapping output to one test.
+    #[arg(long)]
+    test: Option<String>,
+    /// Emit editable TOML mapping skeleton.
+    #[arg(long)]
+    template: bool,
 }
 
 pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
-    if !args.file.is_file() {
-        bail!("input file does not exist: {}", args.file.display());
+    if let Some(mapping) = args.mapping {
+        if args.file.is_some() {
+            bail!("--mapping cannot be combined with FILE");
+        }
+        if args.list || args.r#match.is_some() {
+            bail!("--list and --match require FILE");
+        }
+        return signals::mapping(
+            Some(match mapping {
+                Mapping::Svc => signals::Domain::Svc,
+                Mapping::Knc => signals::Domain::Knc,
+            }),
+            args.test.as_deref(),
+            args.template,
+        );
     }
-    let extension = args
-        .file
+    let Some(file) = args.file else {
+        bail!("FILE is required unless --mapping is provided");
+    };
+    if args.test.is_some() || args.template {
+        bail!("--test and --template require --mapping");
+    }
+    if !file.is_file() {
+        bail!("input file does not exist: {}", file.display());
+    }
+    let extension = file
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase);
     match extension.as_deref() {
         Some("json") => inspect_svc_json(
-            &args.file,
-            args.signals || args.r#match.is_some(),
+            &file,
+            args.list || args.r#match.is_some(),
             args.r#match.as_deref(),
         ),
         Some("h5" | "hdf5") => inspect_hdf5(
-            &args.file,
-            args.signals || args.r#match.is_some(),
+            &file,
+            args.list || args.r#match.is_some(),
             args.r#match.as_deref(),
         ),
         _ => bail!("unsupported input extension; clab inspect accepts .json, .h5, or .hdf5"),

@@ -37,7 +37,6 @@ measurement_hdf5 = "vertical.measurement.h5"
 simulation_hdf5 = "vertical.simulation.h5"
 
 [vertical.setup]
-code = "vert-smoke"
 brakes_applied = false
 engine_running = false
 front_arb_connected = true

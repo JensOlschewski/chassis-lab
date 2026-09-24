@@ -12,7 +12,7 @@ Adams .res / Lommel .acd
         ↓
 simulation HDF5 v3 / measurement HDF5 v1
         ↓
-  Rust `clab validate` — domain validation
+   Rust `clab analyze` — canonical analysis and report bundles
         ↓
 JSON, CSV, SVG, and run manifests
 ```
@@ -87,9 +87,9 @@ capabilities:
 |---|---|---|
 | `clab inspect-h5 FILE` | `clab inspect FILE` | HDF5 summary; read-only |
 | `clab list-h5-signals FILE` | `clab inspect FILE --signals` | HDF5 signal catalog; read-only |
-| `clab validate-config CONFIG` | `clab check CONFIG` | Config and referenced-input checks; read-only |
-| `clab validate-svc CONFIG` | `clab validate svc CONFIG` | Console and optional JSON/CSV reports |
-| `clab validate vertical CONFIG` | Rust-owned normalized HDF5 validation | Console and optional JSON/CSV/SVG reports |
+| `clab inspect FILE` | `clab inspect FILE` | Inspect normalized inputs and mappings |
+| SVC analysis | `clab analyze CONFIG RUN` | Canonical SVC metrics and report bundle |
+| KnC vertical curves | `clab analyze CONFIG FILE -o DIR` | KnC vertical raw curves and SVG |
 
 Vertical migration: `[vertical.inputs].measurement_hdf5` is required. Convert
 legacy ACD inputs with `clab convert`; validation never reads raw ACD.
@@ -100,10 +100,10 @@ legacy ACD inputs with `clab convert`; validation never reads raw ACD.
 `clab convert`. `--signals` combines summary and signal listing, while `--match`
 implies signal listing.
 
-`clab validate CONFIG` runs every configured domain by default. Repeatable
+`clab analyze CONFIG RUN` analyzes configured SVC inputs. Repeatable
 `--domain DOMAIN` options select a subset. This avoids conflicting boolean flags
 and scales to later validation domains. Multi-domain reports use deterministic
-filenames below `--output-dir`.
+filenames below `--output`.
 
 Temporary hidden aliases may preserve old flat command forms during migration.
 Read-only commands never convert or write implicitly. JSON and CSV fields,
@@ -155,17 +155,14 @@ using channel name exactly `time` for sample axis and retaining that channel.
 Canonical configuration is function-first:
 
 ```toml
-[input.svc.simulation]
-input_file = "...json"
+[input.svc]
+file = "svc.h5-or-json"
 
-[input.svc.measurement]
-input_file = "...json"
+[input.knc.static]
+file = "static-simulation.h5"
 
-[input.knc.vertical.simulation]
-input_file = "...h5"
-
-[input.knc.vertical.measurement]
-input_file = "...h5"
+[input.knc.vertical]
+file = "vertical.h5"
 
 [mappings.svc]
 file = "example-signals.toml"
@@ -177,6 +174,10 @@ file = "example-vertical-signals.toml"
 # inline values add to or override domain mappings
 ```
 
+Source kind comes from input metadata: HDF5 `source_kind` is optional and absent
+means simulation; SVC JSON must declare it. SVC and vertical must have same source
+kind. `[input.knc.static]` is run-relative simulation HDF5 baseline for vertical
+normalization. Nested simulation/measurement role tables remain compatible.
 External role files can replace inline sections. Input JSON combines SVC and
 KnC paths; setup JSON contains setup and window data; mappings TOML contains
 `[svc]` and `[knc]` bases plus test overrides; validation TOML contains optional

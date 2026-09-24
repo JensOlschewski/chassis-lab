@@ -62,24 +62,17 @@ fn rejects_acd_without_exact_time_channel() {
 }
 
 #[test]
-fn committed_vertical_examples_are_valid_and_correspond() {
-    let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
-    let source = examples.join("../../../examples/example-measurement-vertical.acd");
-    let expected_path = examples.join("../../../examples/example-measurement-vertical.h5");
-    if !source.is_file() || !expected_path.is_file() {
-        return;
-    }
-    let expected = MeasurementFile::open(expected_path).unwrap();
+fn committed_vertical_measurement_example_imports() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/input/example-measurement-knc-vertical.acd");
+    assert!(source.is_file(), "missing {}", source.display());
     let directory = tempdir().unwrap();
     let output = directory.path().join("example-vertical.h5");
 
     measurement_hdf5::import_acd(&source, &output, false).unwrap();
     let imported = MeasurementFile::open(output).unwrap();
 
-    assert_eq!(
-        expected.read_sample_axis().unwrap(),
-        imported.read_sample_axis().unwrap()
-    );
-    assert_eq!(expected.channels(), imported.channels());
-    assert_eq!(expected.test_info(), imported.test_info());
+    assert_eq!(imported.read_sample_axis().unwrap().len(), 6);
+    assert_eq!(imported.channels().len(), 17);
+    assert_eq!(imported.test_info().len(), 5);
 }

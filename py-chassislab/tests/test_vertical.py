@@ -1,7 +1,7 @@
 import json
 import re
 
-from chassis_lab.vertical_kernel import evaluate
+from chassis_lab.vertical_kernel import evaluate, plot
 
 
 def test_kernel_evaluates_normalized_curves() -> None:
@@ -67,3 +67,63 @@ def test_kernel_svg_is_deterministic_and_scales_large_curves() -> None:
             x, y = map(float, point.split(","))
             assert 0.0 <= x <= 900.0
             assert 0.0 <= y <= 650.0
+
+
+def test_plot_groups_direct_vertical_corner_panels() -> None:
+    curves = [
+        {
+            "corner": corner,
+            "signal": signal,
+            "values": [-1.0, 0.0, 1.0],
+            "unit": "mm",
+        }
+        for corner in (
+            "front_left",
+            "front_right",
+            "rear_left",
+            "rear_right",
+        )
+        for signal in ("wheel_center_x", "wheel_center_y", "wheel_center_z")
+    ]
+    reports = json.loads(plot(json.dumps(curves)))
+    assert set(reports) == {
+        "plots/knc/vertical/wheel-center-z-vs-wheel-center-y.svg",
+        "plots/knc/vertical/wheel-center-y-vs-wheel-center-x.svg",
+        "plots/knc/vertical/wheel-center-z-vs-wheel-center-x.svg",
+    }
+    assert (
+        "Simulation"
+        in reports["plots/knc/vertical/wheel-center-z-vs-wheel-center-y.svg"]
+    )
+
+
+def test_plot_adds_optional_direct_vertical_curves_and_wheel_rate() -> None:
+    curves = [
+        {
+            "corner": corner,
+            "signal": signal,
+            "values": [-1.0, 0.0, 1.0],
+            "unit": unit,
+        }
+        for corner in (
+            "front_left",
+            "front_right",
+            "rear_left",
+            "rear_right",
+        )
+        for signal, unit in (
+            ("wheel_center_x", "mm"),
+            ("wheel_center_y", "mm"),
+            ("wheel_center_z", "mm"),
+            ("wheel_load", "newton"),
+            ("toe", "deg"),
+            ("camber", "deg"),
+        )
+    ]
+    reports = json.loads(plot(json.dumps(curves)))
+    assert "plots/knc/vertical/wheel-load-vs-wheel-center-z.svg" in reports
+    assert "plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg" in reports
+    assert (
+        "[newton/mm]"
+        in reports["plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg"]
+    )
