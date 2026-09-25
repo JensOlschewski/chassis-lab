@@ -223,7 +223,10 @@ def plot_compare(
     candidates = [
         (
             item["label"],
-            {(curve["corner"], curve["signal"]): curve for curve in item["curves"]},
+            {
+                (curve["corner"], curve["signal"]): curve
+                for curve in item["curves"]
+            },
         )
         for item in candidates
     ]
@@ -321,7 +324,8 @@ def _plot_overlay_group(
 
 
 def _candidate_color(index: int) -> str:
-    return ("#e41a1c", "#377eb8", "#e7298a", "#00a6a6", "#ff7f00", "#6a3d9a")[index % 6]
+    colors = ("#e41a1c", "#377eb8", "#e7298a", "#00a6a6", "#ff7f00", "#6a3d9a")
+    return colors[index % len(colors)]
 
 
 def _plot_group(

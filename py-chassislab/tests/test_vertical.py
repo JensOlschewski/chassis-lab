@@ -161,7 +161,10 @@ def test_comparison_plot_uses_ordered_curve_colors_and_footer() -> None:
             ),
             "Baseline",
             "Baseline: fixture | loadcase | input.h5",
-            (Path(__file__).resolve().parents[2] / "crates/clab-cli/assets/flb-logo.png").read_bytes(),
+            (
+                Path(__file__).resolve().parents[2]
+                / "crates/clab-cli/assets/flb-logo.png"
+            ).read_bytes(),
         )
     )
     svg = reports["wheel-center-z-vs-wheel-center-y.svg"]
