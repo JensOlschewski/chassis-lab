@@ -23,5 +23,5 @@ file = "example-setup.toml"
 file = "example-signal-mappings.toml"
 
 [validation]
-# optional tolerance definition for `clab compare` acceptance checks.
+# validation definitions; `clab compare --tolerances` enables acceptance checks.
 file = "example-validation-tolerances.toml"

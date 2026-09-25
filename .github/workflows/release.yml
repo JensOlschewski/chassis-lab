@@ -116,7 +116,7 @@ jobs:
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.h5
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-vertical.res -o vertical.simulation.h5
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-knc-vertical.acd -o vertical.measurement.h5
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze runtime-smoke.toml runtime-smoke.toml -o reports
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze runtime-smoke.toml runtime-smoke.toml -r reports
             test -s reports/report.json && test -s reports/metrics.csv && test -s reports/svc.json
           ' < "$smoke_input"
 
@@ -143,7 +143,7 @@ jobs:
           & "$bundle\bin\clab.exe" convert example-simulation-svc.res -o svc.simulation.h5
           & "$bundle\bin\clab.exe" convert example-simulation-knc-vertical.res -o vertical.simulation.h5
            & "$bundle\bin\clab.exe" convert example-measurement-knc-vertical.acd -o vertical.measurement.h5
-          & "$bundle\bin\clab.exe" analyze runtime-smoke.toml runtime-smoke.toml -o reports
+          & "$bundle\bin\clab.exe" analyze runtime-smoke.toml runtime-smoke.toml -r reports
            if (-not (Test-Path reports\report.json) -or -not (Test-Path reports\metrics.csv) -or -not (Test-Path reports\svc.json)) { throw "missing SVC report bundle" }
           if (-not (Test-Path reports\knc-vertical.json)) { throw "missing vertical report" }
           Pop-Location
@@ -168,7 +168,7 @@ jobs:
            "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.h5
            "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-knc-vertical.res -o vertical.simulation.h5
            "${clean_env[@]}" "$bundle/bin/clab" convert example-measurement-knc-vertical.acd -o vertical.measurement.h5
-          "${clean_env[@]}" "$bundle/bin/clab" analyze runtime-smoke.toml runtime-smoke.toml -o reports
+          "${clean_env[@]}" "$bundle/bin/clab" analyze runtime-smoke.toml runtime-smoke.toml -r reports
            test -s reports/report.json && test -s reports/metrics.csv && test -s reports/svc.json
 
       - name: Verify archive checksum

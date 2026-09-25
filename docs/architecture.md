@@ -89,7 +89,7 @@ capabilities:
 | `clab list-h5-signals FILE` | `clab inspect FILE --signals` | HDF5 signal catalog; read-only |
 | `clab inspect FILE` | `clab inspect FILE` | Inspect normalized inputs and mappings |
 | SVC analysis | `clab analyze CONFIG RUN` | Canonical SVC metrics and report bundle |
-| KnC vertical curves | `clab analyze CONFIG FILE -o DIR` | KnC vertical raw curves and SVG |
+| KnC vertical curves | `clab analyze CONFIG FILE -r DIR` | KnC vertical raw curves and SVG |
 
 Vertical migration: `[vertical.inputs].measurement_hdf5` is required. Convert
 legacy ACD inputs with `clab convert`; validation never reads raw ACD.
