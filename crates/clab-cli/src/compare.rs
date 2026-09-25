@@ -1,31 +1,36 @@
 use std::{
     collections::BTreeMap,
-    fmt, fs,
+    env, fmt, fs,
+    io::IsTerminal,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use anyhow::{Result, bail};
-use clab_core::conventions::SVC_METRICS;
+use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
 use clap::Args;
 use serde::Serialize;
 use sha2::Digest;
 
-use crate::{analysis::svc, analyze::write_bundle};
+use crate::{
+    analysis::{svc, vertical},
+    analyze::write_bundle,
+};
 
 #[derive(Debug, Args)]
 pub(crate) struct CompareArgs {
     /// Shared TOML configuration: mappings, units, conventions, physics, and setup.
     config: PathBuf,
-    /// Baseline SVC JSON or run TOML manifest.
+    /// Baseline SVC JSON, normalized HDF5, or run TOML manifest.
     baseline: PathBuf,
-    /// Candidate SVC JSON or run TOML manifests.
+    /// Candidate SVC JSON, normalized HDF5, or run TOML manifests.
     #[arg(required = true, num_args = 1..)]
     candidates: Vec<PathBuf>,
-    /// Optional TOML tolerance definition. Signals without tolerances are informational.
+    /// Apply validation tolerances from configuration.
     #[arg(short, long)]
-    tolerances: Option<PathBuf>,
+    tolerances: bool,
     /// Directory for deterministic report bundle.
-    #[arg(short, long)]
+    #[arg(short = 'r', long = "report")]
     output: Option<PathBuf>,
     /// Replace report bundle already in output directory.
     #[arg(long)]
@@ -34,13 +39,11 @@ pub(crate) struct CompareArgs {
 
 #[derive(Debug)]
 pub(crate) struct ToleranceFailure;
-
 impl fmt::Display for ToleranceFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("SVC comparison failed tolerance checks")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("comparison failed tolerance checks")
     }
 }
-
 impl std::error::Error for ToleranceFailure {}
 
 #[derive(Clone, Serialize)]
@@ -49,136 +52,201 @@ struct Metric {
     test: Option<&'static str>,
     metric: String,
     unit: String,
-    baseline_value: f64,
-    candidate_value: f64,
-    difference: f64,
+    baseline_value: Option<f64>,
+    candidate_value: Option<f64>,
+    difference: Option<f64>,
     absolute_tolerance: Option<f64>,
     relative_percent: Option<f64>,
     allowed_difference: Option<f64>,
     status: &'static str,
 }
 
+enum ComparedDomain {
+    Svc(Vec<svc::CanonicalMetric>),
+    Vertical(serde_json::Value),
+}
+
+struct Input {
+    config: clab_core::config::CaseConfig,
+    domains: BTreeMap<&'static str, ComparedDomain>,
+    sources: Vec<PathBuf>,
+}
+
+struct ComparisonTolerances {
+    svc: clab_core::config::ValidationTolerances,
+    vertical: clab_core::config::ValidationTolerances,
+}
+
+type GroupedMetrics<'a> = BTreeMap<(Option<&'a str>, &'a str), Vec<(usize, &'a Metric)>>;
+
 pub(crate) fn compare(args: CompareArgs) -> Result<()> {
-    let baseline_config = load_input(&args.config, &args.baseline)?;
-    if baseline_config.svc_source_kind != Some(clab_core::config::SourceKind::Simulation) {
-        bail!("compare supports simulation SVC inputs only");
-    }
-    let baseline = svc::evaluate_case(&baseline_config)?;
-    let tolerances = match &args.tolerances {
-        Some(path) => load_tolerances(path)?,
-        None => baseline_config
+    let baseline = load_input(&args.config, &args.baseline)?;
+    let tolerances = args.tolerances.then(|| ComparisonTolerances {
+        svc: baseline
+            .config
             .validation
             .as_ref()
             .map(|v| v.tolerances.clone())
-            .unwrap_or(clab_core::config::ValidationTolerances {
-                absolute: BTreeMap::new(),
-                relative_percent: BTreeMap::new(),
-            }),
-    };
+            .unwrap_or_else(empty_tolerances),
+        vertical: baseline
+            .config
+            .vertical
+            .as_ref()
+            .map(|v| v.tolerances.clone())
+            .unwrap_or_else(empty_tolerances),
+    });
     let mut failed = false;
+    let mut incomplete = false;
     let mut rows = Vec::new();
-    let mut candidate_reports = Vec::new();
-    for candidate_path in &args.candidates {
-        let candidate_config = load_input(&args.config, candidate_path)?;
-        if candidate_config.svc_source_kind != Some(clab_core::config::SourceKind::Simulation) {
-            bail!("compare supports simulation SVC inputs only");
+    let mut candidates = Vec::new();
+    let mut plots = BTreeMap::new();
+    let mut vertical_candidates = Vec::new();
+    let mut candidate_sources = Vec::new();
+    let mut unavailable_domains = Vec::new();
+    for (index, path) in args.candidates.iter().enumerate() {
+        let candidate = load_input(&args.config, path)?;
+        let mut metrics = Vec::new();
+        let mut domains = Vec::new();
+        for (name, base_domain) in &baseline.domains {
+            let Some(candidate_domain) = candidate.domains.get(name) else {
+                incomplete = true;
+                unavailable_domains.push((index, *name));
+                domains.push(serde_json::json!({"domain": name, "test": if *name == "knc" { serde_json::Value::String("vertical".into()) } else { serde_json::Value::Null }, "status": "not compared"}));
+                continue;
+            };
+            match (base_domain, candidate_domain) {
+                (ComparedDomain::Svc(base), ComparedDomain::Svc(candidate_values)) => {
+                    let compared = compare_metrics(
+                        base,
+                        candidate_values,
+                        tolerances.as_ref().map(|value| &value.svc),
+                    );
+                    failed |= compared.iter().any(|metric| metric.status == "failed");
+                    incomplete |= compared.iter().any(|metric| metric.status == "missing");
+                    metrics.extend(compared);
+                    domains.push(
+                        serde_json::json!({"domain": "svc", "test": null, "status": "compared"}),
+                    );
+                }
+                (ComparedDomain::Vertical(base), ComparedDomain::Vertical(candidate_curves)) => {
+                    let compared = compare_vertical_metrics(
+                        &baseline.config,
+                        base,
+                        candidate_curves,
+                        tolerances.as_ref().map(|value| &value.vertical),
+                    )?;
+                    failed |= compared.iter().any(|metric| metric.status == "failed");
+                    incomplete |= compared.iter().any(|metric| metric.status == "missing");
+                    metrics.extend(compared);
+                    vertical_candidates.push((
+                        format!("Curve {}", index + 1),
+                        candidate_curves.clone(),
+                        format!(
+                            "Curve {}: {} | {} | {}",
+                            index + 1,
+                            candidate.config.name,
+                            candidate.config.loadcase,
+                            absolute_path(path)?.display()
+                        ),
+                    ));
+                    domains.push(serde_json::json!({"domain": "knc", "test": "vertical", "status": "compared"}));
+                }
+                _ => bail!(
+                    "incompatible comparison domains between '{}' and '{}'",
+                    args.baseline.display(),
+                    path.display()
+                ),
+            }
         }
-        let candidate = svc::evaluate_case(&candidate_config)?;
-        let metrics = compare_metrics(&baseline, &candidate, &tolerances)?;
-        failed |= metrics.iter().any(|metric| metric.status == "failed");
-        rows.extend(
-            metrics
-                .iter()
-                .cloned()
-                .map(|metric| (candidate_path.clone(), metric)),
-        );
-        candidate_reports.push(serde_json::json!({
-            "input": provenance(candidate_path)?,
-            "case": {"name": candidate_config.name, "loadcase": candidate_config.loadcase},
-            "metrics": metrics,
-        }));
+        if baseline.domains.len() == 1
+            && candidate.domains.len() == 1
+            && baseline.domains.keys().next() != candidate.domains.keys().next()
+        {
+            bail!(
+                "incompatible comparison domains between '{}' and '{}'",
+                args.baseline.display(),
+                path.display()
+            );
+        }
+        rows.extend(metrics.iter().cloned().map(|metric| (path.clone(), metric)));
+        candidate_sources.extend(candidate.sources.iter().cloned());
+        candidates.push(serde_json::json!({"input": provenance(path)?, "case": {"name": candidate.config.name, "loadcase": candidate.config.loadcase}, "metrics": metrics, "domains": domains}));
     }
-    let status = if rows
-        .iter()
-        .all(|(_, metric)| metric.status == "informational")
+    print_metrics(
+        &args.baseline,
+        &args.candidates,
+        &baseline.domains,
+        &rows,
+        &unavailable_domains,
+        args.tolerances,
+    );
+    let status = comparison_status(failed, incomplete, &rows, args.tolerances);
+    if args.output.is_some()
+        && let Some(ComparedDomain::Vertical(base)) = baseline.domains.get("knc")
     {
-        "informational"
-    } else if failed {
-        "failed"
-    } else {
-        "passed"
-    };
+        let footer = std::iter::once(format!(
+            "Config: {}",
+            absolute_path(&args.config)?.display()
+        ))
+        .chain(std::iter::once(format!(
+            "Baseline: {} | {} | {}",
+            baseline.config.name,
+            baseline.config.loadcase,
+            absolute_path(&args.baseline)?.display()
+        )))
+        .chain(
+            vertical_candidates
+                .iter()
+                .map(|(_, _, metadata)| metadata.clone()),
+        )
+        .chain(std::iter::once(format!("Created by: {}", report_creator())))
+        .collect::<Vec<_>>()
+        .join("\n");
+        let candidates = vertical_candidates
+            .into_iter()
+            .map(|(label, curves, _)| (label, curves))
+            .collect::<Vec<_>>();
+        plots.extend(vertical::compare_plots(
+            base,
+            &candidates,
+            "Baseline",
+            &footer,
+            "plots/knc/vertical/comparison",
+        )?);
+    }
     let report = serde_json::json!({
-        "schema_version": 1,
-        "command": "compare",
-        "domain": "svc",
-        "baseline": {"input": provenance(&args.baseline)?, "case": {"name": baseline_config.name, "loadcase": baseline_config.loadcase}},
-        "candidates": candidate_reports,
-        "status": status,
+        "schema_version": 1, "command": "compare",
+        "domain": baseline.domains.keys().next().copied().unwrap_or(""),
+        "domains": baseline.domains.keys().map(|name| serde_json::json!({
+            "domain": name,
+            "test": if *name == "knc" { serde_json::Value::String("vertical".into()) } else { serde_json::Value::Null },
+        })).collect::<Vec<_>>(),
+        "baseline": {"input": provenance(&args.baseline)?, "case": {"name": baseline.config.name, "loadcase": baseline.config.loadcase}},
+        "candidates": candidates, "status": status,
     });
     if let Some(output) = &args.output {
-        let mut csv = csv::Writer::from_writer(Vec::new());
-        csv.write_record([
-            "baseline",
-            "candidate",
-            "domain",
-            "test",
-            "metric",
-            "unit",
-            "baseline_value",
-            "candidate_value",
-            "difference",
-            "absolute_tolerance",
-            "relative_percent",
-            "allowed_difference",
-            "status",
-        ])?;
-        for (candidate, metric) in rows {
-            csv.write_record([
-                safe_cell(&args.baseline.display().to_string()),
-                safe_cell(&candidate.display().to_string()),
-                safe_cell(metric.domain),
-                metric.test.map(safe_cell).unwrap_or_default(),
-                safe_cell(&metric.metric),
-                safe_cell(&metric.unit),
-                metric.baseline_value.to_string(),
-                metric.candidate_value.to_string(),
-                metric.difference.to_string(),
-                metric
-                    .absolute_tolerance
-                    .map(|v| v.to_string())
-                    .unwrap_or_default(),
-                metric
-                    .relative_percent
-                    .map(|v| v.to_string())
-                    .unwrap_or_default(),
-                metric
-                    .allowed_difference
-                    .map(|v| v.to_string())
-                    .unwrap_or_default(),
-                safe_cell(metric.status),
-            ])?;
-        }
+        let csv = metrics_csv(&args.baseline, &rows)?;
         let detail = serde_json::to_string_pretty(&report)? + "\n";
-        let inputs = std::iter::once(args.config.as_path())
-            .chain(std::iter::once(args.baseline.as_path()))
-            .chain(args.candidates.iter().map(PathBuf::as_path))
-            .chain(args.tolerances.iter().map(PathBuf::as_path))
-            .collect::<Vec<_>>();
-        write_bundle(
-            output,
-            &[
-                ("report.json", detail.clone()),
-                ("metrics.csv", String::from_utf8(csv.into_inner()?)?),
-                ("svc.json", detail),
-            ],
-            args.force,
-            &inputs,
-        )?;
+        let mut files = vec![("report.json", detail.clone()), ("metrics.csv", csv)];
+        if baseline.domains.contains_key("svc") {
+            files.push(("svc.json", detail));
+        }
+        if baseline.domains.contains_key("knc") {
+            files.push((
+                "knc-vertical.json",
+                serde_json::to_string_pretty(&report)? + "\n",
+            ));
+        }
+        files.extend(plots.iter().map(|(name, svg)| (name.as_str(), svg.clone())));
+        let mut inputs = vec![args.config.as_path(), args.baseline.as_path()];
+        inputs.extend(baseline.sources.iter().map(PathBuf::as_path));
+        inputs.extend(args.candidates.iter().map(PathBuf::as_path));
+        inputs.extend(candidate_sources.iter().map(PathBuf::as_path));
+        write_bundle(output, &files, args.force, &inputs)?;
         println!("report: {}", output.display());
     }
     println!(
-        "SVC comparison: baseline {}; {} candidate(s); {}",
+        "comparison: baseline {}; {} candidate(s); {}",
         args.baseline.display(),
         args.candidates.len(),
         status
@@ -189,115 +257,394 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     Ok(())
 }
 
-fn load_input(config: &Path, input: &Path) -> Result<clab_core::config::CaseConfig> {
-    match input
+fn load_input(config: &Path, path: &Path) -> Result<Input> {
+    let extension = path
         .extension()
-        .and_then(|value| value.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("json") => clab_core::config::load_config_with_input(config, input, false),
-        Some("toml") => clab_core::config::load_config_and_run(config, input),
-        _ => bail!("compare accepts SVC JSON or run TOML inputs"),
+        .and_then(|v| v.to_str())
+        .map(str::to_ascii_lowercase);
+    let (case, include_svc, include_vertical) = match extension.as_deref() {
+        Some("toml") => {
+            clab_core::config::load_config_and_run(config, path).map(|case| (case, true, true))
+        }
+        Some("json") => clab_core::config::load_config_with_input(config, path, false)
+            .map(|case| (case, true, false)),
+        Some("h5" | "hdf5") => {
+            let file = CanonicalFile::open(path)?;
+            let svc_case = clab_core::config::load_config_with_input(config, path, false).ok();
+            match svc_case {
+                Some(svc_case)
+                    if file.summary().source_kind == SourceKind::Simulation
+                        && svc::supports_hdf5(&svc_case, &file) =>
+                {
+                    Ok((svc_case, true, false))
+                }
+                _ => clab_core::config::load_config_with_input(config, path, true)
+                    .map(|case| (case, false, true)),
+            }
+        }
+        _ => bail!("compare accepts run TOML, SVC JSON, or normalized HDF5 input"),
     }
     .map_err(|error| {
-        anyhow::anyhow!(
-            "failed to load compare input '{}': {error}",
-            input.display()
-        )
+        anyhow::anyhow!("failed to load compare input '{}': {error}", path.display())
+    })?;
+    let mut domains = BTreeMap::new();
+    let mut sources = Vec::new();
+    if include_svc && case.svc_source_kind.is_some() {
+        let values = match case.svc_source_kind {
+            Some(clab_core::config::SourceKind::Simulation) if is_hdf5(&case.simulation_json) => {
+                svc::evaluate_hdf5_case(&case)?
+            }
+            Some(clab_core::config::SourceKind::Simulation) => svc::evaluate_case(&case)?,
+            Some(clab_core::config::SourceKind::Measurement) => {
+                clab_core::svc_reference::load_svc_reference(&case.simulation_json)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?
+                    .values
+            }
+            None => unreachable!(),
+        };
+        sources.push(case.simulation_json.clone());
+        domains.insert("svc", ComparedDomain::Svc(svc::canonical_metrics(&values)));
+    }
+    if include_vertical && let Some(vertical_config) = &case.vertical {
+        let source = match vertical_config.source_kind {
+            clab_core::config::SourceKind::Simulation => &vertical_config.simulation_hdf5,
+            clab_core::config::SourceKind::Measurement => &vertical_config.measurement_hdf5,
+        };
+        let report = vertical::analyze_input(&case, source, false)?;
+        let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
+        sources.push(source.clone());
+        if let Some(static_input) = &vertical_config.static_simulation_hdf5 {
+            sources.push(static_input.clone());
+        }
+        domains.insert("knc", ComparedDomain::Vertical(detail["curves"].clone()));
+    }
+    Ok(Input {
+        config: case,
+        domains,
+        sources,
     })
+}
+
+fn is_hdf5(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|v| v.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("h5" | "hdf5")
+    )
 }
 
 fn compare_metrics(
-    baseline: &BTreeMap<String, f64>,
-    candidate: &BTreeMap<String, f64>,
-    tolerances: &clab_core::config::ValidationTolerances,
-) -> Result<Vec<Metric>> {
-    let mut metrics = Vec::new();
-    for (name, unit) in SVC_METRICS {
-        let baseline = *baseline
-            .get(name)
-            .ok_or_else(|| anyhow::anyhow!("baseline SVC metric missing: {name}"))?;
-        let candidate = *candidate
-            .get(name)
-            .ok_or_else(|| anyhow::anyhow!("candidate SVC metric missing: {name}"))?;
-        let absolute = tolerances.absolute.get(name).copied();
-        let relative = tolerances
-            .relative_percent
-            .get(name)
-            .map(|percent| baseline.abs() * percent / 100.0);
-        let allowed = match (absolute, relative) {
-            (Some(a), Some(r)) => Some(a.min(r)),
-            (Some(v), None) | (None, Some(v)) => Some(v),
-            (None, None) => None,
-        };
-        let difference = (candidate - baseline).abs();
-        metrics.push(Metric {
-            domain: "svc",
-            test: None,
-            metric: name.into(),
-            unit: unit.into(),
-            baseline_value: baseline,
-            candidate_value: candidate,
-            difference,
-            absolute_tolerance: absolute,
-            relative_percent: tolerances.relative_percent.get(name).copied(),
-            allowed_difference: allowed,
-            status: match allowed {
-                None => "informational",
-                Some(allowed) if difference <= allowed => "passed",
-                Some(_) => "failed",
-            },
-        });
-    }
-    Ok(metrics)
+    baseline: &[svc::CanonicalMetric],
+    candidate: &[svc::CanonicalMetric],
+    tolerances: Option<&clab_core::config::ValidationTolerances>,
+) -> Vec<Metric> {
+    baseline
+        .iter()
+        .zip(candidate)
+        .map(|(baseline, candidate)| {
+            debug_assert_eq!(baseline.name, candidate.name);
+            debug_assert_eq!(baseline.unit, candidate.unit);
+            let base = baseline.value;
+            let candidate = candidate.value;
+            let absolute = tolerances.and_then(|value| value.absolute.get(baseline.name).copied());
+            let relative_percent =
+                tolerances.and_then(|value| value.relative_percent.get(baseline.name).copied());
+            let relative = base.zip(relative_percent).map(|(v, p)| v.abs() * p / 100.0);
+            let allowed = match (absolute, relative) {
+                (Some(a), Some(r)) => Some(a.min(r)),
+                (Some(v), None) | (None, Some(v)) => Some(v),
+                _ => None,
+            };
+            let difference = base.zip(candidate).map(|(a, b)| (b - a).abs());
+            let status = match (base, candidate, allowed, difference) {
+                (Some(_), Some(_), Some(limit), Some(diff)) if diff <= limit => "passed",
+                (Some(_), Some(_), Some(_), Some(_)) => "failed",
+                (Some(_), Some(_), None, _) => "informational",
+                _ => "missing",
+            };
+            Metric {
+                domain: "svc",
+                test: None,
+                metric: baseline.name.into(),
+                unit: baseline.unit.into(),
+                baseline_value: base,
+                candidate_value: candidate,
+                difference,
+                absolute_tolerance: absolute,
+                relative_percent,
+                allowed_difference: allowed,
+                status,
+            }
+        })
+        .collect()
 }
 
-fn load_tolerances(path: &Path) -> Result<clab_core::config::ValidationTolerances> {
-    let root: toml::Table = fs::read_to_string(path)?.parse()?;
-    let svc = root
-        .get("svc")
-        .and_then(toml::Value::as_table)
-        .or_else(|| {
-            root.get("validation")
-                .and_then(toml::Value::as_table)
-                .and_then(|v| v.get("svc"))
-                .and_then(toml::Value::as_table)
-        })
-        .unwrap_or(&root);
-    let validation = svc
-        .get("validation")
-        .and_then(toml::Value::as_table)
-        .unwrap_or(svc);
-    let tolerance = validation
-        .get("tolerances")
-        .and_then(toml::Value::as_table)
-        .unwrap_or(validation);
-    let map = |name: &str| -> Result<BTreeMap<String, f64>> {
-        tolerance
-            .get(name)
-            .and_then(toml::Value::as_table)
-            .map(|table| {
-                table
-                    .iter()
-                    .map(|(key, value)| {
-                        value
-                            .as_float()
-                            .or_else(|| value.as_integer().map(|value| value as f64))
-                            .filter(|value| value.is_finite() && *value >= 0.0)
-                            .map(|value| Ok((key.clone(), value)))
-                            .unwrap_or_else(|| {
-                                bail!("tolerance '{key}' must be finite and non-negative")
-                            })
-                    })
-                    .collect()
+fn compare_vertical_metrics(
+    config: &clab_core::config::CaseConfig,
+    baseline: &serde_json::Value,
+    candidate: &serde_json::Value,
+    tolerances: Option<&clab_core::config::ValidationTolerances>,
+) -> Result<Vec<Metric>> {
+    vertical::compare_metrics(config, baseline, candidate)?
+        .into_iter()
+        .map(|comparison| {
+            let metric = format!("{}_wheel_center_{}_mm", comparison.corner, comparison.axis);
+            let absolute = tolerances.and_then(|value| value.absolute.get(&metric).copied());
+            let relative_percent =
+                tolerances.and_then(|value| value.relative_percent.get(&metric).copied());
+            let relative =
+                relative_percent.map(|percent| comparison.maximum_reference_mm * percent / 100.0);
+            let allowed_difference = match (absolute, relative) {
+                (Some(absolute), Some(relative)) => Some(absolute.min(relative)),
+                (Some(value), None) | (None, Some(value)) => Some(value),
+                (None, None) => None,
+            };
+            let status = match allowed_difference {
+                Some(limit) if comparison.maximum_error_mm <= limit => "passed",
+                Some(_) => "failed",
+                None => "informational",
+            };
+            Ok(Metric {
+                domain: "knc",
+                test: Some("vertical"),
+                metric,
+                unit: "mm".into(),
+                baseline_value: Some(comparison.maximum_reference_mm),
+                candidate_value: Some(comparison.maximum_candidate_mm),
+                difference: Some(comparison.maximum_error_mm),
+                absolute_tolerance: absolute,
+                relative_percent,
+                allowed_difference,
+                status,
             })
-            .unwrap_or_else(|| Ok(BTreeMap::new()))
+        })
+        .collect()
+}
+
+fn metrics_csv(baseline: &Path, rows: &[(PathBuf, Metric)]) -> Result<String> {
+    let mut csv = csv::Writer::from_writer(Vec::new());
+    csv.write_record([
+        "baseline",
+        "candidate",
+        "domain",
+        "test",
+        "metric",
+        "unit",
+        "baseline_value",
+        "candidate_value",
+        "difference",
+        "absolute_tolerance",
+        "relative_percent",
+        "allowed_difference",
+        "status",
+    ])?;
+    for (candidate, metric) in rows {
+        csv.write_record([
+            safe_cell(&baseline.display().to_string()),
+            safe_cell(&candidate.display().to_string()),
+            safe_cell(metric.domain),
+            metric.test.map(safe_cell).unwrap_or_default(),
+            safe_cell(&metric.metric),
+            safe_cell(&metric.unit),
+            option_number(metric.baseline_value),
+            option_number(metric.candidate_value),
+            option_number(metric.difference),
+            option_number(metric.absolute_tolerance),
+            option_number(metric.relative_percent),
+            option_number(metric.allowed_difference),
+            safe_cell(metric.status),
+        ])?;
+    }
+    Ok(String::from_utf8(csv.into_inner()?)?)
+}
+
+fn print_metrics(
+    baseline: &Path,
+    candidates: &[PathBuf],
+    domains: &BTreeMap<&'static str, ComparedDomain>,
+    rows: &[(PathBuf, Metric)],
+    unavailable_domains: &[(usize, &'static str)],
+    use_tolerances: bool,
+) {
+    for (domain, title) in [("svc", "SVC"), ("knc", "KnC Vertical")] {
+        if !domains.contains_key(domain) {
+            continue;
+        }
+        println!();
+        let mut grouped: GroupedMetrics<'_> = BTreeMap::new();
+        for (candidate, metric) in rows.iter().filter(|(_, metric)| metric.domain == domain) {
+            let index = candidates
+                .iter()
+                .position(|path| path == candidate)
+                .expect("candidate row must have an input");
+            grouped
+                .entry((metric.test, &metric.metric))
+                .or_default()
+                .push((index, metric));
+        }
+        println!("{title}\nbaseline: {}", baseline.display());
+        for (index, candidate) in candidates.iter().enumerate() {
+            println!("candidate_{}: {}", index + 1, candidate.display());
+        }
+        println!("running {} metrics", grouped.len());
+        for ((test, metric_name), values) in grouped {
+            let name = match test {
+                Some(test) => format!("{domain}::{test}::{metric_name}"),
+                None => format!("{domain}::{metric_name}"),
+            };
+            let baseline_value = values[0].1.baseline_value;
+            let unit = &values[0].1.unit;
+            let mut fields = vec![format!("baseline {}", display_number(baseline_value))];
+            let mut metrics = vec![None; candidates.len()];
+            for (index, metric) in values {
+                metrics[index] = Some(metric);
+            }
+            let mut labels = Vec::new();
+            for (index, metric) in metrics.into_iter().enumerate() {
+                let metric = metric.filter(|_| {
+                    !unavailable_domains
+                        .iter()
+                        .any(|(unavailable, name)| *unavailable == index && *name == domain)
+                });
+                fields.push(format!(
+                    "candidate_{} {}",
+                    index + 1,
+                    display_number(metric.and_then(|metric| metric.candidate_value))
+                ));
+                fields.push(format!(
+                    "diff_{} {}",
+                    index + 1,
+                    display_number(metric.and_then(|metric| metric.difference))
+                ));
+                let status = metric.map(|metric| metric.status).unwrap_or("missing");
+                if use_tolerances {
+                    let label = match status {
+                        "passed" => "ok",
+                        "failed" => "FAILED",
+                        "informational" => "tolerance missing",
+                        other => other,
+                    };
+                    labels.push(colored_status(label));
+                } else if !use_tolerances && status == "missing" {
+                    labels.push(colored_status("missing"));
+                }
+            }
+            if use_tolerances
+                && let Some(limit) = rows.iter().find_map(|(_, metric)| {
+                    (metric.domain == domain && metric.test == test && metric.metric == metric_name)
+                        .then_some(metric.allowed_difference)
+                        .flatten()
+                })
+            {
+                fields.push(format!("tolerance <= {limit:.8} {unit}"));
+            }
+            let labels = labels.join(" ");
+            let separator = if labels.is_empty() { "" } else { " " };
+            println!("  {name} ...{separator}{labels} ({})", fields.join("; "));
+        }
+        for _ in unavailable_domains
+            .iter()
+            .filter(|(_, unavailable)| *unavailable == domain)
+        {
+            println!("  {domain} ... {}", colored_status("not compared"));
+        }
+        let domain_rows: Vec<_> = rows
+            .iter()
+            .filter(|(_, metric)| metric.domain == domain)
+            .collect();
+        let (passed, failed, missing, tolerance_missing) = outcome_counts(&domain_rows);
+        if use_tolerances {
+            println!(
+                "comparison result: {}. {passed} ok; {failed} failed; {missing} metric missing; {tolerance_missing} tolerance missing; {} total",
+                if failed > 0 {
+                    "failed"
+                } else if missing > 0
+                    || unavailable_domains
+                        .iter()
+                        .any(|(_, unavailable)| *unavailable == domain)
+                {
+                    "incomplete"
+                } else {
+                    "passed"
+                },
+                domain_rows.len()
+            );
+        } else {
+            println!(
+                "comparison result: informational. {} compared; {missing} metric missing; {} total",
+                domain_rows.len() - missing,
+                domain_rows.len()
+            );
+        }
+    }
+}
+
+fn outcome_counts(rows: &[&(PathBuf, Metric)]) -> (usize, usize, usize, usize) {
+    rows.iter().fold(
+        (0, 0, 0, 0),
+        |(passed, failed, missing, tolerance_missing), (_, metric)| match metric.status {
+            "passed" => (passed + 1, failed, missing, tolerance_missing),
+            "failed" => (passed, failed + 1, missing, tolerance_missing),
+            "missing" => (passed, failed, missing + 1, tolerance_missing),
+            "informational" => (passed, failed, missing, tolerance_missing + 1),
+            _ => unreachable!(),
+        },
+    )
+}
+
+fn display_number(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.8}"))
+        .unwrap_or_else(|| "missing".into())
+}
+
+fn colored_status(status: &str) -> String {
+    render_status(status, std::io::stdout().is_terminal())
+}
+
+fn render_status(status: &str, terminal: bool) -> String {
+    if !terminal {
+        return status.into();
+    }
+    let color = match status {
+        "ok" => "32",
+        "FAILED" => "31",
+        "missing" | "not compared" => "33",
+        "tolerance missing" => "36",
+        _ => return status.into(),
     };
-    Ok(clab_core::config::ValidationTolerances {
-        absolute: map("absolute")?,
-        relative_percent: map("relative_percent")?,
-    })
+    format!("\x1b[{color}m{status}\x1b[0m")
+}
+
+fn option_number(value: Option<f64>) -> String {
+    value.map(|v| v.to_string()).unwrap_or_default()
+}
+
+fn empty_tolerances() -> clab_core::config::ValidationTolerances {
+    clab_core::config::ValidationTolerances {
+        absolute: BTreeMap::new(),
+        relative_percent: BTreeMap::new(),
+    }
+}
+
+fn comparison_status(
+    failed: bool,
+    incomplete: bool,
+    _rows: &[(PathBuf, Metric)],
+    use_tolerances: bool,
+) -> &'static str {
+    if !use_tolerances {
+        return "informational";
+    }
+    if failed {
+        "failed"
+    } else if incomplete {
+        "incomplete"
+    } else {
+        "passed"
+    }
 }
 
 fn safe_cell(value: &str) -> String {
@@ -310,9 +657,69 @@ fn safe_cell(value: &str) -> String {
         value.into()
     }
 }
-
+fn absolute_path(path: &Path) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.into())
+    } else {
+        Ok(env::current_dir()?.join(path))
+    }
+}
+fn report_creator() -> String {
+    let user = env::var("USER")
+        .or_else(|_| env::var("USERNAME"))
+        .unwrap_or_else(|_| "unknown-user".into());
+    let host = env::var("HOSTNAME").unwrap_or_else(|_| {
+        Command::new("hostname")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "unknown-host".into())
+    });
+    format!("{user}@{host}")
+}
 fn provenance(path: &Path) -> Result<serde_json::Value> {
     Ok(
         serde_json::json!({"path": path, "sha256": format!("{:x}", sha2::Sha256::digest(fs::read(path)?))}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Metric, comparison_status, render_status};
+    use std::path::PathBuf;
+
+    #[test]
+    fn colors_console_statuses_only_for_terminals() {
+        assert_eq!(render_status("ok", false), "ok");
+        assert_eq!(render_status("FAILED", false), "FAILED");
+        assert_eq!(render_status("ok", true), "\x1b[32mok\x1b[0m");
+        assert_eq!(render_status("FAILED", true), "\x1b[31mFAILED\x1b[0m");
+        assert_eq!(render_status("missing", true), "\x1b[33mmissing\x1b[0m");
+    }
+
+    #[test]
+    fn incomplete_precedes_all_informational_but_not_failure() {
+        let rows = vec![(
+            PathBuf::from("candidate"),
+            Metric {
+                domain: "svc",
+                test: None,
+                metric: "metric".into(),
+                unit: "mm".into(),
+                baseline_value: None,
+                candidate_value: None,
+                difference: None,
+                absolute_tolerance: None,
+                relative_percent: None,
+                allowed_difference: None,
+                status: "informational",
+            },
+        )];
+        assert_eq!(comparison_status(false, true, &rows, true), "incomplete");
+        assert_eq!(comparison_status(true, true, &rows, true), "failed");
+        assert_eq!(comparison_status(true, true, &rows, false), "informational");
+    }
 }

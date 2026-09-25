@@ -1019,9 +1019,6 @@ fn function_validation(
     reference: Option<PathBuf>,
     path: &Path,
 ) -> Result<Option<ValidationConfig>, Box<dyn std::error::Error>> {
-    let Some(reference) = reference else {
-        return Ok(None);
-    };
     let validation = root
         .get("validation")
         .and_then(Value::as_table)
@@ -1043,12 +1040,8 @@ fn function_validation(
                 .and_then(Value::as_table)
                 .and_then(|v| v.get("tolerances"))
         });
-    let reference = resolve(
-        &Value::String(reference.to_string_lossy().into()),
-        path,
-        "[input.svc.measurement].input_file",
-    )?;
     let (absolute, relative_percent) = match tolerances {
+        None if reference.is_none() => return Ok(None),
         None => (BTreeMap::new(), BTreeMap::new()),
         Some(value) if value.as_str().is_some() => {
             let file = resolve(value, path, "[validation.svc].tolerances")?;
@@ -1060,6 +1053,16 @@ fn function_validation(
             "[validation.svc].tolerances",
         )?,
     };
+    let reference = reference
+        .map(|reference| {
+            resolve(
+                &Value::String(reference.to_string_lossy().into()),
+                path,
+                "[input.svc.measurement].input_file",
+            )
+        })
+        .transpose()?
+        .unwrap_or_default();
     Ok(Some(ValidationConfig {
         reference,
         tolerances: ValidationTolerances {
@@ -1953,7 +1956,7 @@ mod tests {
         fs::write(&p, "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input.svc.simulation]\nfile='simulation.json'\n[signals.svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[validation.svc.tolerances.absolute]\ntotal=1\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.signals["total"].unit, "kg");
-        assert!(config.validation.is_none());
+        assert_eq!(config.validation.unwrap().tolerances.absolute["total"], 1.0);
     }
 
     #[test]

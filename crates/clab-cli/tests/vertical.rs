@@ -1,7 +1,8 @@
-use std::{fs, process::Command, str::FromStr};
+use std::{fs, io::Write, process::Command, str::FromStr};
 
 use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group, Location};
+use serde_json::Value;
 use tempfile::tempdir;
 
 fn string(location: &Location, name: &str, value: &str) {
@@ -201,7 +202,7 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
             "analyze",
             config_path.to_str().unwrap(),
             simulation_path.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
         ])
         .output()
@@ -242,7 +243,7 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
             "analyze",
             config_path.to_str().unwrap(),
             simulation_path.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
         ])
         .output()
@@ -264,6 +265,28 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
 }
 
 #[test]
+fn analyzes_vertical_without_output() {
+    let directory = tempdir().unwrap();
+    let simulation_path = directory.path().join("simulation.h5");
+    closed_fixture(&simulation_path, simulation);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "analyze",
+            config_path.to_str().unwrap(),
+            simulation_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
 fn analyzes_simulation_with_missing_units_and_warns() {
     let directory = tempdir().unwrap();
     let simulation_path = directory.path().join("simulation.h5");
@@ -277,7 +300,7 @@ fn analyzes_simulation_with_missing_units_and_warns() {
             "analyze",
             config_path.to_str().unwrap(),
             simulation_path.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
         ])
         .output()
@@ -316,14 +339,22 @@ fn run_simulation_static_normalizes_without_warning() {
     let config_path = directory.path().join("case.toml");
     config(&config_path, false);
     let run = directory.path().join("run.toml");
-    fs::write(&run, format!("[input.knc.vertical.simulation]\nfile = \"{}\"\n[input.knc.vertical.static_simulation]\nfile = \"{}\"\n", simulation_path.display(), static_path.display())).unwrap();
+    fs::write(
+        &run,
+        format!(
+            "[input.knc.static]\nfile = \"{}\"\n[input.knc.vertical]\nfile = \"{}\"\n",
+            static_path.display(),
+            simulation_path.display()
+        ),
+    )
+    .unwrap();
     let output = directory.path().join("reports");
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([
             "analyze",
             config_path.to_str().unwrap(),
             run.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
         ])
         .output()
@@ -335,6 +366,161 @@ fn run_simulation_static_normalizes_without_warning() {
     );
     assert!(!String::from_utf8_lossy(&result.stderr).contains("warning:"));
     let report = fs::read_to_string(output.join("report.json")).unwrap();
-    assert!(report.contains("subtract_final_sample"));
+    assert!(report.contains("drop_initial_sample_and_subtract_final_sample"));
     assert!(!report.contains("no static_simulation"));
+    let detail: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("knc-vertical.json")).unwrap())
+            .unwrap();
+    let front_left_x = detail["curves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|curve| curve["corner"] == "front_left" && curve["signal"] == "wheel_center_x")
+        .unwrap();
+    assert_eq!(
+        front_left_x["values"],
+        serde_json::json!([-4.0, -2.0, 0.0, 0.0])
+    );
+}
+
+#[test]
+fn compares_direct_vertical_inputs_across_source_kinds_with_overlays() {
+    let directory = tempdir().unwrap();
+    let simulation_path = directory.path().join("simulation.h5");
+    let measurement_path = directory.path().join("measurement.h5");
+    closed_fixture(&simulation_path, simulation);
+    closed_fixture(&measurement_path, measurement);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&config_path)
+        .unwrap()
+        .write_all(
+            b"[validation.knc.vertical.tolerances.absolute]\nfront_left_wheel_center_x_mm=0.001\n",
+        )
+        .unwrap();
+    let output = directory.path().join("comparison");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "compare",
+            config_path.to_str().unwrap(),
+            simulation_path.to_str().unwrap(),
+            measurement_path.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["candidates"][0]["domains"][0]["domain"], "knc");
+    assert_eq!(report["candidates"][0]["domains"][0]["status"], "compared");
+    assert!(
+        report["candidates"][0]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|metric| metric["metric"] == "front_left_wheel_center_x_mm"
+                && metric["status"] == "informational")
+    );
+    assert!(
+        report["candidates"][0]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|metric| metric["metric"] == "front_left_wheel_center_y_mm"
+                && metric["status"] == "informational")
+    );
+    assert_eq!(report["status"], "informational");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(stdout.contains("KnC Vertical\nbaseline:"));
+    assert!(stdout.contains("knc::vertical::front_left_wheel_center_x_mm ... (baseline"));
+    let svg = output.join("plots/knc/vertical/comparison/wheel-center-z-vs-wheel-center-y.svg");
+    let text = fs::read_to_string(svg).unwrap();
+    assert!(text.contains("fixture"));
+    assert!(text.contains("Front left"));
+    assert!(text.contains("#000000"));
+    assert!(text.contains("#e41a1c"));
+    assert!(text.contains("<image"));
+    assert!(output.join("metrics.csv").is_file());
+}
+
+#[test]
+fn compares_direct_vertical_inputs_without_output() {
+    let directory = tempdir().unwrap();
+    let simulation_path = directory.path().join("simulation.h5");
+    let measurement_path = directory.path().join("measurement.h5");
+    closed_fixture(&simulation_path, simulation);
+    closed_fixture(&measurement_path, measurement);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "compare",
+            config_path.to_str().unwrap(),
+            simulation_path.to_str().unwrap(),
+            measurement_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!directory.path().join("plots").exists());
+}
+
+#[test]
+fn compare_config_tolerances_apply_knc_vertical_section() {
+    let directory = tempdir().unwrap();
+    let simulation_path = directory.path().join("simulation.h5");
+    let measurement_path = directory.path().join("measurement.h5");
+    closed_fixture(&simulation_path, simulation);
+    closed_fixture(&measurement_path, measurement);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    fs::write(
+        &config_path,
+        format!(
+            "{}[validation.knc.vertical.tolerances.absolute]\nfront_left_wheel_center_x_mm=0.001\n",
+            fs::read_to_string(&config_path).unwrap()
+        ),
+    )
+    .unwrap();
+    let output = directory.path().join("comparison");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "compare",
+            config_path.to_str().unwrap(),
+            simulation_path.to_str().unwrap(),
+            measurement_path.to_str().unwrap(),
+            "--tolerances",
+            "-r",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert!(
+        report["candidates"][0]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|metric| metric["metric"] == "front_left_wheel_center_x_mm"
+                && metric["absolute_tolerance"] == 0.001
+                && metric["status"] == "passed")
+    );
 }

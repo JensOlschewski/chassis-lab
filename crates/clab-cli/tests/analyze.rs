@@ -28,53 +28,6 @@ fn clear_simulation_units(path: &Path) {
     fs::remove_file(staging).unwrap();
 }
 
-fn write_simulation_json(path: &Path, front_left_load: f64) {
-    let component = |name: &str, unit: &str, value: f64| serde_json::json!({"name": name, "adams_id": 1, "units": unit, "values": [value]});
-    let simulation = serde_json::json!({
-        "schema_version": 1,
-        "source_kind": "simulation",
-        "source_file": "synthetic.res",
-        "sample_count": 1,
-        "values_per_sample": 25,
-        "entities": [
-            {"name": "example.wheel_loads", "components": [
-                component("front_left", "newton", front_left_load),
-                component("front_right", "newton", 4000.0),
-                component("rear_left", "newton", 4000.0),
-                component("rear_right", "newton", 4000.0)
-            ]},
-            {"name": "example.geometry", "components": [
-                component("wheelbase", "mm", 2800.0),
-                component("front_track", "mm", 1600.0),
-                component("rear_track", "mm", 1600.0),
-                component("cg_height", "mm", 500.0),
-                component("inertia_xx", "kg*mm^2", 1.0),
-                component("inertia_yy", "kg*mm^2", 1.0),
-                component("inertia_zz", "kg*mm^2", 1.0),
-                component("front_left_wheel_center_x", "mm", 0.0),
-                component("gyro_x", "mm", 0.0)
-            ]},
-            {"name": "example.ride_heights", "components": [
-                component("front_left", "mm", 100.0),
-                component("front_right", "mm", 100.0),
-                component("rear_left", "mm", 100.0),
-                component("rear_right", "mm", 100.0)
-            ]},
-            {"name": "example.toe_camber", "components": [
-                component("front_left_toe", "deg", 0.0),
-                component("front_right_toe", "deg", 0.0),
-                component("rear_left_toe", "deg", 0.0),
-                component("rear_right_toe", "deg", 0.0),
-                component("front_left_camber", "deg", 0.0),
-                component("front_right_camber", "deg", 0.0),
-                component("rear_left_camber", "deg", 0.0),
-                component("rear_right_camber", "deg", 0.0)
-            ]}
-        ]
-    });
-    fs::write(path, serde_json::to_string(&simulation).unwrap()).unwrap();
-}
-
 #[test]
 fn analyzes_svc_with_report_bundle() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
@@ -104,7 +57,7 @@ fn analyzes_svc_with_report_bundle() {
             "analyze",
             config.to_str().unwrap(),
             input.to_str().unwrap(),
-            "-o",
+            "-r",
             analysis_output.to_str().unwrap(),
         ])
         .output()
@@ -139,7 +92,7 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
             "analyze",
             config.to_str().unwrap(),
             input.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
         ])
         .output()
@@ -288,7 +241,7 @@ fn analyzes_svc_hdf5_with_report_bundle() {
             "analyze",
             config.to_str().unwrap(),
             input.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
         ])
         .output()
@@ -335,7 +288,7 @@ fn analyzes_svc_hdf5_run_with_hdf5_analyzer() {
             "analyze",
             config.to_str().unwrap(),
             run.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
         ])
         .output()
@@ -379,7 +332,7 @@ fn analyzes_svc_hdf5_with_missing_units_and_warns() {
             "analyze",
             config.to_str().unwrap(),
             input.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
         ])
         .output()
@@ -451,7 +404,7 @@ fn analyze_force_rejects_output_containing_input() {
             "analyze",
             config.to_str().unwrap(),
             input.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
             "--force",
         ])
@@ -517,7 +470,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
             "analyze",
             config.to_str().unwrap(),
             run.to_str().unwrap(),
-            "-o",
+            "-r",
             output.to_str().unwrap(),
         ])
         .output()
@@ -538,232 +491,4 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["domains"].as_array().unwrap().len(), 2);
-}
-
-#[test]
-fn compares_svc_inputs_and_protects_reports_and_inputs() {
-    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    let config = examples.join("config.toml");
-    assert!(config.is_file(), "missing {}", config.display());
-    let directory = tempdir().unwrap();
-    let simulation = directory.path().join("simulation.json");
-    write_simulation_json(&simulation, 4000.0);
-    let candidate = directory.path().join("candidate.json");
-    write_simulation_json(&candidate, 4200.0);
-    let output = directory.path().join("reports");
-    let result = clab()
-        .args([
-            "compare",
-            config.to_str().unwrap(),
-            simulation.to_str().unwrap(),
-            candidate.to_str().unwrap(),
-            simulation.to_str().unwrap(),
-            "-o",
-            output.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    for name in ["report.json", "metrics.csv", "svc.json"] {
-        assert!(output.join(name).is_file(), "missing {name}");
-    }
-    let report: Value =
-        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["command"], "compare");
-    assert_eq!(report["status"], "informational");
-    assert!(report.get("passed").is_none());
-    assert_eq!(report["candidates"].as_array().unwrap().len(), 2);
-    assert_eq!(
-        report["candidates"][0]["metrics"][0]["metric"],
-        "front_left_mass_kg"
-    );
-    assert!(
-        report["candidates"][0]["metrics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|metric| metric["status"] == "informational")
-    );
-    let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
-    assert_eq!(
-        csv.headers().unwrap().iter().collect::<Vec<_>>(),
-        vec![
-            "baseline",
-            "candidate",
-            "domain",
-            "test",
-            "metric",
-            "unit",
-            "baseline_value",
-            "candidate_value",
-            "difference",
-            "absolute_tolerance",
-            "relative_percent",
-            "allowed_difference",
-            "status",
-        ]
-    );
-    assert!(
-        csv.records()
-            .all(|record| record.unwrap().get(12) == Some("informational"))
-    );
-
-    let rejected = clab()
-        .args([
-            "compare",
-            config.to_str().unwrap(),
-            simulation.to_str().unwrap(),
-            candidate.to_str().unwrap(),
-            "-o",
-            output.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(rejected.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("already exists"));
-    assert!(
-        clab()
-            .args([
-                "compare",
-                config.to_str().unwrap(),
-                simulation.to_str().unwrap(),
-                candidate.to_str().unwrap(),
-                "-o",
-                output.to_str().unwrap(),
-                "--force"
-            ])
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
-
-    let file_output = directory.path().join("report-file");
-    fs::write(&file_output, "keep").unwrap();
-    let rejected = clab()
-        .args([
-            "compare",
-            config.to_str().unwrap(),
-            simulation.to_str().unwrap(),
-            candidate.to_str().unwrap(),
-            "-o",
-            file_output.to_str().unwrap(),
-            "--force",
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(rejected.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("regular file"));
-    assert_eq!(fs::read_to_string(file_output).unwrap(), "keep");
-
-    let protected_input = directory.path().join("report.json");
-    fs::copy(&simulation, &protected_input).unwrap();
-    let rejected = clab()
-        .args([
-            "compare",
-            config.to_str().unwrap(),
-            protected_input.to_str().unwrap(),
-            candidate.to_str().unwrap(),
-            "-o",
-            directory.path().to_str().unwrap(),
-            "--force",
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(rejected.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("must not replace an input"));
-}
-
-#[test]
-fn compares_svc_json_and_returns_one_for_failed_tolerance() {
-    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    let config = examples.join("config.toml");
-    assert!(config.is_file(), "missing {}", config.display());
-    let directory = tempdir().unwrap();
-    let simulation = directory.path().join("simulation.json");
-    write_simulation_json(&simulation, 4000.0);
-    assert!(
-        clab()
-            .args([
-                "compare",
-                config.to_str().unwrap(),
-                simulation.to_str().unwrap(),
-                simulation.to_str().unwrap()
-            ])
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
-
-    let tolerance = directory.path().join("tolerances.toml");
-    fs::write(
-        &tolerance,
-        "[svc.validation.tolerances.absolute]\ntotal_mass_kg = 0.0\n",
-    )
-    .unwrap();
-    let candidate = directory.path().join("candidate.json");
-    write_simulation_json(&candidate, 4200.0);
-    let result = clab()
-        .args([
-            "compare",
-            config.to_str().unwrap(),
-            simulation.to_str().unwrap(),
-            candidate.to_str().unwrap(),
-            "--tolerances",
-            tolerance.to_str().unwrap(),
-            "-o",
-            directory.path().join("failed-report").to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(
-        result.status.code(),
-        Some(1),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    assert!(String::from_utf8_lossy(&result.stdout).contains("failed"));
-    let report: Value = serde_json::from_str(
-        &fs::read_to_string(directory.path().join("failed-report/report.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(report["status"], "failed");
-    let metric = report["candidates"][0]["metrics"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|metric| metric["metric"] == "total_mass_kg")
-        .unwrap();
-    assert_eq!(metric["absolute_tolerance"], 0.0);
-    assert!(metric["relative_percent"].is_null());
-    assert_eq!(metric["allowed_difference"], 0.0);
-    assert_eq!(metric["status"], "failed");
-
-    let output = directory.path().join("passed-report");
-    let result = clab()
-        .args([
-            "compare",
-            config.to_str().unwrap(),
-            simulation.to_str().unwrap(),
-            simulation.to_str().unwrap(),
-            "--tolerances",
-            tolerance.to_str().unwrap(),
-            "-o",
-            output.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    let report: Value =
-        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["status"], "passed");
 }

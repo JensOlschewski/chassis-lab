@@ -6,7 +6,6 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
-use clab_core::conventions::SVC_METRICS;
 use clab_core::svc_reference::load_svc_reference;
 use clap::Args;
 use sha2::{Digest, Sha256};
@@ -20,7 +19,7 @@ pub(crate) struct AnalyzeArgs {
     /// Normalized input file or run TOML manifest.
     input: PathBuf,
     /// Directory for deterministic report bundle.
-    #[arg(short, long)]
+    #[arg(short = 'r', long = "report")]
     output: Option<PathBuf>,
     /// Replace report files already in output directory.
     #[arg(long)]
@@ -152,7 +151,7 @@ fn write_combined_run(
             None => unreachable!(),
         }
     };
-    let vertical_report = vertical::analyze_input(config, vertical_path)?;
+    let vertical_report = vertical::analyze_input(config, vertical_path, args.output.is_some())?;
     println!("SVC analysis: {svc_metrics} metrics");
     let mut warnings = svc_warnings;
     warnings.extend(vertical_report.warnings.iter().cloned());
@@ -295,17 +294,18 @@ fn svc_reference_reports(
     config: &Path,
 ) -> Result<SvcReferenceReports> {
     let mut warnings = Vec::new();
-    let metrics = SVC_METRICS
-        .iter()
-        .map(|(name, unit)| {
-            let value = reference.values.get(*name).copied();
+    let metrics = svc::canonical_metrics(&reference.values)
+        .into_iter()
+        .map(|metric| {
+            let value = metric.value;
             if value.is_none() {
                 warnings.push(format!(
-                    "SVC metric '{name}' is missing from measurement reference"
+                    "SVC metric '{}' is missing from measurement reference",
+                    metric.name
                 ));
             }
             serde_json::json!({
-                "domain": "svc", "test": null, "metric": name, "unit": unit, "value": value,
+                "domain": "svc", "test": null, "metric": metric.name, "unit": metric.unit, "value": value,
             })
         })
         .collect::<Vec<_>>();
@@ -447,7 +447,7 @@ fn write_vertical(
     args: &AnalyzeArgs,
     run: Option<&Path>,
 ) -> Result<()> {
-    let report = vertical::analyze_input(config, input)?;
+    let report = vertical::analyze_input(config, input, args.output.is_some())?;
     print_warnings(&report.warnings, args);
     let Some(output) = &args.output else {
         return Ok(());

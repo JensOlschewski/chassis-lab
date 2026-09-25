@@ -1,0 +1,252 @@
+use std::{fs, path::Path, process::Command};
+
+use serde_json::Value;
+use tempfile::tempdir;
+
+fn clab() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_clab"))
+}
+
+fn config_with_tolerance(directory: &Path, tolerance: f64) -> std::path::PathBuf {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    for name in [
+        "example-setup.toml",
+        "example-signal-mappings.toml",
+        "example-validation-tolerances.toml",
+    ] {
+        fs::copy(examples.join(name), directory.join(name)).unwrap();
+    }
+    let config = directory.join("config.toml");
+    fs::copy(examples.join("config.toml"), &config).unwrap();
+    let tolerances = directory.join("example-validation-tolerances.toml");
+    fs::write(
+        &tolerances,
+        fs::read_to_string(&tolerances).unwrap().replace(
+            "total_mass_kg = 20.0",
+            &format!("total_mass_kg = {tolerance}"),
+        ),
+    )
+    .unwrap();
+    config
+}
+
+fn write_simulation_json(path: &Path, front_left_load: f64) {
+    let component = |name: &str, unit: &str, value: f64| serde_json::json!({"name": name, "adams_id": 1, "units": unit, "values": [value]});
+    let simulation = serde_json::json!({
+        "schema_version": 1, "source_kind": "simulation", "source_file": "synthetic.res",
+        "sample_count": 1, "values_per_sample": 25,
+        "entities": [
+            {"name": "example.wheel_loads", "components": [component("front_left", "newton", front_left_load), component("front_right", "newton", 4000.0), component("rear_left", "newton", 4000.0), component("rear_right", "newton", 4000.0)]},
+            {"name": "example.geometry", "components": [component("wheelbase", "mm", 2800.0), component("front_track", "mm", 1600.0), component("rear_track", "mm", 1600.0), component("cg_height", "mm", 500.0), component("inertia_xx", "kg*mm^2", 1.0), component("inertia_yy", "kg*mm^2", 1.0), component("inertia_zz", "kg*mm^2", 1.0), component("front_left_wheel_center_x", "mm", 0.0), component("gyro_x", "mm", 0.0)]},
+            {"name": "example.ride_heights", "components": [component("front_left", "mm", 100.0), component("front_right", "mm", 100.0), component("rear_left", "mm", 100.0), component("rear_right", "mm", 100.0)]},
+            {"name": "example.toe_camber", "components": [component("front_left_toe", "deg", 0.0), component("front_right_toe", "deg", 0.0), component("rear_left_toe", "deg", 0.0), component("rear_right_toe", "deg", 0.0), component("front_left_camber", "deg", 0.0), component("front_right_camber", "deg", 0.0), component("rear_left_camber", "deg", 0.0), component("rear_right_camber", "deg", 0.0)]}
+        ]
+    });
+    fs::write(path, serde_json::to_string(&simulation).unwrap()).unwrap();
+}
+
+#[test]
+fn compares_svc_inputs_and_protects_reports_and_inputs() {
+    let directory = tempdir().unwrap();
+    let config = config_with_tolerance(directory.path(), 0.0001);
+    let simulation = directory.path().join("simulation.json");
+    let candidate = directory.path().join("candidate.json");
+    write_simulation_json(&simulation, 4000.0);
+    write_simulation_json(&candidate, 4200.0);
+    let output = directory.path().join("reports");
+    let result = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            simulation.to_str().unwrap(),
+            candidate.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(stdout.starts_with("\nSVC\nbaseline:"));
+    assert!(stdout.contains("candidate_1:"));
+    assert!(stdout.contains("svc::total_mass_kg ... (baseline"));
+    assert!(!stdout.contains(" ... ok") && !stdout.contains(" ... failed"));
+    assert!(
+        stdout
+            .contains("comparison result: informational. 29 compared; 0 metric missing; 29 total")
+    );
+    assert!(
+        !stdout.contains("\x1b["),
+        "piped output must not contain ANSI"
+    );
+    for name in ["report.json", "metrics.csv", "svc.json"] {
+        assert!(output.join(name).is_file(), "missing {name}");
+    }
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["command"], "compare");
+    assert_eq!(report["status"], "informational");
+    let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
+    assert_eq!(csv.headers().unwrap().get(0), Some("baseline"));
+    assert!(
+        csv.records()
+            .all(|record| record.unwrap().get(12) == Some("informational"))
+    );
+    let rejected = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            simulation.to_str().unwrap(),
+            candidate.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("already exists"));
+    let protected_input = directory.path().join("report.json");
+    fs::copy(&simulation, &protected_input).unwrap();
+    let rejected = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            protected_input.to_str().unwrap(),
+            candidate.to_str().unwrap(),
+            "-r",
+            directory.path().to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("must not replace an input"));
+}
+
+#[test]
+fn compares_svc_json_and_returns_one_for_failed_tolerance() {
+    let directory = tempdir().unwrap();
+    let config = config_with_tolerance(directory.path(), 0.0001);
+    let simulation = directory.path().join("simulation.json");
+    let candidate = directory.path().join("candidate.json");
+    write_simulation_json(&simulation, 4000.0);
+    write_simulation_json(&candidate, 4200.0);
+    let output = directory.path().join("failed-report");
+    let result = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            simulation.to_str().unwrap(),
+            candidate.to_str().unwrap(),
+            "--tolerances",
+            "-r",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        result.status.code(),
+        Some(1),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.stderr),
+        String::from_utf8_lossy(&result.stdout)
+    );
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["status"], "failed");
+    assert!(
+        report["candidates"][0]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|metric| metric["metric"] == "total_mass_kg" && metric["status"] == "failed")
+    );
+}
+
+#[test]
+fn aggregates_candidates_once_and_marks_missing_without_extra_sections() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let config = examples.join("config.toml");
+    let directory = tempdir().unwrap();
+    let baseline = directory.path().join("baseline.json");
+    let candidate_a = directory.path().join("candidate-a.json");
+    let candidate_b = directory.path().join("candidate-b.json");
+    write_simulation_json(&baseline, 4000.0);
+    write_simulation_json(&candidate_a, 4100.0);
+    write_simulation_json(&candidate_b, 4200.0);
+    let output = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            baseline.to_str().unwrap(),
+            candidate_a.to_str().unwrap(),
+            candidate_b.to_str().unwrap(),
+            "--tolerances",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.matches("SVC\n").count(), 1);
+    assert!(stdout.contains("candidate_1:"));
+    assert!(stdout.contains("candidate_2:"));
+    assert!(stdout.contains("candidate_1 "));
+    assert!(stdout.contains("diff_1 "));
+    assert!(stdout.contains("candidate_2 "));
+    assert!(stdout.contains("diff_2 "));
+    assert!(stdout.contains("FAILED FAILED"));
+    assert!(stdout.starts_with('\n'));
+}
+
+#[test]
+fn compares_svc_simulation_and_measurement_references() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let config = examples.join("config.toml");
+    let measurement = examples.join("input/example-measurement-svc.json");
+    let directory = tempdir().unwrap();
+    let simulation = directory.path().join("simulation.json");
+    write_simulation_json(&simulation, 4000.0);
+    let output = directory.path().join("comparison");
+    let result = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            measurement.to_str().unwrap(),
+            simulation.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_ne!(
+        result.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    let metrics = report["candidates"][0]["metrics"].as_array().unwrap();
+    assert_eq!(metrics.len(), 29);
+    assert_eq!(metrics[0]["metric"], "front_left_mass_kg");
+    assert_eq!(metrics[28]["metric"], "camber_rear_right_deg");
+    assert!(metrics.iter().any(|metric| {
+        metric["metric"] == "total_mass_kg"
+            && metric["baseline_value"].is_number()
+            && metric["candidate_value"].is_number()
+            && metric["status"] != "missing"
+    }));
+    assert!(metrics.iter().any(|metric| {
+        metric["metric"] == "camber_rear_right_deg"
+            && metric["baseline_value"].is_null()
+            && metric["candidate_value"].is_number()
+            && metric["difference"].is_null()
+            && metric["status"] == "missing"
+    }));
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(stdout.contains("svc::camber_rear_right_deg ... missing (baseline missing; candidate_1 0.00000000; diff_1 missing)"));
+    assert!(!stdout.contains("reference 0.00000000; diff 0.00000000)"));
+}
