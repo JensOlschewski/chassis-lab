@@ -22,7 +22,7 @@ struct Cli {
 enum Command {
     /// Analyze normalized input or run manifest.
     Analyze(analyze::AnalyzeArgs),
-    /// Compare SVC baseline against one or more candidates.
+    /// Compare compatible SVC or KnC vertical inputs.
     Compare(compare::CompareArgs),
     /// Inspect normalized input or canonical mapping requirements.
     Inspect(inspect::InspectArgs),

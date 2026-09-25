@@ -66,22 +66,22 @@ measurement HDF5 file; it is a small synthetic vertical measurement fixture.
 Vertical validation consumes normalized inputs only:
 
 ```text
-clab analyze config.toml simulation-vertical.h5 -o reports/vertical
+clab analyze config.toml simulation-vertical.h5 -r reports/vertical
 ```
 
 SVC analysis consumes JSON or HDF5. Run manifests assign input by domain:
 
 ```text
-clab analyze examples/config.toml examples/run.toml -o reports/run
+clab analyze examples/config.toml examples/run.toml -r reports/run
 ```
 
-SVC comparison evaluates baseline first, then one or more candidates. Optional
-TOML tolerances make configured signals pass or fail; all other signals remain
-informational:
+SVC comparison evaluates baseline first, then one or more candidates. Use
+`--tolerances` to activate validation tolerances already supplied by config;
+without it every complete metric is informational:
 
 ```text
 clab compare examples/config.toml baseline.json candidate-a.json candidate-b.json \
-  --tolerances examples/example-validation-tolerances.toml -o reports/compare
+  --tolerances -r reports/compare
 ```
 
 SVC evaluation, optional tolerance comparison, reporting, provenance, and output

@@ -1,16 +1,30 @@
 import json
-import re
+import subprocess
+import sys
+from pathlib import Path
 
-from chassis_lab.vertical_kernel import evaluate, plot
+from chassis_lab.knc_vertical_kernel import evaluate, plot, plot_compare
+
+
+def test_numeric_kernel_import_does_not_require_matplotlib() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import chassis_lab.knc_vertical_kernel; "
+            "assert 'matplotlib' not in sys.modules",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_kernel_evaluates_normalized_curves() -> None:
     curve = {
-        "measurement_travel": [-1.0, 0.0, 1.0, 1.0, 0.0, -1.0],
-        "measurement_cycle": [2.0, 2.0, 2.0, 3.0, 3.0, 3.0],
-        "measurement": [-2.0, 0.0, 2.0, 2.0, 0.0, -2.0],
-        "simulation_travel": [0.0, -1.0, 0.0, 1.0, 0.0, -1.0],
-        "simulation": [0.5, -1.5, 0.5, 2.5, 0.5, -1.5],
+        "baseline": {"travel": [-1.0, 0.0, 1.0], "values": [-2.0, 0.0, 2.0]},
+        "candidate": {"travel": [-1.0, 0.0, 1.0], "values": [-1.5, 0.5, 2.5]},
     }
     response = json.loads(
         evaluate(
@@ -33,16 +47,19 @@ def test_kernel_evaluates_normalized_curves() -> None:
     )
     assert len(response["comparisons"]) == 12
     assert response["comparisons"][0]["baseline_error_mm"] == 0.5
-    assert response["svg"].startswith("<svg")
+    assert response["comparisons"][0]["maximum_error_mm"] == 0.0
 
 
-def test_kernel_svg_is_deterministic_and_scales_large_curves() -> None:
+def test_kernel_comparison_is_deterministic() -> None:
     curve = {
-        "measurement_travel": [-1000.0, 0.0, 1000.0, 1000.0, 0.0, -1000.0],
-        "measurement_cycle": [2.0, 2.0, 2.0, 3.0, 3.0, 3.0],
-        "measurement": [-1e6, 0.0, 1e6, 1e6, 0.0, -1e6],
-        "simulation_travel": [-1000.0, 0.0, 1000.0],
-        "simulation": [-1e6, 0.0, 1e6],
+        "baseline": {
+            "travel": [-1000.0, 0.0, 1000.0],
+            "values": [-1e6, 0.0, 1e6],
+        },
+        "candidate": {
+            "travel": [-1000.0, 0.0, 1000.0],
+            "values": [-1e6, 0.0, 1e6],
+        },
     }
     request = {
         "grid": [-1000.0, 0.0, 1000.0],
@@ -59,14 +76,7 @@ def test_kernel_svg_is_deterministic_and_scales_large_curves() -> None:
             }
         ),
     }
-    first = json.loads(evaluate(request))["svg"]
-    assert first == json.loads(evaluate(request))["svg"]
-    points = re.findall(r'points="([^"]+)"', first)
-    for point_list in points:
-        for point in point_list.split():
-            x, y = map(float, point.split(","))
-            assert 0.0 <= x <= 900.0
-            assert 0.0 <= y <= 650.0
+    assert evaluate(request) == evaluate(request)
 
 
 def test_plot_groups_direct_vertical_corner_panels() -> None:
@@ -127,3 +137,38 @@ def test_plot_adds_optional_direct_vertical_curves_and_wheel_rate() -> None:
         "[newton/mm]"
         in reports["plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg"]
     )
+
+
+def test_comparison_plot_uses_ordered_curve_colors_and_footer() -> None:
+    curves = [
+        {
+            "corner": corner,
+            "signal": signal,
+            "values": [-1.0, 0.0, 1.0],
+            "unit": "mm",
+        }
+        for corner in ("front_left", "front_right", "rear_left", "rear_right")
+        for signal in ("wheel_center_x", "wheel_center_y", "wheel_center_z")
+    ]
+    reports = json.loads(
+        plot_compare(
+            json.dumps(curves),
+            json.dumps(
+                [
+                    {"label": f"Curve {index}", "curves": curves}
+                    for index in range(1, 5)
+                ]
+            ),
+            "Baseline",
+            "Baseline: fixture | loadcase | input.h5",
+            (
+                Path(__file__).resolve().parents[2]
+                / "crates/clab-cli/assets/flb-logo.png"
+            ).read_bytes(),
+        )
+    )
+    svg = reports["wheel-center-z-vs-wheel-center-y.svg"]
+    for color in ("#000000", "#e41a1c", "#377eb8", "#e7298a", "#00a6a6"):
+        assert color in svg
+    assert "Baseline: fixture | loadcase | input.h5" in svg
+    assert "Generated:" in svg

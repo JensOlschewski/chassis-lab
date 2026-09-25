@@ -50,6 +50,24 @@ pub(crate) struct Reports {
     pub warnings: Vec<String>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct CanonicalMetric {
+    pub name: &'static str,
+    pub unit: &'static str,
+    pub value: Option<f64>,
+}
+
+pub(crate) fn canonical_metrics(values: &BTreeMap<String, f64>) -> Vec<CanonicalMetric> {
+    SVC_METRICS
+        .iter()
+        .map(|&(name, unit)| CanonicalMetric {
+            name,
+            unit,
+            value: values.get(name).copied(),
+        })
+        .collect()
+}
+
 pub(crate) fn analyze(config: &CaseConfig) -> Result<Reports> {
     reports(config, evaluate_case(config)?, Vec::new())
 }
@@ -107,6 +125,10 @@ fn evaluate_hdf5(config: &CaseConfig) -> Result<(BTreeMap<String, f64>, Vec<Stri
     warnings.sort();
     warnings.dedup();
     Ok((values, warnings))
+}
+
+pub(crate) fn evaluate_hdf5_case(config: &CaseConfig) -> Result<BTreeMap<String, f64>> {
+    Ok(evaluate_hdf5(config)?.0)
 }
 
 fn evaluate(
@@ -209,15 +231,15 @@ fn reports(
     values: BTreeMap<String, f64>,
     warnings: Vec<String>,
 ) -> Result<Reports> {
-    let metrics = SVC_METRICS
-        .iter()
-        .map(|(name, unit)| {
+    let metrics = canonical_metrics(&values)
+        .into_iter()
+        .map(|metric| {
             serde_json::json!({
                 "domain": "svc",
                 "test": null,
-                "metric": name,
-                "unit": unit,
-                "value": values[*name],
+                "metric": metric.name,
+                "unit": metric.unit,
+                "value": metric.value,
             })
         })
         .collect::<Vec<_>>();
