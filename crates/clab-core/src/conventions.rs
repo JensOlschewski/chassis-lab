@@ -209,6 +209,10 @@ pub fn convert_values(
     Ok(values.iter().map(|value| value * factor).collect())
 }
 
+/// Convert finite source values, then apply configured sign and scale.
+///
+/// Conversion and gravity validation happen before sign/scale transformation;
+/// returned metadata records both source and canonical units.
 pub fn apply_convention(
     values: &[f64],
     name: impl Into<String>,

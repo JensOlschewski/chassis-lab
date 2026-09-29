@@ -50,6 +50,10 @@ pub struct SvcSimulationFile {
 }
 
 impl SvcSimulationFile {
+    /// Open legacy SVC simulation JSON and validate its complete signal schema.
+    ///
+    /// This accepts only simulation source kind, expected schema version, finite
+    /// values, and component arrays matching declared sample count.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SvcJsonError> {
         let path = path.as_ref().to_path_buf();
         let text = fs::read_to_string(&path).map_err(|source| SvcJsonError::Read {
@@ -181,6 +185,10 @@ impl SvcSimulationFile {
             .collect()
     }
 
+    /// Read exactly one entity/component signal with optional unit validation.
+    ///
+    /// Entity names and source paths are both valid selectors. Missing or
+    /// ambiguous selectors fail rather than selecting an arbitrary signal.
     pub fn read_signal(
         &self,
         entity: &str,

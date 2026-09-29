@@ -13,7 +13,15 @@ class VerticalKernelError(ValueError):
 
 
 def evaluate(request: dict[str, object]) -> str:
-    """Return deterministic comparison metrics for canonical vertical curves."""
+    """Compare canonical KnC vertical curves on requested travel grid.
+
+    ``request["grid"]`` is travel in millimetres. ``request["curves"]`` is a
+    JSON object keyed by ``<corner>:<axis>`` for all four corners and ``x``,
+    ``y``, and ``z`` axes. Each value contains baseline and candidate travel/
+    value arrays in millimetres. Return JSON with normalized curves and scalar
+    comparison metrics. Raise ``VerticalKernelError`` when a curve cannot cover
+    requested grid through a finite monotonic branch.
+    """
     grid = np.asarray(request["grid"], dtype=np.float64)
     curves = json.loads(str(request["curves"]))
     comparisons = []
@@ -59,34 +67,10 @@ def _curve(
     )
 
 
-def _measurement(
-    curve: dict[str, list[float]], grid: np.ndarray, source: str
-) -> np.ndarray:
-    travel = np.asarray(curve["measurement_travel"], dtype=np.float64)
-    cycles = np.asarray(curve["measurement_cycle"], dtype=np.float64)
-    values = np.asarray(curve["measurement"], dtype=np.float64)
-    return np.mean(
-        [
-            _interpolate(
-                travel[cycles == cycle], values[cycles == cycle], grid, source
-            )
-            for cycle in (2.0, 3.0)
-        ],
-        axis=0,
-    )
-
-
-def _simulation(
-    curve: dict[str, list[float]], grid: np.ndarray, source: str
-) -> np.ndarray:
-    travel = np.asarray(curve["simulation_travel"], dtype=np.float64)
-    values = np.asarray(curve["simulation"], dtype=np.float64)
-    return _mean_monotonic(travel, values, grid, source)
-
-
 def _mean_monotonic(
     x: np.ndarray, y: np.ndarray, grid: np.ndarray, source: str
 ) -> np.ndarray:
+    """Interpolate every complete monotonic branch, then average branches."""
     finite = np.isfinite(x) & np.isfinite(y)
     x, y = x[finite], y[finite]
     direction = np.sign(np.diff(x))
@@ -116,6 +100,11 @@ def _mean_monotonic(
 def _interpolate(
     x: np.ndarray, y: np.ndarray, grid: np.ndarray, source: str
 ) -> np.ndarray:
+    """Interpolate finite samples after stable sorting and duplicate averaging.
+
+    Reject curves with fewer than two finite samples or incomplete grid
+    coverage.
+    """
     finite = np.isfinite(x) & np.isfinite(y)
     x, y = x[finite], y[finite]
     if len(x) < 2:
@@ -134,7 +123,14 @@ def _at_zero(grid: np.ndarray, values: np.ndarray) -> float:
 
 
 def plot(curves_json: str, source_label: str = "Simulation") -> str:
-    """Return English direct vertical SVG reports grouped by corner."""
+    """Render direct vertical curves as deterministic four-corner SVG reports.
+
+    ``curves_json`` is a JSON array of canonical curve records with ``corner``,
+    ``signal``, ``unit``, and signal-unit ``values`` fields. Wheel-center values
+    are millimetres; optional load, toe, and camber values use their declared
+    units. ``source_label`` identifies each line in SVG legends. Return JSON
+    mapping report-relative paths to SVG document strings.
+    """
     plt = _pyplot()
     curves = json.loads(curves_json)
     reports = {}
@@ -208,7 +204,13 @@ def plot_compare(
     footer: str,
     logo: bytes,
 ) -> str:
-    """Overlay canonical baseline and candidate vertical curves."""
+    """Render baseline/candidate vertical SVG overlays.
+
+    Baseline JSON is canonical curve array. Candidate JSON is an array of
+    ``{"label": str, "curves": [...]}`` records with same curve coverage.
+    Footer and PNG logo are rendered in every SVG. Return JSON mapping
+    report-relative filenames to SVG document strings.
+    """
     plt = _pyplot()
     baseline = json.loads(baseline_json)
     candidates = json.loads(candidates_json)
@@ -378,6 +380,7 @@ def _pyplot() -> object:
 
 
 def _wheel_rate(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return load gradient on original finite travel samples."""
     finite = np.isfinite(x) & np.isfinite(y)
     if not np.any(finite):
         return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
@@ -406,62 +409,3 @@ def _label(signal: str) -> str:
         "camber": "Camber",
     }
     return labels[signal]
-
-
-def _svg(comparisons: list[dict[str, object]]) -> str:
-    lines = [
-        '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="650">'
-        "<title>Vertical trajectories</title>"
-    ]
-    for index, item in enumerate(comparisons):
-        x0, y0 = (index % 3) * 300, (index // 3) * 160
-        lines.append(
-            f'<text x="{x0 + 8}" y="{y0 + 16}">'
-            f"{item['corner']} {item['axis']}</text>"
-        )
-        x_values = np.asarray(item["travel_mm"], dtype=np.float64)
-        y_values = np.concatenate(
-            [
-                np.asarray(item["measurement_mm"], dtype=np.float64),
-                np.asarray(item["simulation_mm"], dtype=np.float64),
-            ]
-        )
-        x_min, x_max = _bounds(x_values)
-        y_min, y_max = _bounds(y_values)
-        for name, color in (
-            ("measurement_mm", "#167d91"),
-            ("simulation_mm", "#d2603a"),
-        ):
-            values = item[name]
-            points = " ".join(
-                _point(x0, y0, x, value, x_min, x_max, y_min, y_max)
-                for x, value in zip(x_values, values, strict=True)
-            )
-            lines.append(
-                f'<polyline fill="none" stroke="{color}" points="{points}"/>'
-            )
-    return "".join(lines) + "</svg>"
-
-
-def _bounds(values: np.ndarray) -> tuple[float, float]:
-    minimum = float(np.min(values))
-    maximum = float(np.max(values))
-    if minimum == maximum:
-        return minimum - 1.0, maximum + 1.0
-    margin = (maximum - minimum) * 0.05
-    return minimum - margin, maximum + margin
-
-
-def _point(
-    x0: int,
-    y0: int,
-    x: float,
-    y: float,
-    x_min: float,
-    x_max: float,
-    y_min: float,
-    y_max: float,
-) -> str:
-    scaled_x = x0 + 20 + (float(x) - x_min) / (x_max - x_min) * 260
-    scaled_y = y0 + 140 - (float(y) - y_min) / (y_max - y_min) * 110
-    return f"{scaled_x:.3f},{scaled_y:.3f}"

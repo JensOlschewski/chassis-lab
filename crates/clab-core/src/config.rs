@@ -92,6 +92,12 @@ impl CaseConfig {
 }
 type SignalSource = (Option<PathBuf>, BTreeMap<String, SignalRef>);
 
+/// Load and validate one case configuration.
+///
+/// The root schema selects parsing mode: function-first configurations have an
+/// `[input]` table, unified configurations have `[svc]` or `[vertical]`, and
+/// older flat configurations use the legacy schema. All referenced paths are
+/// resolved relative to the configuration file.
 pub fn load_config(path: impl AsRef<Path>) -> Result<CaseConfig, Box<dyn std::error::Error>> {
     let (path, raw) = load_toml(path.as_ref())?;
     parse_root(&raw, &path)
