@@ -108,11 +108,64 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     assert!(stdout.contains("  front_left_mass_kg = 420.0 kg"));
     assert!(stdout.contains("  cg_height_mm = missing mm"));
     assert!(stderr.contains("16 analysis warnings; details in"));
+    let expected = [
+        "front_left_mass_kg",
+        "front_right_mass_kg",
+        "rear_left_mass_kg",
+        "rear_right_mass_kg",
+        "front_mass_kg",
+        "rear_mass_kg",
+        "total_mass_kg",
+        "front_distribution_percent",
+        "rear_distribution_percent",
+        "wheelbase_mm",
+        "cg_x_from_front_axle_mm",
+        "cg_height_mm",
+        "ride_height_front_left_mm",
+        "ride_height_front_right_mm",
+        "ride_height_rear_left_mm",
+        "ride_height_rear_right_mm",
+        "front_track_mm",
+        "rear_track_mm",
+        "toe_front_left_deg",
+        "toe_front_right_deg",
+        "toe_rear_left_deg",
+        "toe_rear_right_deg",
+        "camber_front_left_deg",
+        "camber_front_right_deg",
+        "camber_rear_left_deg",
+        "camber_rear_right_deg",
+        "inertia_xx_kg_mm2",
+        "inertia_yy_kg_mm2",
+        "inertia_zz_kg_mm2",
+    ];
+    let positions = expected
+        .iter()
+        .map(|metric| stdout.find(&format!("  {metric} =")).unwrap())
+        .collect::<Vec<_>>();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     let metrics = report["metrics"].as_array().unwrap();
     assert_eq!(metrics.len(), 29);
-    assert_eq!(metrics[0]["metric"], "front_left_mass_kg");
+    assert_eq!(
+        metrics
+            .iter()
+            .map(|metric| metric["metric"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected.as_slice()
+    );
+    let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
+    assert_eq!(csv.headers().unwrap().get(3), Some("metric"));
+    assert_eq!(
+        csv.records()
+            .map(|record| record.unwrap().get(3).unwrap().to_owned())
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|metric| (*metric).to_owned())
+            .collect::<Vec<_>>()
+    );
     assert!(
         metrics
             .iter()

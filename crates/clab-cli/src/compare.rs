@@ -77,7 +77,7 @@ struct ComparisonTolerances {
     vertical: clab_core::config::ValidationTolerances,
 }
 
-type GroupedMetrics<'a> = BTreeMap<(Option<&'a str>, &'a str), Vec<(usize, &'a Metric)>>;
+type GroupedMetrics<'a> = Vec<(Option<&'a str>, &'a str, Vec<(usize, &'a Metric)>)>;
 
 pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     let baseline = load_input(&args.config, &args.baseline)?;
@@ -258,6 +258,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
 }
 
 fn load_input(config: &Path, path: &Path) -> Result<Input> {
+    validate_comparison_input(path)?;
     let extension = path
         .extension()
         .and_then(|v| v.to_str())
@@ -287,6 +288,21 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
     .map_err(|error| {
         anyhow::anyhow!("failed to load compare input '{}': {error}", path.display())
     })?;
+    if include_svc && case.svc_source_kind.is_some() {
+        validate_comparison_input(&case.simulation_json)?;
+    }
+    if include_vertical && let Some(vertical_config) = &case.vertical {
+        let source = match vertical_config.source_kind {
+            clab_core::config::SourceKind::Simulation => &vertical_config.simulation_hdf5,
+            clab_core::config::SourceKind::Measurement => &vertical_config.measurement_hdf5,
+        };
+        validate_comparison_input(source)?;
+        if vertical_config.source_kind == clab_core::config::SourceKind::Simulation
+            && let Some(static_input) = &vertical_config.static_simulation_hdf5
+        {
+            validate_comparison_input(static_input)?;
+        }
+    }
     let mut domains = BTreeMap::new();
     let mut sources = Vec::new();
     if include_svc && case.svc_source_kind.is_some() {
@@ -323,6 +339,13 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         domains,
         sources,
     })
+}
+
+fn validate_comparison_input(path: &Path) -> Result<()> {
+    if !path.is_file() {
+        bail!("comparison input does not exist: {}", path.display());
+    }
+    Ok(())
 }
 
 fn is_hdf5(path: &Path) -> bool {
@@ -473,23 +496,26 @@ fn print_metrics(
             continue;
         }
         println!();
-        let mut grouped: GroupedMetrics<'_> = BTreeMap::new();
+        let mut grouped: GroupedMetrics<'_> = Vec::new();
         for (candidate, metric) in rows.iter().filter(|(_, metric)| metric.domain == domain) {
             let index = candidates
                 .iter()
                 .position(|path| path == candidate)
                 .expect("candidate row must have an input");
-            grouped
-                .entry((metric.test, &metric.metric))
-                .or_default()
-                .push((index, metric));
+            if let Some((_, _, values)) = grouped.iter_mut().find(|(test, name, _)| {
+                *test == metric.test && *name == metric.metric.as_str()
+            }) {
+                values.push((index, metric));
+            } else {
+                grouped.push((metric.test, &metric.metric, vec![(index, metric)]));
+            }
         }
         println!("{title}\nbaseline: {}", baseline.display());
         for (index, candidate) in candidates.iter().enumerate() {
             println!("candidate_{}: {}", index + 1, candidate.display());
         }
         println!("running {} metrics", grouped.len());
-        for ((test, metric_name), values) in grouped {
+        for (test, metric_name, values) in grouped {
             let name = match test {
                 Some(test) => format!("{domain}::{test}::{metric_name}"),
                 None => format!("{domain}::{metric_name}"),

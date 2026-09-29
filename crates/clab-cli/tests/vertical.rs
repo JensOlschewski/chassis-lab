@@ -421,6 +421,29 @@ fn compares_direct_vertical_inputs_across_source_kinds_with_overlays() {
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["candidates"][0]["domains"][0]["domain"], "knc");
     assert_eq!(report["candidates"][0]["domains"][0]["status"], "compared");
+    let expected = [
+        "front_left_wheel_center_x_mm",
+        "front_left_wheel_center_y_mm",
+        "front_left_wheel_center_z_mm",
+        "front_right_wheel_center_x_mm",
+        "front_right_wheel_center_y_mm",
+        "front_right_wheel_center_z_mm",
+        "rear_left_wheel_center_x_mm",
+        "rear_left_wheel_center_y_mm",
+        "rear_left_wheel_center_z_mm",
+        "rear_right_wheel_center_x_mm",
+        "rear_right_wheel_center_y_mm",
+        "rear_right_wheel_center_z_mm",
+    ];
+    assert_eq!(
+        report["candidates"][0]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|metric| metric["metric"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected.as_slice()
+    );
     assert!(
         report["candidates"][0]["metrics"]
             .as_array()
@@ -441,6 +464,11 @@ fn compares_direct_vertical_inputs_across_source_kinds_with_overlays() {
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(stdout.contains("KnC Vertical\nbaseline:"));
     assert!(stdout.contains("knc::vertical::front_left_wheel_center_x_mm ... (baseline"));
+    let positions = expected
+        .iter()
+        .map(|metric| stdout.find(&format!("knc::vertical::{metric}")).unwrap())
+        .collect::<Vec<_>>();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     let svg = output.join("plots/knc/vertical/comparison/wheel-center-z-vs-wheel-center-y.svg");
     let text = fs::read_to_string(svg).unwrap();
     assert!(text.contains("fixture"));
