@@ -81,7 +81,7 @@ Convert a file next to the source file:
 target/release/clab convert BeFlex2upLoa_svc.res
 ```
 
-This creates `BeFlex2upLoa_svc.simulation.h5`.
+This creates `BeFlex2upLoa_svc.h5`.
 
 Choose another output path:
 

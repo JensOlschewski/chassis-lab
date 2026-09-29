@@ -45,10 +45,7 @@ impl InputKind {
     }
 
     fn default_output(self, input: &Path) -> PathBuf {
-        match self {
-            Self::Res => input.with_extension("simulation.h5"),
-            Self::Acd => input.with_extension("measurement.h5"),
-        }
+        input.with_extension("h5")
     }
 
     fn output_type(self) -> &'static str {

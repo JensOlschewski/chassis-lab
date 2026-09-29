@@ -31,7 +31,7 @@ fn convert(input: &Path) -> Command {
 }
 
 #[test]
-fn converts_res_to_default_simulation_hdf5() {
+fn converts_res_to_neutral_default_hdf5() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("shared.res");
     fs::write(&input, MINIMAL_RES).unwrap();
@@ -39,7 +39,7 @@ fn converts_res_to_default_simulation_hdf5() {
     let result = convert(&input).output().unwrap();
 
     assert!(result.status.success());
-    let output = directory.path().join("shared.simulation.h5");
+    let output = directory.path().join("shared.h5");
     assert!(output.is_file());
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
@@ -51,7 +51,7 @@ fn converts_res_to_default_simulation_hdf5() {
 }
 
 #[test]
-fn converts_svc_res_to_default_simulation_hdf5() {
+fn converts_svc_res_to_neutral_default_hdf5() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("shared_svc.res");
     fs::write(&input, MINIMAL_RES).unwrap();
@@ -59,7 +59,7 @@ fn converts_svc_res_to_default_simulation_hdf5() {
     let result = convert(&input).output().unwrap();
 
     assert!(result.status.success());
-    let output = directory.path().join("shared_svc.simulation.h5");
+    let output = directory.path().join("shared_svc.h5");
     assert!(output.is_file());
     assert_eq!(
         File::open(&output)
@@ -80,7 +80,7 @@ fn converts_svc_res_to_default_simulation_hdf5() {
 }
 
 #[test]
-fn converts_acd_to_default_measurement_hdf5() {
+fn converts_acd_to_neutral_default_hdf5() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("shared.acd");
     fs::write(&input, MINIMAL_ACD).unwrap();
@@ -88,7 +88,7 @@ fn converts_acd_to_default_measurement_hdf5() {
     let result = convert(&input).output().unwrap();
 
     assert!(result.status.success());
-    let output = directory.path().join("shared.measurement.h5");
+    let output = directory.path().join("shared.h5");
     assert!(output.is_file());
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
@@ -110,7 +110,7 @@ fn existing_output_directory_uses_derived_filename() {
     let result = convert(&input).arg("-o").arg(&output_dir).output().unwrap();
 
     assert!(result.status.success());
-    assert!(output_dir.join("shared.simulation.h5").is_file());
+    assert!(output_dir.join("shared.h5").is_file());
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn uses_explicit_output() {
 
     assert!(result.status.success());
     assert!(output.is_file());
-    assert!(!directory.path().join("input.simulation.h5").exists());
+    assert!(!directory.path().join("input.h5").exists());
 }
 
 #[test]

@@ -14,12 +14,12 @@ Convert an Adams result or Lommel measurement and validate it:
 
 ```bash
 target/release/clab convert input.res
-target/release/clab convert measurement.acd -o measurement.h5
+target/release/clab convert measurement.acd
 target/release/clab analyze examples/config.toml examples/run.toml
 ```
 
-Default conversion output is `INPUT.simulation.h5` for every `.res` and
-`INPUT.measurement.h5` for `.acd`. Explicit output files must use `.h5` or
+Default conversion output is `INPUT.h5` for `.res` and `.acd`. Explicit output
+files must use `.h5` or
 `.hdf5`; an existing output directory receives derived filename. Use `--force`
 to replace an existing output.
 

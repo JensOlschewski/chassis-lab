@@ -83,6 +83,42 @@ fn compares_svc_inputs_and_protects_reports_and_inputs() {
         !stdout.contains("\x1b["),
         "piped output must not contain ANSI"
     );
+    let expected = [
+        "front_left_mass_kg",
+        "front_right_mass_kg",
+        "rear_left_mass_kg",
+        "rear_right_mass_kg",
+        "front_mass_kg",
+        "rear_mass_kg",
+        "total_mass_kg",
+        "front_distribution_percent",
+        "rear_distribution_percent",
+        "wheelbase_mm",
+        "cg_x_from_front_axle_mm",
+        "cg_height_mm",
+        "ride_height_front_left_mm",
+        "ride_height_front_right_mm",
+        "ride_height_rear_left_mm",
+        "ride_height_rear_right_mm",
+        "front_track_mm",
+        "rear_track_mm",
+        "toe_front_left_deg",
+        "toe_front_right_deg",
+        "toe_rear_left_deg",
+        "toe_rear_right_deg",
+        "camber_front_left_deg",
+        "camber_front_right_deg",
+        "camber_rear_left_deg",
+        "camber_rear_right_deg",
+        "inertia_xx_kg_mm2",
+        "inertia_yy_kg_mm2",
+        "inertia_zz_kg_mm2",
+    ];
+    let positions = expected
+        .iter()
+        .map(|metric| stdout.find(&format!("svc::{metric}")).unwrap())
+        .collect::<Vec<_>>();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     for name in ["report.json", "metrics.csv", "svc.json"] {
         assert!(output.join(name).is_file(), "missing {name}");
     }
@@ -90,11 +126,32 @@ fn compares_svc_inputs_and_protects_reports_and_inputs() {
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["command"], "compare");
     assert_eq!(report["status"], "informational");
+    assert_eq!(
+        report["candidates"][0]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|metric| metric["metric"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected.as_slice()
+    );
     let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
     assert_eq!(csv.headers().unwrap().get(0), Some("baseline"));
+    let records = csv
+        .records()
+        .map(|record| record.unwrap())
+        .collect::<Vec<_>>();
     assert!(
-        csv.records()
-            .all(|record| record.unwrap().get(12) == Some("informational"))
+        records
+            .iter()
+            .all(|record| record.get(12) == Some("informational"))
+    );
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.get(4).unwrap())
+            .collect::<Vec<_>>(),
+        expected.as_slice()
     );
     let rejected = clab()
         .args([
@@ -232,7 +289,7 @@ fn compares_svc_simulation_and_measurement_references() {
     let metrics = report["candidates"][0]["metrics"].as_array().unwrap();
     assert_eq!(metrics.len(), 29);
     assert_eq!(metrics[0]["metric"], "front_left_mass_kg");
-    assert_eq!(metrics[28]["metric"], "camber_rear_right_deg");
+    assert_eq!(metrics[28]["metric"], "inertia_zz_kg_mm2");
     assert!(metrics.iter().any(|metric| {
         metric["metric"] == "total_mass_kg"
             && metric["baseline_value"].is_number()
@@ -249,4 +306,46 @@ fn compares_svc_simulation_and_measurement_references() {
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(stdout.contains("svc::camber_rear_right_deg ... missing (baseline missing; candidate_1 0.00000000; diff_1 missing)"));
     assert!(!stdout.contains("reference 0.00000000; diff 0.00000000)"));
+}
+
+#[test]
+fn rejects_missing_compare_inputs_before_hdf5_dispatch() {
+    let directory = tempdir().unwrap();
+    let config = config_with_tolerance(directory.path(), 0.0001);
+    let missing_hdf5 = directory.path().join("missing.h5");
+    let direct = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            missing_hdf5.to_str().unwrap(),
+            missing_hdf5.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(direct.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&direct.stderr);
+    assert!(stderr.contains(&format!(
+        "comparison input does not exist: {}",
+        missing_hdf5.display()
+    )));
+    assert!(!stderr.contains("H5Fopen"));
+
+    let run = directory.path().join("missing-input-run.toml");
+    fs::write(&run, "[input.svc]\nfile = 'missing.h5'\n").unwrap();
+    let manifest = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            run.to_str().unwrap(),
+            run.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(manifest.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&manifest.stderr);
+    assert!(stderr.contains(&format!(
+        "comparison input does not exist: {}",
+        directory.path().join("missing.h5").display()
+    )));
+    assert!(!stderr.contains("H5Fopen"));
 }
