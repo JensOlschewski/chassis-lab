@@ -1,12 +1,17 @@
 //! Version 1 canonical HDF5 input schema.
 //!
-//! Root attributes: `schema_version` (uint32), `source_kind` (`simulation` or
-//! `measurement`), `source_file`, `sample_count` (uint64), and `signal_count`
-//! (uint64). `/axis/values` is uint64 sample indices for simulations and float64
-//! physical time for measurements; its `kind` and `unit` attributes describe
-//! which. Every signal lives at `/signals/<safe-name>` with
-//! a one-dimensional float64 `values` dataset and `original_name` and `unit`
-//! attributes. `/simulation` and `/measurement` retain source-specific data.
+//! Root attributes:
+//! `schema_version` (uint32),
+//! `source_kind` (`simulation` or `measurement`),
+//! `source_file` (UTF-8 string),
+//! `sample_count` (uint64),
+//! `signal_count` (uint64)
+//! `/axis/values` (uint64) sample indices for simulation and physical time (f64) for measurements
+//!
+//! Every signal lives at `/signals/<safe-name>` with a one-dimensional f64
+//! `values` dataset and `original_name` and `unit` attributes
+//!
+//! `/simulation` and `/measurement` retain source-specific data.
 
 use std::path::{Path, PathBuf};
 
@@ -95,6 +100,10 @@ pub struct CanonicalFile {
 }
 
 impl CanonicalFile {
+    /// Open and fully validate a canonical HDF5 v1 file.
+    ///
+    /// Validation reads required metadata and signal records before returning,
+    /// so callers can rely on `summary`, `signals`, and `test_info` afterwards.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CanonicalHdf5Error> {
         let path = path.as_ref().to_path_buf();
         let file = File::open(&path)?;
@@ -146,6 +155,10 @@ impl CanonicalFile {
             })
             .collect()
     }
+    /// Resolve one signal by safe name, original name, source path, or entity.
+    ///
+    /// An optional component narrows source/entity matches. Ambiguous matches
+    /// are errors; callers must never receive an arbitrary matching signal.
     pub fn resolve_signal(
         &self,
         name: &str,
@@ -179,6 +192,10 @@ impl CanonicalFile {
             )),
         }
     }
+    /// Read one resolved signal and optionally verify its declared unit.
+    ///
+    /// Empty source units remain usable for migration compatibility. A non-empty
+    /// unit must equal `expected_unit` when one is supplied.
     pub fn read_signal(
         &self,
         name: &str,

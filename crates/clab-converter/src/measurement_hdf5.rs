@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
-use hdf5::types::VarLenUnicode;
 use hdf5::{File, Location};
 
 use crate::acd::{self, AcdMeasurement};
+use crate::hdf5_writer::{safe_name, unique_name, write_string_attribute};
 
 /// Imports an ACD measurement into canonical HDF5. The exact `time` channel is sample axis.
 pub fn import_acd(
@@ -46,29 +45,31 @@ pub fn write_file(path: &Path, source: &Path, measurement: &AcdMeasurement) -> R
     scalar(&file, "schema_version", 1_u32)?;
     scalar(&file, "sample_count", sample_count as u64)?;
     scalar(&file, "signal_count", measurement.channels.len() as u64)?;
-    string(&file, "source_kind", "measurement")?;
-    string(&file, "source_file", &source.display().to_string())?;
-    string(&file, "encoding", &measurement.encoding)?;
-    string(&file, "dialect", &measurement.dialect)?;
+    write_string_attribute(&file, "source_kind", "measurement")?;
+    write_string_attribute(&file, "source_file", &source.display().to_string())?;
+    write_string_attribute(&file, "encoding", &measurement.encoding)?;
+    write_string_attribute(&file, "dialect", &measurement.dialect)?;
 
     let axis = file.create_group("axis")?;
-    string(&axis, "kind", "time")?;
-    string(&axis, "unit", &time.unit)?;
+    write_string_attribute(&axis, "kind", "time")?;
+    write_string_attribute(&axis, "unit", &time.unit)?;
     axis.new_dataset_builder()
         .with_data(&time.values)
         .create("values")?;
     let signals = file.create_group("signals")?;
     let mut used_names = HashMap::new();
     for channel in &measurement.channels {
-        let group =
-            signals.create_group(&unique_name(safe_name(&channel.name), &mut used_names))?;
+        let group = signals.create_group(&unique_name(
+            safe_name(&channel.name, false),
+            &mut used_names,
+        ))?;
         group
             .new_dataset_builder()
             .with_data(&channel.values)
             .create("values")?;
-        string(&group, "original_name", &channel.name)?;
-        string(&group, "description", &channel.description)?;
-        string(&group, "unit", &channel.unit)?;
+        write_string_attribute(&group, "original_name", &channel.name)?;
+        write_string_attribute(&group, "description", &channel.description)?;
+        write_string_attribute(&group, "unit", &channel.unit)?;
         scalar(&group, "offset", channel.offset)?;
         scalar(&group, "column", channel.column)?;
     }
@@ -77,13 +78,13 @@ pub fn write_file(path: &Path, source: &Path, measurement: &AcdMeasurement) -> R
         let test_info = metadata.create_group("test_info")?;
         let mut used_names = HashMap::new();
         for info in &measurement.test_info {
-            let group =
-                test_info.create_group(&unique_name(safe_name(&info.name), &mut used_names))?;
-            string(&group, "name", &info.name)?;
-            string(&group, "description", &info.description)?;
-            string(&group, "data_type", &info.data_type)?;
-            string(&group, "unit", &info.unit)?;
-            string(&group, "value", &info.value)?;
+            let group = test_info
+                .create_group(&unique_name(safe_name(&info.name, false), &mut used_names))?;
+            write_string_attribute(&group, "name", &info.name)?;
+            write_string_attribute(&group, "description", &info.description)?;
+            write_string_attribute(&group, "data_type", &info.data_type)?;
+            write_string_attribute(&group, "unit", &info.unit)?;
+            write_string_attribute(&group, "value", &info.value)?;
         }
     }
     file.flush()?;
@@ -96,43 +97,4 @@ fn scalar<T: hdf5::H5Type>(location: &Location, name: &str, value: T) -> Result<
         .create(name)?
         .write_scalar(&value)?;
     Ok(())
-}
-
-fn string(location: &Location, name: &str, value: &str) -> Result<()> {
-    let value = VarLenUnicode::from_str(value)
-        .with_context(|| format!("'{value}' cannot be represented as an HDF5 UTF-8 string"))?;
-    location
-        .new_attr::<VarLenUnicode>()
-        .shape(())
-        .create(name)?
-        .write_scalar(&value)?;
-    Ok(())
-}
-
-fn safe_name(name: &str) -> String {
-    let safe: String = name
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-') {
-                byte as char
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if safe.is_empty() {
-        "unnamed".into()
-    } else {
-        safe
-    }
-}
-
-fn unique_name(base: String, used: &mut HashMap<String, usize>) -> String {
-    let count = used.entry(base.clone()).or_insert(0);
-    *count += 1;
-    if *count == 1 {
-        base
-    } else {
-        format!("{base}_{count}")
-    }
 }

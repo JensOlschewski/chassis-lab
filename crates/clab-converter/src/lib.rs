@@ -18,6 +18,10 @@ pub fn convert_res(source: &Path, output: &Path, overwrite: bool) -> Result<()> 
     })
 }
 
+/// Publish completed output atomically from a temporary file near destination.
+///
+/// Failed writers leave any existing output unchanged. `overwrite` controls
+/// replacement only at publication time, after successful temporary writing.
 pub fn write_atomically(
     output: &Path,
     overwrite: bool,

@@ -40,8 +40,7 @@ pub fn write_file(path: &Path, source: &Path, result: &AdamsResult) -> Result<()
                 entity.source_path.as_deref().unwrap_or(&entity.name),
                 component.name
             );
-            let group_name =
-                unique_name(sanitize_group_name(&preferred_name), &mut used_signal_names);
+            let group_name = unique_name(safe_name(&preferred_name, true), &mut used_signal_names);
             let signal = signals_group.create_group(&group_name)?;
             signal
                 .new_dataset_builder()
@@ -74,7 +73,8 @@ pub fn write_file(path: &Path, source: &Path, result: &AdamsResult) -> Result<()
     Ok(())
 }
 
-fn write_string_attribute(location: &Location, name: &str, value: &str) -> Result<()> {
+/// Write one scalar UTF-8 HDF5 attribute.
+pub(crate) fn write_string_attribute(location: &Location, name: &str, value: &str) -> Result<()> {
     let value = as_hdf5_string(value)?;
     location
         .new_attr::<VarLenUnicode>()
@@ -89,9 +89,15 @@ fn as_hdf5_string(value: &str) -> Result<VarLenUnicode> {
         .with_context(|| format!("'{value}' cannot be represented as an HDF5 UTF-8 string"))
 }
 
-fn sanitize_group_name(name: &str) -> String {
+/// Build an HDF5-safe name. Simulation sources trim surrounding whitespace;
+/// measurement channel names retain it before unsupported bytes become `_`.
+pub(crate) fn safe_name(name: &str, trim_surrounding_whitespace: bool) -> String {
+    let name = if trim_surrounding_whitespace {
+        name.trim()
+    } else {
+        name
+    };
     let name: String = name
-        .trim()
         .bytes()
         .map(|byte| {
             if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-') {
@@ -108,7 +114,8 @@ fn sanitize_group_name(name: &str) -> String {
     }
 }
 
-fn unique_name(base: String, used: &mut HashMap<String, usize>) -> String {
+/// Return `base`, or its stable `_N` collision suffix, and record its use.
+pub(crate) fn unique_name(base: String, used: &mut HashMap<String, usize>) -> String {
     let count = used.entry(base.clone()).or_insert(0);
     *count += 1;
     if *count == 1 {
@@ -122,13 +129,15 @@ fn unique_name(base: String, used: &mut HashMap<String, usize>) -> String {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{sanitize_group_name, unique_name};
+    use super::{safe_name, unique_name};
 
     #[test]
     fn creates_safe_unique_group_names() {
         let mut used = HashMap::new();
-        assert_eq!(sanitize_group_name("part/wheel"), "part_wheel");
-        assert_eq!(sanitize_group_name(""), "unnamed");
+        assert_eq!(safe_name("part/wheel", true), "part_wheel");
+        assert_eq!(safe_name("", true), "unnamed");
+        assert_eq!(safe_name(" wheel ", true), "wheel");
+        assert_eq!(safe_name(" wheel ", false), "_wheel_");
         assert_eq!(unique_name("wheel".into(), &mut used), "wheel");
         assert_eq!(unique_name("wheel".into(), &mut used), "wheel_2");
     }
