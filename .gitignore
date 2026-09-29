@@ -13,4 +13,6 @@ build/
 dist/
 htmlcov/
 local-test-data/
+reports/
+ford-b479-data/
 target/

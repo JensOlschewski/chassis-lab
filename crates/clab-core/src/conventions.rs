@@ -551,7 +551,7 @@ mod tests {
         assert!(svc_conventions().contains_key("front_left_wheel_load"));
         assert_eq!(SVC_METRICS.len(), 29);
         assert_eq!(SVC_METRICS[0], ("front_left_mass_kg", "kg"));
-        assert_eq!(SVC_METRICS[28], ("camber_rear_right_deg", "deg"));
+        assert_eq!(SVC_METRICS[28], ("inertia_zz_kg_mm2", "kg*mm^2"));
         assert_eq!(vertical_conventions().len(), 28);
         assert_eq!(vertical_conventions()["front_right_toe"].sign, -1);
     }
