@@ -289,7 +289,7 @@ fn compares_svc_simulation_and_measurement_references() {
     let metrics = report["candidates"][0]["metrics"].as_array().unwrap();
     assert_eq!(metrics.len(), 29);
     assert_eq!(metrics[0]["metric"], "front_left_mass_kg");
-    assert_eq!(metrics[28]["metric"], "camber_rear_right_deg");
+    assert_eq!(metrics[28]["metric"], "inertia_zz_kg_mm2");
     assert!(metrics.iter().any(|metric| {
         metric["metric"] == "total_mass_kg"
             && metric["baseline_value"].is_number()
