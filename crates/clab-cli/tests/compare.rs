@@ -137,10 +137,15 @@ fn compares_svc_inputs_and_protects_reports_and_inputs() {
     );
     let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
     assert_eq!(csv.headers().unwrap().get(0), Some("baseline"));
-    let records = csv.records().map(|record| record.unwrap()).collect::<Vec<_>>();
-    assert!(records
-        .iter()
-        .all(|record| record.get(12) == Some("informational")));
+    let records = csv
+        .records()
+        .map(|record| record.unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        records
+            .iter()
+            .all(|record| record.get(12) == Some("informational"))
+    );
     assert_eq!(
         records
             .iter()
@@ -319,7 +324,10 @@ fn rejects_missing_compare_inputs_before_hdf5_dispatch() {
         .unwrap();
     assert_eq!(direct.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&direct.stderr);
-    assert!(stderr.contains(&format!("comparison input does not exist: {}", missing_hdf5.display())));
+    assert!(stderr.contains(&format!(
+        "comparison input does not exist: {}",
+        missing_hdf5.display()
+    )));
     assert!(!stderr.contains("H5Fopen"));
 
     let run = directory.path().join("missing-input-run.toml");

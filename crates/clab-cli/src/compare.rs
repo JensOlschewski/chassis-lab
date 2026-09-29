@@ -502,9 +502,10 @@ fn print_metrics(
                 .iter()
                 .position(|path| path == candidate)
                 .expect("candidate row must have an input");
-            if let Some((_, _, values)) = grouped.iter_mut().find(|(test, name, _)| {
-                *test == metric.test && *name == metric.metric.as_str()
-            }) {
+            if let Some((_, _, values)) = grouped
+                .iter_mut()
+                .find(|(test, name, _)| *test == metric.test && *name == metric.metric.as_str())
+            {
                 values.push((index, metric));
             } else {
                 grouped.push((metric.test, &metric.metric, vec![(index, metric)]));
