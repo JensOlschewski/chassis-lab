@@ -1,154 +1,112 @@
 # ChassisLab
 
-Vehicle simulation validation with a Rust `clab` CLI and embedded Python kernels.
+ChassisLab, or Chassis Laboratory, analyzes and compares vehicle chassis
+simulation and measurement data. Rust owns `clab` workflow, input validation,
+reports, and output safety. Embedded Python provides scientific kernels and
+plotting.
 
-## Quick start
+## Workflow
+
+```text
+convert → inspect → analyze → compare
+```
+
+🔄 **Convert** raw Adams `.res` simulations or Lommel `.acd` measurements to
+canonical HDF5. \
+🔍 **Inspect** normalized files and available signals before configuring
+analysis. \
+📊 **Analyze** one normalized input or run manifest to calculate metrics and
+curves. \
+⚖️ **Compare** baseline with compatible candidates. Tolerances enable acceptance
+checks.
+
+## Pre-built executables
+
+Download archive
+[latest release](https://github.com/JensOlschewski/chassis-lab/releases/latest).
+
+Extract complete archive. Keep bin/, embedded Python runtime, libraries, and
+dependencies together.
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e './py-chassislab[dev]'
-cargo build --workspace --release
+bin/clab --help
 ```
 
-Convert an Adams result or Lommel measurement and validate it:
+Release archives include private embedded CPython runtime and scientific
+dependencies. No Python, pip, virtual environment, or Rust toolchain needed.
+
+## Configuration ⚙️
+
+`config.toml` defines reusable configuration file. One configuration can be
+shared across simulation and measurement runs.
+
+Configuration is modular. `config.toml` references setup, mappings, and optional
+tolerance files.
+
+`run.toml` defines input files and case metadata for each analysis or
+comparison.
+
+| File              | Purpose                                                             |
+| ----------------- | ------------------------------------------------------------------- |
+| `config.toml`     | Main configuration file                                             |
+| `setup.toml`      | Test setup and KnC travel-window parameters.                        |
+| `mappings.toml`   | Maps source signals to canonical ChassisLab signals and units.      |
+| `tolerances.toml` | Optional absolute and relative comparison tolerances.               |
+| `run.toml`        | Run-specific input paths and provenance for `analyze` or `compare`. |
+
+## Commands `>_`
+
+### clab convert
+
+Convert raw simulation or measurement data to HDF5. Default output is
+`INPUT.h5`. Use `--output` for explicit file definition or write in an existing
+directory. Use `--force` to replace an existing output.
 
 ```bash
-target/release/clab convert input.res
-target/release/clab convert measurement.acd
-target/release/clab analyze examples/config.toml examples/run-simulation.toml
+clab convert examples/input/example-measurement-knc-vertical.acd \
+    --output input/converted-measurement-knc-vertical.h5
 ```
 
-Default conversion output is `INPUT.h5` for `.res` and `.acd`. Explicit output
-files must use `.h5` or
-`.hdf5`; an existing output directory receives derived filename. Use `--force`
-to replace an existing output.
+### clab inspect
 
-## Input
+Inspect a HDF5 or SVC JSON input.
 
-- Adams `.res` files are converted by `crates/clab-converter/`.
-- Converted `.res` and `.acd` files use canonical HDF5 schema version 1.
-- Canonical files explicitly declare `source_kind` as `simulation` or `measurement`.
-- Lommel `.acd` files provide physical measurements for conversion.
-- TOML files define combined cases, inputs, signal mappings, setup, and tolerances.
+`--list` to show signals and \
+`--match TEXT` to filter them \
+`--mapping svc|knc` displays mapping requirements without opening an input file
 
-### Canonical HDF5 layout
-
-```text
-/
-  attrs: schema_version, source_kind, source_file, sample_count, signal_count
-/axis
-  attrs: kind, unit
-  values: sample indices for simulations, physical time for measurements
-/signals/<safe-name>
-  attrs: original_name, unit, optional source-specific metadata
-  values: float64[sample_count]
-/simulation
-  attrs: source-format metadata
-/measurement/test_info/<safe-name>
-  attrs: measurement test metadata
-```
-
-Simulation axes use unitless sample indices when a RES file has no physical time;
-conversion never invents time values. Signal records share one layout while retaining
-simulation entity/component/ID metadata or measurement descriptions, offsets, and
-test metadata as applicable.
-
-### Configuration and runs
-
-`config.toml` is reusable analysis policy. It owns physics, setup, signal
-mappings, and optional validation tolerances. A `run.toml` supplies normalized
-input paths and optional `[meta]` `name` and `loadcase` for that run. One
-configuration can therefore analyze or compare multiple loadcases.
-
-Direct input commands have no run manifest. They use `[meta]` from
-`config.toml` when supplied; otherwise reports use `undefined` for name and
-loadcase. Paths in external role files resolve relative to their own file.
-
-See [`examples/config.toml`](examples/config.toml),
-[`examples/run-simulation.toml`](examples/run-simulation.toml), and
-[`examples/run-measurement.toml`](examples/run-measurement.toml). Input TOML
-assigns normalized SVC and KnC vertical paths. Mapping TOML uses base plus test
-overrides, with shared KnC mappings inherited by vertical. Inline
-function-first sections remain supported. All files use synthetic names and
-values as templates for private vehicle data.
-`examples/input/example-measurement-knc-vertical.acd` converts to a normalized
-measurement HDF5 file; it is a small synthetic vertical measurement fixture.
-
-Vertical validation consumes normalized inputs only:
-
-```text
-clab analyze config.toml simulation-vertical.h5 -r reports/vertical
-```
-
-SVC analysis consumes JSON or HDF5. Run manifests assign input by domain:
-
-```text
-clab analyze examples/config.toml examples/run-simulation.toml -r reports/run
-```
-
-SVC comparison evaluates baseline first, then one or more candidates. Use
-`--tolerances` to activate validation tolerances already supplied by config;
-without it every complete metric is informational:
-
-```text
-clab compare examples/config.toml baseline.json candidate-a.json candidate-b.json \
-  --tolerances -r reports/compare
-```
-
-SVC evaluation, optional tolerance comparison, reporting, provenance, and output
-safety are Rust-owned. SVC metrics without tolerances are informational.
-Final simulation sample is selected by default. Embedded Python
-is used only as a scientific kernel through the Rust CLI. Exit codes are 0 for
-pass, 1 for tolerance failure, and 2 for operational or configuration errors.
-
-Run manifests use `[input.svc]`, `[input.knc.vertical]`, and optional
-`[input.knc.static]`, each with `file = "..."`. HDF5 `source_kind` is required;
-SVC JSON must also declare it. Static is simulation HDF5
-baseline for vertical normalization. Replace raw ACD with `clab convert`; raw ACD
-is not accepted. Legacy domain-first configuration remains accepted during migration.
-
-## Output
-
-Commands produce:
-
-- HDF5 result files
-- JSON and CSV metrics
-- deterministic SVG plots
-- SHA-256 input and software provenance
-
-Raw measurements and generated artifacts are not committed.
-
-## Releases
-
-Trusted `vMAJOR.MINOR.PATCH` tags publish standalone archives through GitHub
-Releases for Linux x86_64, Windows x86_64, and Intel macOS x86_64. Each archive
-contains `clab`, embedded CPython, scientific dependencies, licenses, build
-provenance, and checksums. No user-managed Python, pip, virtual environment, or
-Rust toolchain is required after extraction.
-
-Download matching archive from [GitHub Releases](https://github.com/JensOlschewski/chassis-lab/releases),
-extract it, then run `bin/clab` (`bin/clab.exe` on Windows).
-
-## Development
+Inspect a measurement HDF5 file:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --locked
-.venv/bin/ruff check py-chassislab
-.venv/bin/ruff format --check py-chassislab
-.venv/bin/pytest -q py-chassislab/tests
+clab inspect input/converted-measurement-knc-vertical.h5 --list
 ```
 
-## Layout
+Create a mapping template for KnC vertical analysis:
 
-```text
-py-chassislab/      Python package and tests
-crates/             Rust workspace crates
-examples/           committed synthetic inputs and configuration
-local-test-data/    ignored private or large engineering files
-docs/               architecture and roadmap
+```bash
+clab inspect --mapping knc --test vertical --template
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) and
-[`docs/roadmap.md`](docs/roadmap.md).
+### clab analyze
+
+Analyze one normalized input or a multi-domain run manifest. Configuration owns
+mappings, units, conventions, physics, and setup. Use `--report DIRECTORY` to
+write a report bundle: SVC analysis creates JSON and CSV; KnC vertical analysis
+creates JSON and SVG plots.
+
+```bash
+mkdir -p reports/example
+clab analyze examples/config.toml examples/run-simulation.toml --report reports/example
+```
+
+### clab compare
+
+Compare compatible SVC or KnC vertical baseline and candidate inputs. Without
+`--tolerances`, complete metrics are informational. With it, configured
+tolerances produce pass/fail status. Replace `BASELINE` and `CANDIDATE` with
+compatible normalized inputs or run manifests.
+
+```bash
+clab compare examples/config.toml BASELINE CANDIDATE \
+  --tolerances --report reports/compare
+```
