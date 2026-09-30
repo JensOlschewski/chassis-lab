@@ -1892,6 +1892,26 @@ mod tests {
         assert_eq!(c.signals["x"].entity, "e");
         assert_eq!(c.simulation_json, d.path().join("x.json"));
     }
+
+    #[test]
+    fn parses_legacy_runtime_smoke_fixture() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = directory.path().join("runtime-smoke.toml");
+        fs::copy(fixtures.join("runtime-smoke.toml"), &fixture).unwrap();
+        fs::copy(
+            fixtures.join("runtime-smoke-signals.toml"),
+            directory.path().join("example-signals.toml"),
+        )
+        .unwrap();
+
+        let config = load_config(fixture).unwrap();
+
+        assert_eq!(config.name, "example-config");
+        assert!(config.svc_signal_map.is_some());
+        assert!(config.vertical.is_some());
+    }
+
     #[test]
     fn rejects_unknown_and_bad_tolerance() {
         let d = tempfile::tempdir().unwrap();
