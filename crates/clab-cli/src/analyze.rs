@@ -62,6 +62,12 @@ pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
 }
 
 fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
+    clab_core::config::validate_run_input_files(&args.input).map_err(|error| {
+        anyhow::anyhow!(
+            "failed to load config/run '{}': {error}",
+            args.input.display()
+        )
+    })?;
     let config =
         clab_core::config::load_config_and_run(&args.config, &args.input).map_err(|error| {
             anyhow::anyhow!(

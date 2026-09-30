@@ -270,7 +270,7 @@ fn aggregates_candidates_once_and_marks_missing_without_extra_sections() {
 fn compares_svc_simulation_and_measurement_references() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let measurement = examples.join("input/example-measurement-svc.json");
+    let measurement = examples.join("input/generated-measurement-svc.json");
     let directory = tempdir().unwrap();
     let simulation = directory.path().join("simulation.json");
     write_simulation_json(&simulation, 4000.0);

@@ -15,7 +15,7 @@ Convert an Adams result or Lommel measurement and validate it:
 ```bash
 target/release/clab convert input.res
 target/release/clab convert measurement.acd
-target/release/clab analyze examples/config.toml examples/run.toml
+target/release/clab analyze examples/config.toml examples/run-simulation.toml
 ```
 
 Default conversion output is `INPUT.h5` for `.res` and `.acd`. Explicit output
@@ -64,12 +64,13 @@ Direct input commands have no run manifest. They use `[meta]` from
 `config.toml` when supplied; otherwise reports use `undefined` for name and
 loadcase. Paths in external role files resolve relative to their own file.
 
-See [`examples/config.toml`](examples/config.toml) and
-[`examples/run.toml`](examples/run.toml). Input TOML assigns normalized SVC and
-KnC vertical paths. Mapping TOML uses base plus test overrides, with shared KnC
-mappings inherited by vertical. Inline function-first sections remain
-supported. All files use synthetic names and values as templates for private
-vehicle data.
+See [`examples/config.toml`](examples/config.toml),
+[`examples/run-simulation.toml`](examples/run-simulation.toml), and
+[`examples/run-measurement.toml`](examples/run-measurement.toml). Input TOML
+assigns normalized SVC and KnC vertical paths. Mapping TOML uses base plus test
+overrides, with shared KnC mappings inherited by vertical. Inline
+function-first sections remain supported. All files use synthetic names and
+values as templates for private vehicle data.
 `examples/input/example-measurement-knc-vertical.acd` converts to a normalized
 measurement HDF5 file; it is a small synthetic vertical measurement fixture.
 
@@ -82,7 +83,7 @@ clab analyze config.toml simulation-vertical.h5 -r reports/vertical
 SVC analysis consumes JSON or HDF5. Run manifests assign input by domain:
 
 ```text
-clab analyze examples/config.toml examples/run.toml -r reports/run
+clab analyze examples/config.toml examples/run-simulation.toml -r reports/run
 ```
 
 SVC comparison evaluates baseline first, then one or more candidates. Use

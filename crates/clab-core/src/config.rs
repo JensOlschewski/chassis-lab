@@ -127,7 +127,6 @@ pub fn load_config_and_run(
 ) -> Result<CaseConfig, Box<dyn std::error::Error>> {
     let (config_path, config_root) = load_toml(config.as_ref())?;
     let (run_path, run_root) = load_toml(run.as_ref())?;
-    validate_run_input_files(&run_root, &run_path)?;
     let mut config_root = load_function_role_files(&config_root, &config_path)?;
     // Run metadata never inherits from reusable shared configuration.
     config_root.remove("meta");
@@ -143,7 +142,12 @@ pub fn load_config_and_run(
     parse_root(&root, &config_path)
 }
 
-fn validate_run_input_files(
+pub fn validate_run_input_files(run: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+    let (run, root) = load_toml(run.as_ref())?;
+    validate_run_input_tables(&root, &run)
+}
+
+fn validate_run_input_tables(
     root: &toml::Table,
     run: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -2355,7 +2359,11 @@ mod tests {
         let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
 
         assert!(
-            load_config_and_run(examples.join("config.toml"), examples.join("run.toml")).is_ok()
+            load_config_and_run(
+                examples.join("config.toml"),
+                examples.join("run-simulation.toml")
+            )
+            .is_ok()
         );
     }
 }
