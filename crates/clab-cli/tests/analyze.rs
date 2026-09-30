@@ -627,6 +627,14 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     ] {
         assert!(output.join(name).is_file(), "missing {name}");
     }
+    let svg =
+        fs::read_to_string(output.join("plots/knc/vertical/wheel-center-z-vs-wheel-center-y.svg"))
+            .unwrap();
+    assert!(svg.contains(&format!("Config: {}", config.display())));
+    assert!(svg.contains("Case: two-up run | two-up"));
+    assert!(svg.contains(&format!("Input: {}", vertical_simulation.display())));
+    assert!(svg.contains(&format!("Run: {}", run.display())));
+    assert!(svg.contains("Created by:"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["domains"].as_array().unwrap().len(), 2);

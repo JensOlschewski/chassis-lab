@@ -49,6 +49,15 @@ pub(crate) struct Reports {
 }
 
 pub(crate) fn analyze_input(config: &CaseConfig, path: &Path, plots: bool) -> Result<Reports> {
+    analyze_input_with_footer(config, path, plots, None)
+}
+
+pub(crate) fn analyze_input_with_footer(
+    config: &CaseConfig,
+    path: &Path,
+    plots: bool,
+    footer: Option<&str>,
+) -> Result<Reports> {
     let file = CanonicalFile::open(path)
         .with_context(|| format!("failed to read HDF5 '{}'", path.display()))?;
     let (curves, source, mut warnings, normalization) = match file.summary().source_kind {
@@ -108,7 +117,7 @@ pub(crate) fn analyze_input(config: &CaseConfig, path: &Path, plots: bool) -> Re
     Ok(Reports {
         detail: serde_json::to_string_pretty(&detail)? + "\n",
         plots: if plots {
-            curve_plots(&detail["curves"], source)?
+            curve_plots(&detail["curves"], source, footer.unwrap_or(""))?
         } else {
             BTreeMap::new()
         },
@@ -550,7 +559,11 @@ fn convention(
         .ok_or_else(|| anyhow::anyhow!("vertical signal convention missing: {name}"))
 }
 
-fn curve_plots(curves: &serde_json::Value, source_label: &str) -> Result<BTreeMap<String, String>> {
+fn curve_plots(
+    curves: &serde_json::Value,
+    source_label: &str,
+    footer: &str,
+) -> Result<BTreeMap<String, String>> {
     let curves = serde_json::to_string(curves)?;
     let source = CStr::from_bytes_with_nul(
         concat!(
@@ -567,7 +580,18 @@ fn curve_plots(curves: &serde_json::Value, source_label: &str) -> Result<BTreeMa
             c"knc_vertical_kernel.py",
             c"chassis_lab.knc_vertical_kernel",
         )?;
-        module.getattr("plot")?.call1((curves, source_label))?.extract()
+        module
+            .getattr("plot")?
+            .call1((
+                curves,
+                source_label,
+                footer,
+                PyBytes::new(
+                    py,
+                    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/flb-logo.png")),
+                ),
+            ))?
+            .extract()
     })
     .context("failed to generate vertical SVG reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'")?;
     serde_json::from_str(&reports).context("embedded Python returned invalid vertical SVG reports")

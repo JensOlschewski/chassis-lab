@@ -233,6 +233,10 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
     let svg_text = fs::read_to_string(svg).unwrap();
     assert!(svg_text.contains("Simulation"));
     assert!(svg_text.contains("Front left"));
+    assert!(svg_text.contains(&format!("Config: {}", config_path.display())));
+    assert!(svg_text.contains("Case: fixture | L"));
+    assert!(svg_text.contains(&format!("Input: {}", simulation_path.display())));
+    assert!(svg_text.contains("Created by:"));
     assert!(
         fs::read_to_string(&json)
             .unwrap()
