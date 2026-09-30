@@ -5,6 +5,7 @@ simulation and measurement data. Rust owns `clab` workflow, input validation,
 reports, and output safety. Embedded Python provides scientific kernels and
 plotting.
 
+
 ## Workflow
 
 ```text
@@ -19,6 +20,14 @@ analysis. \
 curves. \
 ⚖️ **Compare** baseline with compatible candidates. Tolerances enable acceptance
 checks.
+
+<p align="center">
+  <img
+    src="docs/assets/compare.svg"
+    alt="ChassisLab comparison report"
+    width="900"
+  />
+</p>
 
 ## Pre-built executables
 
