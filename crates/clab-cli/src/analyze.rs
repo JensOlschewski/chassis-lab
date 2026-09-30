@@ -170,13 +170,13 @@ fn write_combined_run(
         }
     };
     let vertical_report = vertical::analyze_input(config, vertical_path, args.output.is_some())?;
-    println!("SVC analysis: {svc_metrics} metrics");
+    print_svc_header(svc_metrics);
     let mut warnings = svc_warnings;
     warnings.extend(vertical_report.warnings.iter().cloned());
     warnings.sort();
     warnings.dedup();
-    print_warnings(&warnings, args);
     print_svc_metrics(svc_report["metrics"].as_array().unwrap());
+    print_warnings(&warnings, args);
     let Some(output) = &args.output else {
         return Ok(());
     };
@@ -321,12 +321,9 @@ fn write_svc_reference(
         reports.report["inputs"]["run"] = provenance(run)?;
         reports.detail = serde_json::to_string_pretty(&reports.report)? + "\n";
     }
-    println!(
-        "SVC reference analysis: {} metrics",
-        reports.report["metrics"].as_array().unwrap().len()
-    );
-    print_warnings(&reports.warnings, args);
+    print_svc_header(reports.report["metrics"].as_array().unwrap().len());
     print_svc_metrics(reports.report["metrics"].as_array().unwrap());
+    print_warnings(&reports.warnings, args);
     if let Some(output) = &args.output {
         write_bundle(
             output,
@@ -417,9 +414,9 @@ fn write_svc_report(
     run: Option<&Path>,
     report: svc::Reports,
 ) -> Result<()> {
-    println!("SVC analysis: {} metrics", report.metric_count);
-    print_warnings(&report.warnings, args);
+    print_svc_header(report.metric_count);
     print_svc_metrics(report.report["metrics"].as_array().unwrap());
+    print_warnings(&report.warnings, args);
     if let Some(output) = &args.output {
         let mut bundle = report.report;
         if let Some(run) = run {
@@ -459,6 +456,12 @@ fn print_svc_metrics(metrics: &[serde_json::Value]) {
             metric["unit"].as_str().unwrap()
         );
     }
+}
+
+fn print_svc_header(metric_count: usize) {
+    println!();
+    println!("SVC");
+    println!("running {metric_count} metrics");
 }
 
 fn print_warnings(warnings: &[String], args: &AnalyzeArgs) {
