@@ -1,15 +1,19 @@
-[meta]
-name = "example-config"
-loadcase = "example-loadcase"
+# Example configuration.
+#
+# Each config role is stored in its own file.
 
 [physics]
-gravity = 9.80665
+gravity = 9.80665 # m/s²
 
 [setup]
-file = "example-setup.toml"
+# test definitions and their setup values.
+file = "setup.toml"
 
 [signals]
-file = "example-signal-mappings.toml"
+# signal mappings
+# test-specific mappings extend or override them.
+file = "mappings.toml"
 
 [validation]
-file = "example-validation-tolerances.toml"
+# validation definitions; `clab compare --tolerances` enables acceptance checks.
+file = "tolerances.toml"

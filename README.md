@@ -53,13 +53,23 @@ conversion never invents time values. Signal records share one layout while reta
 simulation entity/component/ID metadata or measurement descriptions, offsets, and
 test metadata as applicable.
 
-See [`examples/example-config.toml`](examples/example-config.toml) and its
-external role files. `[meta]` identifies case; `[input]`, `[setup]`,
-`[mappings]`, and `[validation]` point to role files resolved relative to main
-config. Input TOML assigns normalized SVC and KnC vertical paths. Mapping TOML uses
-`base` plus test overrides, with shared KnC mappings inherited by vertical.
-Inline function-first sections remain supported. All files use synthetic names
-and values as templates for private vehicle data.
+### Configuration and runs
+
+`config.toml` is reusable analysis policy. It owns physics, setup, signal
+mappings, and optional validation tolerances. A `run.toml` supplies normalized
+input paths and optional `[meta]` `name` and `loadcase` for that run. One
+configuration can therefore analyze or compare multiple loadcases.
+
+Direct input commands have no run manifest. They use `[meta]` from
+`config.toml` when supplied; otherwise reports use `undefined` for name and
+loadcase. Paths in external role files resolve relative to their own file.
+
+See [`examples/config.toml`](examples/config.toml) and
+[`examples/run.toml`](examples/run.toml). Input TOML assigns normalized SVC and
+KnC vertical paths. Mapping TOML uses base plus test overrides, with shared KnC
+mappings inherited by vertical. Inline function-first sections remain
+supported. All files use synthetic names and values as templates for private
+vehicle data.
 `examples/input/example-measurement-knc-vertical.acd` converts to a normalized
 measurement HDF5 file; it is a small synthetic vertical measurement fixture.
 

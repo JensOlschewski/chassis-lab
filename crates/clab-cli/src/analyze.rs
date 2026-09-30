@@ -90,7 +90,7 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
             Some(clab_core::config::SourceKind::Measurement) => {
                 let reference = load_svc_reference(&config.simulation_json)
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                write_svc_reference(&reference, args)
+                write_svc_reference(&reference, args, &config, Some(&args.input))
             }
             None => unreachable!(),
         },
@@ -138,7 +138,7 @@ fn write_combined_run(
             Some(clab_core::config::SourceKind::Measurement) => {
                 let reference = load_svc_reference(&config.simulation_json)
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                let reports = svc_reference_reports(&reference, &args.config)?;
+                let reports = svc_reference_reports(&reference, &args.config, config)?;
                 let metrics = reports.report["metrics"].as_array().unwrap().len();
                 (
                     reports.report,
@@ -165,6 +165,7 @@ fn write_combined_run(
     let bundle = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
+        "case": {"name": config.name, "loadcase": config.loadcase},
         "inputs": {"config": provenance(&args.config)?, "run": provenance(&args.input)?},
         "domains": [
             {"domain": "svc", "metric_count": svc_metrics},
@@ -174,11 +175,32 @@ fn write_combined_run(
         "warnings": warnings,
         "normalization": vertical_report.normalization,
     });
+    let mut svc_detail: serde_json::Value = serde_json::from_str(&svc_detail)?;
+    svc_detail["case"] = bundle["case"].clone();
+    svc_detail["inputs"]["run"] = bundle["inputs"]["run"].clone();
+    let mut vertical_detail: serde_json::Value = serde_json::from_str(&vertical_report.detail)?;
+    vertical_detail["case"] = bundle["case"].clone();
+    let mut vertical_inputs = bundle["inputs"].clone();
+    vertical_inputs["input"] = provenance(vertical_path)?;
+    if let Some(static_input) = config
+        .vertical
+        .as_ref()
+        .and_then(|vertical| vertical.static_simulation_hdf5.as_ref())
+    {
+        vertical_inputs["static_simulation"] = provenance(static_input)?;
+    }
+    vertical_detail["inputs"] = vertical_inputs;
     let mut files = vec![
         ("report.json", serde_json::to_string_pretty(&bundle)? + "\n"),
         ("metrics.csv", svc_csv),
-        ("svc.json", svc_detail),
-        ("knc-vertical.json", vertical_report.detail),
+        (
+            "svc.json",
+            serde_json::to_string_pretty(&svc_detail)? + "\n",
+        ),
+        (
+            "knc-vertical.json",
+            serde_json::to_string_pretty(&vertical_detail)? + "\n",
+        ),
     ];
     files.extend(
         vertical_report
@@ -213,9 +235,17 @@ fn analyze_svc(args: &AnalyzeArgs) -> Result<()> {
     .with_context(|| format!("failed to parse JSON input '{}'", args.input.display()))?;
     match input.get("source_kind").and_then(serde_json::Value::as_str) {
         Some("measurement") => {
+            let config =
+                clab_core::config::load_config_with_input(&args.config, &args.input, false)
+                    .map_err(|error| {
+                        anyhow::anyhow!(
+                            "failed to load analysis config '{}': {error}",
+                            args.config.display()
+                        )
+                    })?;
             let reference = load_svc_reference(&args.input)
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-            write_svc_reference(&reference, args)
+            write_svc_reference(&reference, args, &config, None)
         }
         Some("simulation") => {
             let config =
@@ -265,8 +295,14 @@ fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
 fn write_svc_reference(
     reference: &clab_core::svc_reference::SvcReference,
     args: &AnalyzeArgs,
+    config: &clab_core::config::CaseConfig,
+    run: Option<&Path>,
 ) -> Result<()> {
-    let reports = svc_reference_reports(reference, &args.config)?;
+    let mut reports = svc_reference_reports(reference, &args.config, config)?;
+    if let Some(run) = run {
+        reports.report["inputs"]["run"] = provenance(run)?;
+        reports.detail = serde_json::to_string_pretty(&reports.report)? + "\n";
+    }
     println!(
         "SVC reference analysis: {} metrics",
         reports.report["metrics"].as_array().unwrap().len()
@@ -292,6 +328,7 @@ fn write_svc_reference(
 fn svc_reference_reports(
     reference: &clab_core::svc_reference::SvcReference,
     config: &Path,
+    case: &clab_core::config::CaseConfig,
 ) -> Result<SvcReferenceReports> {
     let mut warnings = Vec::new();
     let metrics = svc::canonical_metrics(&reference.values)
@@ -310,7 +347,7 @@ fn svc_reference_reports(
         })
         .collect::<Vec<_>>();
     let report = serde_json::json!({
-        "schema_version": 1, "command": "analyze", "inputs": {"config": provenance(config)?, "reference": provenance(&reference.path)?}, "metrics": metrics, "warnings": warnings,
+        "schema_version": 1, "command": "analyze", "case": {"name": case.name, "loadcase": case.loadcase}, "inputs": {"config": provenance(config)?, "reference": provenance(&reference.path)?}, "metrics": metrics, "warnings": warnings,
     });
     let mut csv = csv::Writer::from_writer(Vec::new());
     csv.write_record(["run", "domain", "test", "metric", "unit", "value"])?;
@@ -370,12 +407,13 @@ fn write_svc_report(
         if let Some(run) = run {
             bundle["inputs"]["run"] = provenance(run)?;
         }
+        let detail = serde_json::to_string_pretty(&bundle)? + "\n";
         write_bundle(
             output,
             &[
-                ("report.json", serde_json::to_string_pretty(&bundle)? + "\n"),
+                ("report.json", detail.clone()),
                 ("metrics.csv", report.csv),
-                ("svc.json", report.detail),
+                ("svc.json", detail),
             ],
             args.force,
             &[&args.config, &args.input, &config.simulation_json],
@@ -452,17 +490,25 @@ fn write_vertical(
     let Some(output) = &args.output else {
         return Ok(());
     };
-    let bundle = serde_json::json!({
+    let mut bundle = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
+        "case": {"name": config.name, "loadcase": config.loadcase},
         "inputs": {"config": provenance(&args.config)?, "input": provenance(input)?},
         "domains": [{"domain": "knc", "test": "vertical", "metric_count": 0, "curve_count": report.curve_count}],
         "warnings": report.warnings,
         "normalization": report.normalization,
     });
+    if let Some(run) = run {
+        bundle["inputs"]["run"] = provenance(run)?;
+    }
+    let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
+    detail["case"] = bundle["case"].clone();
+    detail["inputs"] = bundle["inputs"].clone();
+    let detail = serde_json::to_string_pretty(&detail)? + "\n";
     let mut files = vec![
         ("report.json", serde_json::to_string_pretty(&bundle)? + "\n"),
-        ("knc-vertical.json", report.detail),
+        ("knc-vertical.json", detail),
     ];
     files.extend(
         report

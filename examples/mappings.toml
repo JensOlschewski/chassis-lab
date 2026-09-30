@@ -2,27 +2,18 @@
 # Each entry maps one canonical signal understood by the program (the table name)
 # to a signal in the raw input file (`entity` + `component`) and declares its
 # unit which is converted if necessary by the program!
+#
+# Example
 # Run `clab inspect --mapping svc` to list available canonical SVC signals.
 # Run `clab inspect --mapping svc --template` for an empty generated TOML template.
-# clab inspect --mapping svc
-# clab inspect --mapping knc --test vertical
 #
+# clab inspect --mapping svc
 # SVC
 #   front_left_wheel_load       N
 #   front_right_wheel_load      N
 #   rear_left_wheel_load        N
 #   rear_right_wheel_load       N
 #   wheelbase                   mm
-#   ...
-#
-# KnC
-#   front_left_travel           mm
-#   front_right_travel          mm
-#   ...
-#
-# KnC / vertical
-#   front_left_wheel_center_x   mm
-#   front_left_wheel_center_y   mm
 #   ...
 
 # SVC signal mappings.

@@ -1,5 +1,7 @@
-# Validation tolerances.
-# Define acceptance tolerances for each signal.
+# tolerances.
+# Define acceptance tolerances for each signal
+# use as
+# clab compare --tolerances <tolerances.toml>
 #
 # - Absolute tolerances use the signal’s canonical unit.
 # - Relative tolerances are percentages of the reference value.
@@ -7,8 +9,7 @@
 #
 # Signals without a tolerance are informational in `clab compare`
 
-# SVC tolerances.
-
+# SVC tolerances
 [svc.validation.tolerances.absolute]
 front_left_mass_kg = 0.01
 front_right_mass_kg = 0.01
@@ -28,8 +29,7 @@ cg_x_from_front_axle_mm = 0.01
 total_mass_kg = 1.0
 wheelbase_mm = 0.5
 
-# KnC vertical tolerances.
-
+# KnC vertical tolerances
 [knc.vertical.validation.tolerances.absolute]
 front_left_wheel_center_x_mm = 0.1
 front_left_wheel_center_y_mm = 0.1

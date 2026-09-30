@@ -9,16 +9,20 @@ fn clab() -> Command {
 
 fn config_with_tolerance(directory: &Path, tolerance: f64) -> std::path::PathBuf {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    for name in [
-        "example-setup.toml",
-        "example-signal-mappings.toml",
-        "example-validation-tolerances.toml",
-    ] {
+    for name in ["setup.toml", "mappings.toml", "tolerances.toml"] {
         fs::copy(examples.join(name), directory.join(name)).unwrap();
     }
     let config = directory.join("config.toml");
     fs::copy(examples.join("config.toml"), &config).unwrap();
-    let tolerances = directory.join("example-validation-tolerances.toml");
+    fs::write(
+        &config,
+        fs::read_to_string(&config).unwrap().replace(
+            "[meta]\nname = \"example-config\"\nloadcase = \"example-loadcase\"\n\n",
+            "",
+        ),
+    )
+    .unwrap();
+    let tolerances = directory.join("tolerances.toml");
     fs::write(
         &tolerances,
         fs::read_to_string(&tolerances).unwrap().replace(
@@ -126,6 +130,10 @@ fn compares_svc_inputs_and_protects_reports_and_inputs() {
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["command"], "compare");
     assert_eq!(report["status"], "informational");
+    assert_eq!(report["baseline"]["case"]["name"], "undefined");
+    assert_eq!(report["baseline"]["case"]["loadcase"], "undefined");
+    assert_eq!(report["candidates"][0]["case"]["name"], "undefined");
+    assert_eq!(report["candidates"][0]["case"]["loadcase"], "undefined");
     assert_eq!(
         report["candidates"][0]["metrics"]
             .as_array()

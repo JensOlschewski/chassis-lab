@@ -106,8 +106,11 @@ jobs:
           trap 'rm -f "$smoke_input"' EXIT
           tar -czf "$smoke_input" \
             dist/clab-runtime-linux-x86_64.tar.gz \
-            examples/example-config-flat.toml \
-            examples/input/example-measurement-svc.json \
+            examples/config.toml \
+            examples/run.toml \
+            examples/setup.toml \
+            examples/mappings.toml \
+            examples/tolerances.toml \
             examples/input/example-simulation-svc.res \
             examples/input/example-simulation-knc-vertical.res \
             examples/input/example-measurement-knc-vertical.acd
@@ -116,13 +119,13 @@ jobs:
             ubuntu:24.04 \
             bash -ceu '
               mkdir /tmp/input /tmp/clab-runtime /tmp/smoke
-              tar -xzf - -C /tmp/input
-              tar -xzf /tmp/input/dist/clab-runtime-linux-x86_64.tar.gz -C /tmp/clab-runtime
-              bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
-              cp /tmp/input/examples/example-config-flat.toml /tmp/smoke/
-              mkdir /tmp/smoke/input
-              cp /tmp/input/examples/input/example-measurement-svc.json /tmp/smoke/input/
-              cp /tmp/input/examples/input/example-simulation-svc.res /tmp/smoke/
+            tar -xzf - -C /tmp/input
+            tar -xzf /tmp/input/dist/clab-runtime-linux-x86_64.tar.gz -C /tmp/clab-runtime
+            bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
+            cp /tmp/input/examples/config.toml /tmp/input/examples/run.toml /tmp/smoke/
+            cp /tmp/input/examples/setup.toml /tmp/input/examples/mappings.toml /tmp/input/examples/tolerances.toml /tmp/smoke/
+            mkdir /tmp/smoke/input
+            cp /tmp/input/examples/input/example-simulation-svc.res /tmp/smoke/
               cp /tmp/input/examples/input/example-simulation-knc-vertical.res /tmp/smoke/
               cp /tmp/input/examples/input/example-measurement-knc-vertical.acd /tmp/smoke/
               cd /tmp/smoke
@@ -130,7 +133,7 @@ jobs:
               env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -o input/generated-simulation-svc.h5
               env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-vertical.res -o input/generated-simulation-knc-vertical.h5
               env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-knc-vertical.acd -o input/example-measurement-knc-vertical.h5
-              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze example-config-flat.toml example-config-flat.toml -r reports
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze config.toml run.toml -r reports
               test -s reports/report.json
               test -s reports/metrics.csv
               test -s reports/svc.json
