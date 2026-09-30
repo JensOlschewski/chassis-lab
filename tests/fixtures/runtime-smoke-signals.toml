@@ -1,0 +1,126 @@
+# SVC-only mapping fixture for legacy runtime-smoke.toml.
+
+[signals.front_left_wheel_load]
+entity = "example.wheel_loads"
+component = "front_left"
+unit = "newton"
+
+[signals.front_right_wheel_load]
+entity = "example.wheel_loads"
+component = "front_right"
+unit = "newton"
+
+[signals.rear_left_wheel_load]
+entity = "example.wheel_loads"
+component = "rear_left"
+unit = "newton"
+
+[signals.rear_right_wheel_load]
+entity = "example.wheel_loads"
+component = "rear_right"
+unit = "newton"
+
+[signals.wheelbase]
+entity = "example.geometry"
+component = "wheelbase"
+unit = "mm"
+
+[signals.front_left_ride_height]
+entity = "example.ride_heights"
+component = "front_left"
+unit = "mm"
+
+[signals.front_right_ride_height]
+entity = "example.ride_heights"
+component = "front_right"
+unit = "mm"
+
+[signals.rear_left_ride_height]
+entity = "example.ride_heights"
+component = "rear_left"
+unit = "mm"
+
+[signals.rear_right_ride_height]
+entity = "example.ride_heights"
+component = "rear_right"
+unit = "mm"
+
+[signals.front_track]
+entity = "example.geometry"
+component = "front_track"
+unit = "mm"
+
+[signals.rear_track]
+entity = "example.geometry"
+component = "rear_track"
+unit = "mm"
+
+[signals.cg_height]
+entity = "example.geometry"
+component = "cg_height"
+unit = "mm"
+
+[signals.inertia_xx]
+entity = "example.geometry"
+component = "inertia_xx"
+unit = "kg*mm^2"
+
+[signals.inertia_yy]
+entity = "example.geometry"
+component = "inertia_yy"
+unit = "kg*mm^2"
+
+[signals.inertia_zz]
+entity = "example.geometry"
+component = "inertia_zz"
+unit = "kg*mm^2"
+
+[signals.front_left_wheel_center_x]
+entity = "example.geometry"
+component = "front_left_wheel_center_x"
+unit = "mm"
+
+[signals.gyro_x]
+entity = "example.geometry"
+component = "gyro_x"
+unit = "mm"
+
+[signals.front_left_toe]
+entity = "example.toe_camber"
+component = "front_left_toe"
+unit = "deg"
+
+[signals.front_right_toe]
+entity = "example.toe_camber"
+component = "front_right_toe"
+unit = "deg"
+
+[signals.rear_left_toe]
+entity = "example.toe_camber"
+component = "rear_left_toe"
+unit = "deg"
+
+[signals.rear_right_toe]
+entity = "example.toe_camber"
+component = "rear_right_toe"
+unit = "deg"
+
+[signals.front_left_camber]
+entity = "example.toe_camber"
+component = "front_left_camber"
+unit = "deg"
+
+[signals.front_right_camber]
+entity = "example.toe_camber"
+component = "front_right_camber"
+unit = "deg"
+
+[signals.rear_left_camber]
+entity = "example.toe_camber"
+component = "rear_left_camber"
+unit = "deg"
+
+[signals.rear_right_camber]
+entity = "example.toe_camber"
+component = "rear_right_camber"
+unit = "deg"

@@ -137,4 +137,5 @@ jobs:
               test -s reports/report.json
               test -s reports/metrics.csv
               test -s reports/svc.json
+              test -s reports/knc-vertical.json
             ' < "$smoke_input"

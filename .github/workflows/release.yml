@@ -96,28 +96,29 @@ jobs:
           trap 'rm -f "$smoke_input"' EXIT
           tar -czf "$smoke_input" \
             dist/embed-bundle-linux-x86_64.tar.gz \
+            examples/config.toml \
+            examples/run-simulation.toml \
+            examples/setup.toml \
+            examples/mappings.toml \
+            examples/tolerances.toml \
             examples/input/example-simulation-svc.res \
-            examples/input/example-simulation-knc-vertical.res \
-            examples/input/example-measurement-knc-vertical.acd \
-            tests/fixtures/runtime-smoke.toml examples/mappings.toml examples/input/generated-measurement-svc.json
+            examples/input/example-simulation-knc-vertical.res
           docker run --rm --pull=missing -i ubuntu:24.04 bash -ceu '
             mkdir /tmp/input /tmp/bundle /tmp/smoke
             tar -xzf - -C /tmp/input
             tar -xzf /tmp/input/dist/embed-bundle-linux-x86_64.tar.gz -C /tmp/bundle
             bundle=/tmp/bundle/embed-bundle-linux-x86_64
+            cp /tmp/input/examples/config.toml /tmp/input/examples/run-simulation.toml /tmp/smoke/
+            cp /tmp/input/examples/setup.toml /tmp/input/examples/mappings.toml /tmp/input/examples/tolerances.toml /tmp/smoke/
+            mkdir /tmp/smoke/input
             cp /tmp/input/examples/input/example-simulation-svc.res /tmp/smoke/
             cp /tmp/input/examples/input/example-simulation-knc-vertical.res /tmp/smoke/
-            cp /tmp/input/examples/input/example-measurement-knc-vertical.acd /tmp/smoke/
-            cp /tmp/input/tests/fixtures/runtime-smoke.toml /tmp/smoke/
-            cp /tmp/input/examples/mappings.toml /tmp/smoke/example-signals.toml
-            cp /tmp/input/examples/input/generated-measurement-svc.json /tmp/smoke/example-measurement-svc.json
             cd /tmp/smoke
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.h5
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-vertical.res -o vertical.simulation.h5
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-knc-vertical.acd -o vertical.measurement.h5
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze runtime-smoke.toml runtime-smoke.toml -r reports
-            test -s reports/report.json && test -s reports/metrics.csv && test -s reports/svc.json
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -o input/generated-simulation-svc.h5
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-vertical.res -o input/generated-simulation-knc-vertical.h5
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze config.toml run-simulation.toml -r reports
+            test -s reports/report.json && test -s reports/metrics.csv && test -s reports/svc.json && test -s reports/knc-vertical.json
           ' < "$smoke_input"
 
       - name: Smoke test Windows release runtime
@@ -133,19 +134,22 @@ jobs:
           $env:PYTHONPATH = "C:\poisoned"
           $env:VIRTUAL_ENV = "C:\poisoned"
           & "$bundle\bin\clab.exe" --version
+          Copy-Item examples\config.toml $smoke
+          Copy-Item examples\run-simulation.toml $smoke
+          Copy-Item examples\setup.toml $smoke
+          Copy-Item examples\mappings.toml $smoke
+          Copy-Item examples\tolerances.toml $smoke
           Copy-Item examples\input\example-simulation-svc.res $smoke
           Copy-Item examples\input\example-simulation-knc-vertical.res $smoke
-           Copy-Item examples\input\example-measurement-knc-vertical.acd $smoke
-           Copy-Item tests\fixtures\runtime-smoke.toml $smoke
-           Copy-Item examples\mappings.toml (Join-Path $smoke "example-signals.toml")
-           Copy-Item examples\input\generated-measurement-svc.json (Join-Path $smoke "example-measurement-svc.json")
           Push-Location $smoke
-          & "$bundle\bin\clab.exe" convert example-simulation-svc.res -o svc.simulation.h5
-          & "$bundle\bin\clab.exe" convert example-simulation-knc-vertical.res -o vertical.simulation.h5
-           & "$bundle\bin\clab.exe" convert example-measurement-knc-vertical.acd -o vertical.measurement.h5
-          & "$bundle\bin\clab.exe" analyze runtime-smoke.toml runtime-smoke.toml -r reports
-           if (-not (Test-Path reports\report.json) -or -not (Test-Path reports\metrics.csv) -or -not (Test-Path reports\svc.json)) { throw "missing SVC report bundle" }
-          if (-not (Test-Path reports\knc-vertical.json)) { throw "missing vertical report" }
+          New-Item -ItemType Directory -Path input | Out-Null
+          & "$bundle\bin\clab.exe" convert example-simulation-svc.res -o input\generated-simulation-svc.h5
+          & "$bundle\bin\clab.exe" convert example-simulation-knc-vertical.res -o input\generated-simulation-knc-vertical.h5
+          & "$bundle\bin\clab.exe" analyze config.toml run-simulation.toml -r reports
+          foreach ($report in "report.json", "metrics.csv", "svc.json", "knc-vertical.json") {
+            $path = Join-Path reports $report
+            if (-not (Test-Path $path) -or (Get-Item $path).Length -eq 0) { throw "missing report: $path" }
+          }
           Pop-Location
 
       - name: Smoke test macOS release runtime
@@ -158,18 +162,16 @@ jobs:
           bundle="$smoke/embed-bundle-macos-x86_64"
           clean_env=(env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned DYLD_LIBRARY_PATH=/poisoned)
           "${clean_env[@]}" "$bundle/bin/clab" --version
-           cp examples/input/example-simulation-svc.res "$smoke/"
-           cp examples/input/example-simulation-knc-vertical.res "$smoke/"
-           cp examples/input/example-measurement-knc-vertical.acd "$smoke/"
-           cp tests/fixtures/runtime-smoke.toml "$smoke/"
-           cp examples/mappings.toml "$smoke/example-signals.toml"
-           cp examples/input/generated-measurement-svc.json "$smoke/example-measurement-svc.json"
+          cp examples/config.toml examples/run-simulation.toml "$smoke/"
+          cp examples/setup.toml examples/mappings.toml examples/tolerances.toml "$smoke/"
+          cp examples/input/example-simulation-svc.res "$smoke/"
+          cp examples/input/example-simulation-knc-vertical.res "$smoke/"
           cd "$smoke"
-           "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.h5
-           "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-knc-vertical.res -o vertical.simulation.h5
-           "${clean_env[@]}" "$bundle/bin/clab" convert example-measurement-knc-vertical.acd -o vertical.measurement.h5
-          "${clean_env[@]}" "$bundle/bin/clab" analyze runtime-smoke.toml runtime-smoke.toml -r reports
-           test -s reports/report.json && test -s reports/metrics.csv && test -s reports/svc.json
+          mkdir input
+          "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-svc.res -o input/generated-simulation-svc.h5
+          "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-knc-vertical.res -o input/generated-simulation-knc-vertical.h5
+          "${clean_env[@]}" "$bundle/bin/clab" analyze config.toml run-simulation.toml -r reports
+          test -s reports/report.json && test -s reports/metrics.csv && test -s reports/svc.json && test -s reports/knc-vertical.json
 
       - name: Verify archive checksum
         shell: bash
