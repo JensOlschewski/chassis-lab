@@ -115,7 +115,7 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
     let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(stdout.contains("SVC reference analysis: 29 metrics"));
+    assert!(stdout.starts_with("\nSVC\nrunning 29 metrics\n"));
     assert!(stdout.contains("  front_left_mass_kg = 420.0 kg"));
     assert!(stdout.contains("  cg_height_mm = missing mm"));
     assert!(stderr.contains("16 analysis warnings; details in"));
@@ -384,7 +384,7 @@ fn analyzes_svc_hdf5_with_report_bundle() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert!(String::from_utf8_lossy(&result.stdout).contains("SVC analysis"));
+    assert!(String::from_utf8_lossy(&result.stdout).contains("\nSVC\nrunning 29 metrics\n"));
     assert!(!String::from_utf8_lossy(&result.stdout).contains("KnC"));
     assert!(!String::from_utf8_lossy(&result.stderr).contains("warning:"));
     for name in ["report.json", "metrics.csv", "svc.json"] {
@@ -480,7 +480,7 @@ fn analyzes_svc_hdf5_with_missing_units_and_warns() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert!(String::from_utf8_lossy(&result.stdout).contains("SVC analysis"));
+    assert!(String::from_utf8_lossy(&result.stdout).contains("\nSVC\nrunning 29 metrics\n"));
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("analysis warnings; details in"));
     assert!(!stderr.contains("no HDF5 unit metadata"));
@@ -618,6 +618,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+    assert!(String::from_utf8_lossy(&result.stdout).contains("\nSVC\nrunning 29 metrics\n"));
     for name in [
         "report.json",
         "metrics.csv",
