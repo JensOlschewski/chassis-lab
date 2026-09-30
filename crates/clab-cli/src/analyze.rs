@@ -1,7 +1,8 @@
 use std::{
-    fs,
+    env, fs,
     io::{IsTerminal, Write},
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use anyhow::{Context, Result, bail};
@@ -169,7 +170,13 @@ fn write_combined_run(
             None => unreachable!(),
         }
     };
-    let vertical_report = vertical::analyze_input(config, vertical_path, args.output.is_some())?;
+    let footer = analysis_footer(&args.config, config, vertical_path, Some(&args.input))?;
+    let vertical_report = vertical::analyze_input_with_footer(
+        config,
+        vertical_path,
+        args.output.is_some(),
+        Some(&footer),
+    )?;
     print_svc_header(svc_metrics);
     let mut warnings = svc_warnings;
     warnings.extend(vertical_report.warnings.iter().cloned());
@@ -506,7 +513,9 @@ fn write_vertical(
     args: &AnalyzeArgs,
     run: Option<&Path>,
 ) -> Result<()> {
-    let report = vertical::analyze_input(config, input, args.output.is_some())?;
+    let footer = analysis_footer(&args.config, config, input, run)?;
+    let report =
+        vertical::analyze_input_with_footer(config, input, args.output.is_some(), Some(&footer))?;
     print_warnings(&report.warnings, args);
     let Some(output) = &args.output else {
         return Ok(());
@@ -556,6 +565,49 @@ fn add_vertical_inputs<'a>(inputs: &mut Vec<&'a Path>, config: &'a clab_core::co
     if let Some(static_simulation) = &vertical.static_simulation_hdf5 {
         inputs.push(static_simulation);
     }
+}
+
+fn analysis_footer(
+    config_path: &Path,
+    config: &clab_core::config::CaseConfig,
+    input: &Path,
+    run: Option<&Path>,
+) -> Result<String> {
+    let mut lines = vec![
+        format!("Config: {}", absolute_path(config_path)?.display()),
+        format!("Case: {} | {}", config.name, config.loadcase),
+        format!("Input: {}", absolute_path(input)?.display()),
+    ];
+    if let Some(run) = run {
+        lines.push(format!("Run: {}", absolute_path(run)?.display()));
+    }
+    lines.push(format!("Created by: {}", report_creator()));
+    Ok(lines.join("\n"))
+}
+
+fn absolute_path(path: &Path) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.into())
+    } else {
+        Ok(env::current_dir()?.join(path))
+    }
+}
+
+fn report_creator() -> String {
+    let user = env::var("USER")
+        .or_else(|_| env::var("USERNAME"))
+        .unwrap_or_else(|_| "unknown-user".into());
+    let host = env::var("HOSTNAME").unwrap_or_else(|_| {
+        Command::new("hostname")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "unknown-host".into())
+    });
+    format!("{user}@{host}")
 }
 
 fn provenance(path: &Path) -> Result<serde_json::Value> {

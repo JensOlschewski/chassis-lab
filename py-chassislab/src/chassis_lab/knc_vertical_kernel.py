@@ -122,16 +122,25 @@ def _at_zero(grid: np.ndarray, values: np.ndarray) -> float:
     return float(np.interp(0.0, grid, values))
 
 
-def plot(curves_json: str, source_label: str = "Simulation") -> str:
+def plot(
+    curves_json: str,
+    source_label: str = "Simulation",
+    footer: str = "",
+    logo: bytes | None = None,
+) -> str:
     """Render direct vertical curves as deterministic four-corner SVG reports.
 
     ``curves_json`` is a JSON array of canonical curve records with ``corner``,
     ``signal``, ``unit``, and signal-unit ``values`` fields. Wheel-center values
     are millimetres; optional load, toe, and camber values use their declared
-    units. ``source_label`` identifies each line in SVG legends. Return JSON
+    units. ``source_label`` identifies each line in SVG legends. ``footer`` and
+    ``logo`` use comparison-report footer layout when supplied. Return JSON
     mapping report-relative paths to SVG document strings.
     """
     plt = _pyplot()
+    logo_image = None
+    if footer and logo is not None:
+        logo_image = plt.imread(BytesIO(logo), format="png")
     curves = json.loads(curves_json)
     reports = {}
     corners = (
@@ -159,6 +168,8 @@ def plot(curves_json: str, source_label: str = "Simulation") -> str:
             "mm",
             source_label,
             plt,
+            footer=footer,
+            logo_image=logo_image,
         )
 
     for signal, title, unit in (
@@ -179,6 +190,8 @@ def plot(curves_json: str, source_label: str = "Simulation") -> str:
                 unit,
                 source_label,
                 plt,
+                footer=footer,
+                logo_image=logo_image,
             )
             if signal == "wheel_load":
                 reports[
@@ -193,6 +206,8 @@ def plot(curves_json: str, source_label: str = "Simulation") -> str:
                     source_label,
                     plt,
                     transform=_wheel_rate,
+                    footer=footer,
+                    logo_image=logo_image,
                 )
     return json.dumps(reports)
 
@@ -340,10 +355,25 @@ def _plot_group(
     source_label: str,
     plt: object,
     transform: object = None,
+    footer: str = "",
+    logo_image: np.ndarray | None = None,
 ) -> str:
-    figure, panels = plt.subplots(
-        2, 2, figsize=(11.69, 8.27), layout="constrained"
-    )
+    if footer:
+        footer_lines = footer.count("\n") + 2
+        footer_height = min(0.12 + footer_lines * 0.025, 0.35)
+        figure, panels = plt.subplots(2, 2, figsize=(11.69, 8.27))
+        figure.subplots_adjust(
+            left=0.08,
+            right=0.97,
+            top=0.89,
+            bottom=footer_height,
+            wspace=0.28,
+            hspace=0.42,
+        )
+    else:
+        figure, panels = plt.subplots(
+            2, 2, figsize=(11.69, 8.27), layout="constrained"
+        )
     figure.suptitle(title, fontsize=16)
     for panel, (corner, label) in zip(panels.flat, corners, strict=True):
         x = np.asarray(indexed[(corner, x_signal)]["values"], dtype=np.float64)
@@ -354,12 +384,27 @@ def _plot_group(
             )
         if transform is not None:
             x, y = transform(x, y)
-        panel.plot(x, y, color="#1f4e79", linewidth=1.8, label=source_label)
+        panel.plot(x, y, color="#000000", linewidth=1.8, label=source_label)
         panel.set_title(label, loc="left", fontweight="bold")
         panel.set_xlabel(f"{_label(x_signal)} [mm]")
         panel.set_ylabel(f"{_label(y_signal)} [{unit}]")
         panel.grid(True, color="#d9e2f3", linewidth=0.8)
         panel.legend(loc="best", frameon=False)
+    if footer:
+        figure.text(
+            0.02,
+            0.025,
+            f"{footer}\nGenerated: "
+            f"{datetime.now().astimezone():%Y-%m-%d %H:%M %Z}",
+            fontsize=7,
+            color="#4a4a4a",
+            va="bottom",
+        )
+        if logo_image is not None:
+            logo_height = min(footer_lines * 0.017, footer_height - 0.05)
+            logo_panel = figure.add_axes((0.80, 0.025, 0.18, logo_height))
+            logo_panel.imshow(logo_image)
+            logo_panel.axis("off")
     output = StringIO()
     figure.savefig(
         output, format="svg", metadata={"Date": None, "Creator": "ChassisLab"}
