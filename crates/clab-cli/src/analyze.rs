@@ -37,21 +37,26 @@ struct SvcReferenceReports {
 }
 
 pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
-    if !args.input.is_file() {
-        bail!(
-            "input file does not exist or is not a file: {}",
-            args.input.display()
-        );
-    }
     let extension = args
         .input
         .extension()
         .and_then(|value| value.to_str())
         .map(str::to_ascii_lowercase);
     match extension.as_deref() {
-        Some("toml") => analyze_run(&args),
-        Some("json") => analyze_svc(&args),
-        Some("h5" | "hdf5") => analyze_hdf5(&args),
+        Some("toml") => {
+            if !args.input.is_file() {
+                bail!("run manifest cannot be found: {}", args.input.display());
+            }
+            analyze_run(&args)
+        }
+        Some("json") => {
+            validate_input_file(&args.input)?;
+            analyze_svc(&args)
+        }
+        Some("h5" | "hdf5") => {
+            validate_input_file(&args.input)?;
+            analyze_hdf5(&args)
+        }
         _ => bail!("analyze accepts run TOML, SVC JSON, or normalized HDF5 input"),
     }
 }
@@ -99,6 +104,13 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
         }
         (false, None) => Ok(()),
     }
+}
+
+fn validate_input_file(path: &Path) -> Result<()> {
+    if !path.is_file() {
+        bail!("input file cannot be found: {}", path.display());
+    }
+    Ok(())
 }
 
 fn write_combined_run(

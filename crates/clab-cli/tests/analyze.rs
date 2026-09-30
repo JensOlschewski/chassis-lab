@@ -244,6 +244,32 @@ fn analyzes_svc_measurement_run_with_manifest_metadata() {
 }
 
 #[test]
+fn run_reports_missing_configured_input() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let directory = tempdir().unwrap();
+    let run = directory.path().join("run.toml");
+    fs::write(&run, "[input.svc]\nfile = 'input/missing.json'\n").unwrap();
+
+    let result = clab()
+        .args([
+            "analyze",
+            examples.join("config.toml").to_str().unwrap(),
+            run.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!result.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&result.stderr).trim(),
+        format!(
+            "error: failed to load config/run '{}': input/missing.json cannot be found",
+            run.display()
+        )
+    );
+}
+
+#[test]
 fn rejects_svc_json_without_source_kind() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");

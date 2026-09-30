@@ -127,6 +127,7 @@ pub fn load_config_and_run(
 ) -> Result<CaseConfig, Box<dyn std::error::Error>> {
     let (config_path, config_root) = load_toml(config.as_ref())?;
     let (run_path, run_root) = load_toml(run.as_ref())?;
+    validate_run_input_files(&run_root, &run_path)?;
     let mut config_root = load_function_role_files(&config_root, &config_path)?;
     // Run metadata never inherits from reusable shared configuration.
     config_root.remove("meta");
@@ -140,6 +141,53 @@ pub fn load_config_and_run(
     let mut root = config_root;
     merge_map(&mut root, &run_root);
     parse_root(&root, &config_path)
+}
+
+fn validate_run_input_files(
+    root: &toml::Table,
+    run: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(input) = root.get("input").and_then(Value::as_table) else {
+        return Ok(());
+    };
+    if let Some(svc) = input.get("svc").and_then(Value::as_table) {
+        validate_run_input_table(svc, run)?;
+    }
+    if let Some(knc) = input.get("knc").and_then(Value::as_table) {
+        if let Some(vertical) = knc.get("vertical").and_then(Value::as_table) {
+            validate_run_input_table(vertical, run)?;
+        }
+        if let Some(static_input) = knc.get("static").and_then(Value::as_table) {
+            validate_run_input_table(static_input, run)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_run_input_table(
+    input: &toml::map::Map<String, Value>,
+    run: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for key in ["file", "input_file", "static_file"] {
+        let Some(file) = input.get(key).and_then(Value::as_str) else {
+            continue;
+        };
+        let path = expand(Path::new(file))?;
+        let path = if path.is_absolute() {
+            path
+        } else {
+            run.parent().unwrap_or_else(|| Path::new(".")).join(path)
+        };
+        if !path.is_file() {
+            return Err(ConfigError(format!("{file} cannot be found")).into());
+        }
+    }
+    for key in ["simulation", "measurement", "static_simulation"] {
+        if let Some(input) = input.get(key).and_then(Value::as_table) {
+            validate_run_input_table(input, run)?;
+        }
+    }
+    Ok(())
 }
 
 /// Load shared analysis configuration for a direct normalized input.
