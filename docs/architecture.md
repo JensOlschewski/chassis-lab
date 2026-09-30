@@ -151,7 +151,7 @@ using channel name exactly `time` for sample axis and retaining that channel.
 
 ## Configuration
 
-`examples/example-config.toml` defines combined SVC and vertical validation.
+`examples/config.toml` defines combined SVC and vertical validation.
 Canonical configuration is function-first:
 
 ```toml
@@ -181,8 +181,9 @@ normalization. Nested simulation/measurement role tables remain compatible.
 External role files can replace inline sections. Input JSON combines SVC and
 KnC paths; setup JSON contains setup and window data; mappings TOML contains
 `[svc]` and `[knc]` bases plus test overrides; validation TOML contains optional
-policy. `[meta]` contains only `name` and `loadcase`; domain is derived. Paths
-resolve relative to main config.
+policy. `[meta]` contains optional run `name` and `loadcase`; domain is derived.
+Run metadata overrides shared configuration metadata, and absent values report
+as `undefined`. Paths resolve relative to main config.
 
 `[setup.knc.vertical]` contains setup flags and window bounds. Signal maps contain
 canonical names, entities, components, and units. Mapping precedence is shared <

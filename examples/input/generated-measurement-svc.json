@@ -1,10 +1,6 @@
 {
     "schema_version": 1,
     "source_kind": "measurement",
-    "case": {
-        "name": "example-config",
-        "loadcase": "example-loadcase"
-    },
     "coordinate_system": {
         "cg_x_origin": "front_axle_wheel_center",
         "cg_x_positive": "rearward"

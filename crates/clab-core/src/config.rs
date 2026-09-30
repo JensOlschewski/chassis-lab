@@ -119,14 +119,18 @@ fn parse_root(
 /// Load shared analysis configuration and one run manifest.
 ///
 /// External role files are expanded before both documents are merged, so each
-/// role keeps paths relative to its own TOML file.
+/// role keeps paths relative to its own TOML file. Run metadata identifies each
+/// run; absent metadata is reported as `undefined`.
 pub fn load_config_and_run(
     config: impl AsRef<Path>,
     run: impl AsRef<Path>,
 ) -> Result<CaseConfig, Box<dyn std::error::Error>> {
     let (config_path, config_root) = load_toml(config.as_ref())?;
     let (run_path, run_root) = load_toml(run.as_ref())?;
-    let config_root = load_function_role_files(&config_root, &config_path)?;
+    let mut config_root = load_function_role_files(&config_root, &config_path)?;
+    // Run metadata never inherits from reusable shared configuration.
+    config_root.remove("meta");
+    config_root.remove("case");
     let mut run_root = Value::Table(run_root);
     resolve_external_paths(
         &mut run_root,
@@ -138,10 +142,64 @@ pub fn load_config_and_run(
     parse_root(&root, &config_path)
 }
 
+pub fn validate_run_input_files(run: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+    let (run, root) = load_toml(run.as_ref())?;
+    validate_run_input_tables(&root, &run)
+}
+
+fn validate_run_input_tables(
+    root: &toml::Table,
+    run: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(input) = root.get("input").and_then(Value::as_table) else {
+        return Ok(());
+    };
+    if let Some(svc) = input.get("svc").and_then(Value::as_table) {
+        validate_run_input_table(svc, run)?;
+    }
+    if let Some(knc) = input.get("knc").and_then(Value::as_table) {
+        if let Some(vertical) = knc.get("vertical").and_then(Value::as_table) {
+            validate_run_input_table(vertical, run)?;
+        }
+        if let Some(static_input) = knc.get("static").and_then(Value::as_table) {
+            validate_run_input_table(static_input, run)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_run_input_table(
+    input: &toml::map::Map<String, Value>,
+    run: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for key in ["file", "input_file", "static_file"] {
+        let Some(file) = input.get(key).and_then(Value::as_str) else {
+            continue;
+        };
+        let path = expand(Path::new(file))?;
+        let path = if path.is_absolute() {
+            path
+        } else {
+            run.parent().unwrap_or_else(|| Path::new(".")).join(path)
+        };
+        if !path.is_file() {
+            return Err(ConfigError(format!("{file} cannot be found")).into());
+        }
+    }
+    for key in ["simulation", "measurement", "static_simulation"] {
+        if let Some(input) = input.get(key).and_then(Value::as_table) {
+            validate_run_input_table(input, run)?;
+        }
+    }
+    Ok(())
+}
+
 /// Load shared analysis configuration for a direct normalized input.
 ///
 /// `vertical` supplies the same file in both roles solely to build its typed
 /// mapping/setup configuration. The caller must only read its actual source.
+/// Direct input has no run manifest, so absent `[meta]` name and loadcase are
+/// reported as `undefined`.
 pub fn load_config_with_input(
     config: impl AsRef<Path>,
     input: impl AsRef<Path>,
@@ -217,26 +275,29 @@ fn parse_function_first(
         ],
         "top level",
     )?;
-    let (case, case_where) = if let Some(meta) = root.get("meta") {
-        (table(meta, "[meta]")?, "[meta]")
-    } else {
+    let (name, loadcase) = if let Some(meta) = root.get("meta") {
+        let meta = table(meta, "[meta]")?;
+        keys(meta, &["name", "loadcase"], "[meta]")?;
         (
-            table(
-                root.get("case")
-                    .ok_or_else(|| ConfigError("missing required [meta] table".into()))?,
-                "[case]",
-            )?,
-            "[case]",
+            meta.get("name")
+                .map(|value| string_value(value, "[meta].name"))
+                .transpose()?
+                .unwrap_or_else(|| "undefined".into()),
+            meta.get("loadcase")
+                .map(|value| string_value(value, "[meta].loadcase"))
+                .transpose()?
+                .unwrap_or_else(|| "undefined".into()),
         )
-    };
-    let case_keys = if case_where == "[case]" {
-        &["name", "domain", "loadcase"][..]
+    } else if let Some(case) = root.get("case") {
+        let case = table(case, "[case]")?;
+        keys(case, &["name", "domain", "loadcase"], "[case]")?;
+        (
+            string(case, "name", "[case]")?,
+            string(case, "loadcase", "[case]")?,
+        )
     } else {
-        &["name", "loadcase"][..]
+        ("undefined".into(), "undefined".into())
     };
-    keys(case, case_keys, case_where)?;
-    require(case, "name", case_where)?;
-    require(case, "loadcase", case_where)?;
     let input = table(value(&root, "input", "top level")?, "[input]")?;
     keys(input, &["svc", "knc"], "[input]")?;
     let physics = root
@@ -274,8 +335,8 @@ fn parse_function_first(
     let has_svc = !simulation_json.as_os_str().is_empty();
     Ok(CaseConfig {
         path: path.to_path_buf(),
-        name: string(case, "name", case_where)?,
-        loadcase: string(case, "loadcase", case_where)?,
+        name,
+        loadcase,
         simulation_json,
         svc_source_kind: has_svc.then_some(svc_source_kind),
         gravity,
@@ -2113,6 +2174,89 @@ mod tests {
     }
 
     #[test]
+    fn run_metadata_overrides_shared_configuration_for_each_run() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("config.toml");
+        let first_input = directory.path().join("first.h5");
+        let second_input = directory.path().join("second.h5");
+        source_kind(&first_input, "simulation");
+        source_kind(&second_input, "simulation");
+        fs::write(
+            &config,
+            "[meta]\nname='shared'\nloadcase='shared'\n[physics]\ngravity=9.80665\n[signals.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n",
+        )
+        .unwrap();
+        let first_run = directory.path().join("first.toml");
+        fs::write(
+            &first_run,
+            format!(
+                "[meta]\nname='first run'\nloadcase='curb'\n[input.svc]\nfile={:?}\n",
+                first_input
+            ),
+        )
+        .unwrap();
+        let second_run = directory.path().join("second.toml");
+        fs::write(
+            &second_run,
+            format!(
+                "[meta]\nname='second run'\nloadcase='two-up'\n[input.svc]\nfile={:?}\n",
+                second_input
+            ),
+        )
+        .unwrap();
+        let undefined_run = directory.path().join("undefined.toml");
+        fs::write(
+            &undefined_run,
+            format!("[input.svc]\nfile={first_input:?}\n"),
+        )
+        .unwrap();
+
+        let first = load_config_and_run(&config, &first_run).unwrap();
+        let second = load_config_and_run(&config, &second_run).unwrap();
+        let undefined = load_config_and_run(&config, &undefined_run).unwrap();
+
+        assert_eq!(
+            (first.name.as_str(), first.loadcase.as_str()),
+            ("first run", "curb")
+        );
+        assert_eq!(
+            (second.name.as_str(), second.loadcase.as_str()),
+            ("second run", "two-up")
+        );
+        assert_eq!(first.simulation_json, absolute(&first_input).unwrap());
+        assert_eq!(second.simulation_json, absolute(&second_input).unwrap());
+        assert_eq!(undefined.name, "undefined");
+        assert_eq!(undefined.loadcase, "undefined");
+    }
+
+    #[test]
+    fn direct_input_reports_undefined_metadata_when_absent() {
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("input.h5");
+        source_kind(&input, "simulation");
+        let config = directory.path().join("config.toml");
+        fs::write(
+            &config,
+            "[physics]\ngravity=9.80665\n[signals.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n",
+        )
+        .unwrap();
+
+        let loaded = load_config_with_input(&config, &input, false).unwrap();
+
+        assert_eq!(loaded.name, "undefined");
+        assert_eq!(loaded.loadcase, "undefined");
+
+        fs::write(
+            &config,
+            "[meta]\nname='named'\n[physics]\ngravity=9.80665\n[signals.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n",
+        )
+        .unwrap();
+        let loaded = load_config_with_input(&config, &input, false).unwrap();
+        assert_eq!(loaded.name, "named");
+        assert_eq!(loaded.loadcase, "undefined");
+    }
+
+    #[test]
     fn rejects_static_baseline_with_measurement_source_kind() {
         let d = tempfile::tempdir().unwrap();
         let input = d.path().join("vertical.h5");
@@ -2190,8 +2334,8 @@ mod tests {
             &config,
             format!(
                 "[meta]\nname='n'\nloadcase='l'\n[setup]\nfile='{}'\n[signals]\nfile='{}'\n[input.knc.vertical.static_simulation]\nfile='{}'\n",
-                examples.join("example-setup.toml").display(),
-                examples.join("example-signal-mappings.toml").display(),
+                examples.join("setup.toml").display(),
+                examples.join("mappings.toml").display(),
                 simulation.display(),
             ),
         )
@@ -2214,9 +2358,12 @@ mod tests {
     fn example_templates_load_before_generated_outputs_exist() {
         let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
 
-        assert!(load_config(examples.join("example-config-flat.toml")).is_ok());
         assert!(
-            load_config_and_run(examples.join("config.toml"), examples.join("run.toml")).is_ok()
+            load_config_and_run(
+                examples.join("config.toml"),
+                examples.join("run-simulation.toml")
+            )
+            .is_ok()
         );
     }
 }

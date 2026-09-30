@@ -52,10 +52,19 @@ fn analyzes_svc_with_report_bundle() {
         String::from_utf8_lossy(&converted.stderr)
     );
     let analysis_output = directory.path().join("analysis");
+    let direct_config = directory.path().join("config.toml");
+    fs::write(
+        &direct_config,
+        format!(
+            "[physics]\ngravity = 9.80665\n[signals]\nfile = {:?}\n",
+            examples.join("mappings.toml")
+        ),
+    )
+    .unwrap();
     let result = clab()
         .args([
             "analyze",
-            config.to_str().unwrap(),
+            direct_config.to_str().unwrap(),
             input.to_str().unwrap(),
             "-r",
             analysis_output.to_str().unwrap(),
@@ -74,14 +83,16 @@ fn analyzes_svc_with_report_bundle() {
         serde_json::from_str(&fs::read_to_string(analysis_output.join("report.json")).unwrap())
             .unwrap();
     assert_eq!(report["command"], "analyze");
+    assert_eq!(report["case"]["name"], "undefined");
+    assert_eq!(report["case"]["loadcase"], "undefined");
     assert!(report["metrics"].as_array().unwrap().len() > 20);
 }
 
 #[test]
 fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    let config = examples.join("example-config.toml");
-    let input = examples.join("input/example-measurement-svc.json");
+    let config = examples.join("config.toml");
+    let input = examples.join("input/generated-measurement-svc.json");
     if !config.is_file() || !input.is_file() {
         return;
     }
@@ -146,6 +157,8 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["case"]["name"], "undefined");
+    assert_eq!(report["case"]["loadcase"], "undefined");
     let metrics = report["metrics"].as_array().unwrap();
     assert_eq!(metrics.len(), 29);
     assert_eq!(
@@ -190,6 +203,73 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
 }
 
 #[test]
+fn analyzes_svc_measurement_run_with_manifest_metadata() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let config = examples.join("config.toml");
+    let input = examples.join("input/generated-measurement-svc.json");
+    if !config.is_file() || !input.is_file() {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let run = directory.path().join("run.toml");
+    fs::write(
+        &run,
+        format!(
+            "[meta]\nname = 'measurement run'\nloadcase = 'curb'\n\n[input.svc]\nfile = {:?}\n",
+            input
+        ),
+    )
+    .unwrap();
+    let output = directory.path().join("analysis");
+    let result = clab()
+        .args([
+            "analyze",
+            config.to_str().unwrap(),
+            run.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["case"]["name"], "measurement run");
+    assert_eq!(report["case"]["loadcase"], "curb");
+    assert_eq!(report["inputs"]["run"]["path"].as_str(), run.to_str());
+}
+
+#[test]
+fn run_reports_missing_configured_input() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let directory = tempdir().unwrap();
+    let run = directory.path().join("run.toml");
+    fs::write(&run, "[input.svc]\nfile = 'input/missing.json'\n").unwrap();
+
+    let result = clab()
+        .args([
+            "analyze",
+            examples.join("config.toml").to_str().unwrap(),
+            run.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!result.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&result.stderr).trim(),
+        format!(
+            "error: failed to load config/run '{}': input/missing.json cannot be found",
+            run.display()
+        )
+    );
+}
+
+#[test]
 fn rejects_svc_json_without_source_kind() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
@@ -224,7 +304,7 @@ fn rejects_missing_normalized_input_without_hdf5_diagnostics() {
 
     assert_eq!(result.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(stderr.contains("input file does not exist or is not a file"));
+    assert!(stderr.contains("input file cannot be found"));
     assert!(stderr.contains(input.to_str().unwrap()));
     assert!(!stderr.contains("H5Fopen"));
 }
@@ -310,6 +390,11 @@ fn analyzes_svc_hdf5_with_report_bundle() {
     for name in ["report.json", "metrics.csv", "svc.json"] {
         assert!(output.join(name).is_file(), "missing {name}");
     }
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    let svc: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("svc.json")).unwrap()).unwrap();
+    assert_eq!(svc["inputs"]["run"], report["inputs"]["run"]);
     assert!(!output.join("knc-vertical.json").exists());
 }
 
@@ -512,7 +597,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     fs::write(
         &run,
         format!(
-            "[input.svc]\nfile = {:?}\n\n[input.knc.vertical]\nfile = {:?}\n",
+            "[meta]\nname = 'two-up run'\nloadcase = 'two-up'\n\n[input.svc]\nfile = {:?}\n\n[input.knc.vertical]\nfile = {:?}\n",
             svc_simulation, vertical_simulation
         ),
     )
@@ -544,4 +629,12 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["domains"].as_array().unwrap().len(), 2);
+    assert_eq!(report["case"]["name"], "two-up run");
+    assert_eq!(report["case"]["loadcase"], "two-up");
+    for name in ["svc.json", "knc-vertical.json"] {
+        let detail: Value =
+            serde_json::from_str(&fs::read_to_string(output.join(name)).unwrap()).unwrap();
+        assert_eq!(detail["case"], report["case"]);
+        assert_eq!(detail["inputs"]["run"], report["inputs"]["run"]);
+    }
 }

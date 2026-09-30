@@ -1,7 +1,5 @@
-# Test setup.
-# Defines test conditions and the evaluated wheel-travel window.
-
-[knc.vertical]
+# Defines test condition
+[knc]
 brakes_applied = false
 engine_running = false
 front_arb_connected = true
