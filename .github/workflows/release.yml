@@ -99,7 +99,7 @@ jobs:
             examples/input/example-simulation-svc.res \
             examples/input/example-simulation-knc-vertical.res \
             examples/input/example-measurement-knc-vertical.acd \
-            tests/fixtures/runtime-smoke.toml examples/mappings.toml examples/input/generated-measurement-svc.json
+            tests/fixtures/runtime-smoke.toml tests/fixtures/runtime-smoke-signals.toml examples/input/generated-measurement-svc.json
           docker run --rm --pull=missing -i ubuntu:24.04 bash -ceu '
             mkdir /tmp/input /tmp/bundle /tmp/smoke
             tar -xzf - -C /tmp/input
@@ -109,7 +109,7 @@ jobs:
             cp /tmp/input/examples/input/example-simulation-knc-vertical.res /tmp/smoke/
             cp /tmp/input/examples/input/example-measurement-knc-vertical.acd /tmp/smoke/
             cp /tmp/input/tests/fixtures/runtime-smoke.toml /tmp/smoke/
-            cp /tmp/input/examples/mappings.toml /tmp/smoke/example-signals.toml
+            cp /tmp/input/tests/fixtures/runtime-smoke-signals.toml /tmp/smoke/example-signals.toml
             cp /tmp/input/examples/input/generated-measurement-svc.json /tmp/smoke/example-measurement-svc.json
             cd /tmp/smoke
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
@@ -137,7 +137,7 @@ jobs:
           Copy-Item examples\input\example-simulation-knc-vertical.res $smoke
            Copy-Item examples\input\example-measurement-knc-vertical.acd $smoke
            Copy-Item tests\fixtures\runtime-smoke.toml $smoke
-           Copy-Item examples\mappings.toml (Join-Path $smoke "example-signals.toml")
+           Copy-Item tests\fixtures\runtime-smoke-signals.toml (Join-Path $smoke "example-signals.toml")
            Copy-Item examples\input\generated-measurement-svc.json (Join-Path $smoke "example-measurement-svc.json")
           Push-Location $smoke
           & "$bundle\bin\clab.exe" convert example-simulation-svc.res -o svc.simulation.h5
@@ -162,7 +162,7 @@ jobs:
            cp examples/input/example-simulation-knc-vertical.res "$smoke/"
            cp examples/input/example-measurement-knc-vertical.acd "$smoke/"
            cp tests/fixtures/runtime-smoke.toml "$smoke/"
-           cp examples/mappings.toml "$smoke/example-signals.toml"
+           cp tests/fixtures/runtime-smoke-signals.toml "$smoke/example-signals.toml"
            cp examples/input/generated-measurement-svc.json "$smoke/example-measurement-svc.json"
           cd "$smoke"
            "${clean_env[@]}" "$bundle/bin/clab" convert example-simulation-svc.res -o svc.simulation.h5
