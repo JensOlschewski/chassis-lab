@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
 const AXES: [&str; 3] = ["x", "y", "z"];
+const DEFAULT_GRADIENT_POINTS_MM: f64 = 5.0;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Curve {
@@ -44,6 +45,7 @@ pub(crate) struct Reports {
     pub detail: String,
     pub plots: BTreeMap<String, String>,
     pub curve_count: usize,
+    pub metrics: Vec<serde_json::Value>,
     pub warnings: Vec<String>,
     pub normalization: serde_json::Value,
 }
@@ -101,6 +103,8 @@ pub(crate) fn analyze_input_with_footer(
             serde_json::json!({"method": "measurement_native"}),
         ),
     };
+    let relative_travel = normalization["method"] != "none";
+    let metrics = gradient_metrics(config, &curves, relative_travel, &mut warnings)?;
     warnings.sort();
     warnings.dedup();
     let detail = serde_json::json!({
@@ -108,7 +112,7 @@ pub(crate) fn analyze_input_with_footer(
         "command": "analyze",
         "domain": "knc",
         "test": "vertical",
-        "metrics": [],
+        "metrics": metrics,
         "curves": curves,
         "warnings": warnings,
         "normalization": normalization,
@@ -122,6 +126,7 @@ pub(crate) fn analyze_input_with_footer(
             BTreeMap::new()
         },
         curve_count,
+        metrics: detail["metrics"].as_array().unwrap().clone(),
         warnings: detail["warnings"]
             .as_array()
             .unwrap()
@@ -130,6 +135,76 @@ pub(crate) fn analyze_input_with_footer(
             .collect(),
         normalization: detail["normalization"].clone(),
     })
+}
+
+/// Calculate secant metrics at configured symmetric wheel-center travel.
+///
+/// Gradient points default to 5 mm, limited to the travel window. Wheel-center
+/// Z must be relative travel: measurement offsets or a static simulation
+/// baseline. Unavailable metrics keep `value: null` and add one warning with
+/// reason.
+fn gradient_metrics(
+    config: &CaseConfig,
+    curves: &[Curve],
+    relative_travel: bool,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<serde_json::Value>> {
+    let Some(window) = config.vertical.as_ref().map(|vertical| &vertical.window) else {
+        return Ok(Vec::new());
+    };
+    let gradient = window.metric_gradient_points_mm.unwrap_or_else(|| {
+        DEFAULT_GRADIENT_POINTS_MM
+            .min(-window.minimum_mm)
+            .min(window.maximum_mm)
+    });
+    if gradient <= 0.0 {
+        warnings.push(format!(
+            "KnC vertical travel window {}..{} mm does not contain 0 mm; vertical metrics skipped",
+            window.minimum_mm, window.maximum_mm
+        ));
+        return Ok(Vec::new());
+    }
+    if !relative_travel {
+        warnings.push(
+            "KnC vertical metrics require static_simulation normalization; vertical metrics skipped"
+                .into(),
+        );
+        return Ok(Vec::new());
+    }
+    let curves = serde_json::to_string(curves)?;
+    let response: String = with_kernel(|py, module| {
+        let request = PyDict::new(py);
+        request.set_item("gradient_mm", gradient)?;
+        request.set_item("curves", &curves)?;
+        module.getattr("metrics")?.call1((request,))?.extract()
+    })
+    .context("failed to calculate vertical metrics with embedded Python")?;
+    let response: serde_json::Value = serde_json::from_str(&response)
+        .context("embedded Python returned invalid vertical metrics")?;
+    let metrics = response["metrics"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("embedded Python returned incomplete vertical metrics"))?;
+    Ok(metrics
+        .iter()
+        .map(|metric| {
+            if let Some(reason) = metric["reason"].as_str() {
+                warnings.push(format!(
+                    "KnC vertical metric '{}' unavailable: {reason}",
+                    metric["metric"].as_str().unwrap_or_default()
+                ));
+            }
+            serde_json::json!({
+                "domain": "knc",
+                "test": "vertical",
+                "metric": metric["metric"],
+                "unit": metric["unit"],
+                "value": metric["value"],
+                "interval_mm": [-gradient, gradient],
+                "lower": metric["lower"],
+                "upper": metric["upper"],
+            })
+        })
+        .collect())
 }
 
 /// Render same canonical curves together. Rust owns input selection; Python only draws arrays.
@@ -147,33 +222,10 @@ pub(crate) fn compare_plots(
             .map(|(label, curves)| serde_json::json!({"label": label, "curves": curves}))
             .collect::<Vec<_>>(),
     )?;
-    let source = CStr::from_bytes_with_nul(
-        concat!(
-            include_str!("../../../../py-chassislab/src/chassis_lab/knc_vertical_kernel.py"),
-            "\0"
-        )
-        .as_bytes(),
-    )?;
-    let reports = Python::attach(|py| -> PyResult<String> {
-        add_venv_site_packages(py)?;
-        let module = PyModule::from_code(
-            py,
-            source,
-            c"knc_vertical_kernel.py",
-            c"chassis_lab.knc_vertical_kernel",
-        )?;
+    let reports: String = with_kernel(|py, module| {
         module
             .getattr("plot_compare")?
-            .call1((
-                &baseline,
-                &candidates,
-                baseline_label,
-                footer,
-                PyBytes::new(
-                    py,
-                    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/flb-logo.png")),
-                ),
-            ))?
+            .call1((&baseline, &candidates, baseline_label, footer, logo(py)))?
             .extract()
     })
     .context("failed to generate vertical comparison SVG reports with embedded Python")?;
@@ -209,21 +261,7 @@ pub(crate) fn compare_metrics(
     }
     let curves = comparison_curves(baseline, candidate)?;
     let curves = serde_json::to_string(&curves)?;
-    let source = CStr::from_bytes_with_nul(
-        concat!(
-            include_str!("../../../../py-chassislab/src/chassis_lab/knc_vertical_kernel.py"),
-            "\0"
-        )
-        .as_bytes(),
-    )?;
-    let response = Python::attach(|py| -> PyResult<String> {
-        add_venv_site_packages(py)?;
-        let module = PyModule::from_code(
-            py,
-            source,
-            c"knc_vertical_kernel.py",
-            c"chassis_lab.knc_vertical_kernel",
-        )?;
+    let response: String = with_kernel(|py, module| {
         let request = PyDict::new(py);
         request.set_item("grid", &grid)?;
         request.set_item("curves", &curves)?;
@@ -565,6 +603,18 @@ fn curve_plots(
     footer: &str,
 ) -> Result<BTreeMap<String, String>> {
     let curves = serde_json::to_string(curves)?;
+    let reports: String = with_kernel(|py, module| {
+        module
+            .getattr("plot")?
+            .call1((curves, source_label, footer, logo(py)))?
+            .extract()
+    })
+    .context("failed to generate vertical SVG reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'")?;
+    serde_json::from_str(&reports).context("embedded Python returned invalid vertical SVG reports")
+}
+
+/// Load embedded vertical kernel and run `call` with it.
+fn with_kernel<T>(call: impl FnOnce(Python<'_>, &Bound<'_, PyModule>) -> PyResult<T>) -> Result<T> {
     let source = CStr::from_bytes_with_nul(
         concat!(
             include_str!("../../../../py-chassislab/src/chassis_lab/knc_vertical_kernel.py"),
@@ -572,7 +622,7 @@ fn curve_plots(
         )
         .as_bytes(),
     )?;
-    let reports = Python::attach(|py| -> PyResult<String> {
+    Ok(Python::attach(|py| -> PyResult<T> {
         add_venv_site_packages(py)?;
         let module = PyModule::from_code(
             py,
@@ -580,21 +630,15 @@ fn curve_plots(
             c"knc_vertical_kernel.py",
             c"chassis_lab.knc_vertical_kernel",
         )?;
-        module
-            .getattr("plot")?
-            .call1((
-                curves,
-                source_label,
-                footer,
-                PyBytes::new(
-                    py,
-                    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/flb-logo.png")),
-                ),
-            ))?
-            .extract()
-    })
-    .context("failed to generate vertical SVG reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'")?;
-    serde_json::from_str(&reports).context("embedded Python returned invalid vertical SVG reports")
+        call(py, &module)
+    })?)
+}
+
+fn logo(py: Python<'_>) -> Bound<'_, PyBytes> {
+    PyBytes::new(
+        py,
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/flb-logo.png")),
+    )
 }
 
 fn add_venv_site_packages(py: Python<'_>) -> PyResult<()> {

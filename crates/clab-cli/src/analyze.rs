@@ -177,12 +177,14 @@ fn write_combined_run(
         args.output.is_some(),
         Some(&footer),
     )?;
-    print_svc_header(svc_metrics);
+    print_header("SVC", svc_metrics);
     let mut warnings = svc_warnings;
     warnings.extend(vertical_report.warnings.iter().cloned());
     warnings.sort();
     warnings.dedup();
-    print_svc_metrics(svc_report["metrics"].as_array().unwrap());
+    print_metrics(svc_report["metrics"].as_array().unwrap());
+    print_header("KnC Vertical", vertical_report.metrics.len());
+    print_metrics(&vertical_report.metrics);
     print_warnings(&warnings, args);
     let Some(output) = &args.output else {
         return Ok(());
@@ -194,9 +196,9 @@ fn write_combined_run(
         "inputs": {"config": provenance(&args.config)?, "run": provenance(&args.input)?},
         "domains": [
             {"domain": "svc", "metric_count": svc_metrics},
-            {"domain": "knc", "test": "vertical", "metric_count": 0, "curve_count": vertical_report.curve_count}
+            {"domain": "knc", "test": "vertical", "metric_count": vertical_report.metrics.len(), "curve_count": vertical_report.curve_count}
         ],
-        "metrics": svc_report["metrics"],
+        "metrics": svc_report["metrics"].as_array().unwrap().iter().chain(&vertical_report.metrics).collect::<Vec<_>>(),
         "warnings": warnings,
         "normalization": vertical_report.normalization,
     });
@@ -217,7 +219,10 @@ fn write_combined_run(
     vertical_detail["inputs"] = vertical_inputs;
     let mut files = vec![
         ("report.json", serde_json::to_string_pretty(&bundle)? + "\n"),
-        ("metrics.csv", svc_csv),
+        (
+            "metrics.csv",
+            svc_csv + &vertical_csv_rows(&config.name, &vertical_report.metrics)?,
+        ),
         (
             "svc.json",
             serde_json::to_string_pretty(&svc_detail)? + "\n",
@@ -328,8 +333,8 @@ fn write_svc_reference(
         reports.report["inputs"]["run"] = provenance(run)?;
         reports.detail = serde_json::to_string_pretty(&reports.report)? + "\n";
     }
-    print_svc_header(reports.report["metrics"].as_array().unwrap().len());
-    print_svc_metrics(reports.report["metrics"].as_array().unwrap());
+    print_header("SVC", reports.report["metrics"].as_array().unwrap().len());
+    print_metrics(reports.report["metrics"].as_array().unwrap());
     print_warnings(&reports.warnings, args);
     if let Some(output) = &args.output {
         write_bundle(
@@ -421,8 +426,8 @@ fn write_svc_report(
     run: Option<&Path>,
     report: svc::Reports,
 ) -> Result<()> {
-    print_svc_header(report.metric_count);
-    print_svc_metrics(report.report["metrics"].as_array().unwrap());
+    print_header("SVC", report.metric_count);
+    print_metrics(report.report["metrics"].as_array().unwrap());
     print_warnings(&report.warnings, args);
     if let Some(output) = &args.output {
         let mut bundle = report.report;
@@ -445,7 +450,7 @@ fn write_svc_report(
     Ok(())
 }
 
-fn print_svc_metrics(metrics: &[serde_json::Value]) {
+fn print_metrics(metrics: &[serde_json::Value]) {
     for metric in metrics {
         let value = if metric["value"].is_null() {
             if std::io::stdout().is_terminal() {
@@ -465,9 +470,9 @@ fn print_svc_metrics(metrics: &[serde_json::Value]) {
     }
 }
 
-fn print_svc_header(metric_count: usize) {
+fn print_header(title: &str, metric_count: usize) {
     println!();
-    println!("SVC");
+    println!("{title}");
     println!("running {metric_count} metrics");
 }
 
@@ -516,6 +521,8 @@ fn write_vertical(
     let footer = analysis_footer(&args.config, config, input, run)?;
     let report =
         vertical::analyze_input_with_footer(config, input, args.output.is_some(), Some(&footer))?;
+    print_header("KnC Vertical", report.metrics.len());
+    print_metrics(&report.metrics);
     print_warnings(&report.warnings, args);
     let Some(output) = &args.output else {
         return Ok(());
@@ -525,7 +532,8 @@ fn write_vertical(
         "command": "analyze",
         "case": {"name": config.name, "loadcase": config.loadcase},
         "inputs": {"config": provenance(&args.config)?, "input": provenance(input)?},
-        "domains": [{"domain": "knc", "test": "vertical", "metric_count": 0, "curve_count": report.curve_count}],
+        "domains": [{"domain": "knc", "test": "vertical", "metric_count": report.metrics.len(), "curve_count": report.curve_count}],
+        "metrics": report.metrics,
         "warnings": report.warnings,
         "normalization": report.normalization,
     });
@@ -538,6 +546,11 @@ fn write_vertical(
     let detail = serde_json::to_string_pretty(&detail)? + "\n";
     let mut files = vec![
         ("report.json", serde_json::to_string_pretty(&bundle)? + "\n"),
+        (
+            "metrics.csv",
+            "run,domain,test,metric,unit,value\n".to_owned()
+                + &vertical_csv_rows(&config.name, &report.metrics)?,
+        ),
         ("knc-vertical.json", detail),
     ];
     files.extend(
@@ -554,6 +567,27 @@ fn write_vertical(
     write_bundle(output, &files, args.force, &inputs)?;
     println!("report: {}", output.display());
     Ok(())
+}
+
+/// Metric rows in shared analysis CSV layout, without header.
+fn vertical_csv_rows(run: &str, metrics: &[serde_json::Value]) -> Result<String> {
+    let mut csv = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(Vec::new());
+    for metric in metrics {
+        csv.write_record([
+            crate::compare::safe_cell(run),
+            "knc".into(),
+            "vertical".into(),
+            crate::compare::safe_cell(metric["metric"].as_str().unwrap_or_default()),
+            metric["unit"].as_str().unwrap_or_default().into(),
+            metric["value"]
+                .as_f64()
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+        ])?;
+    }
+    Ok(String::from_utf8(csv.into_inner()?)?)
 }
 
 fn add_vertical_inputs<'a>(inputs: &mut Vec<&'a Path>, config: &'a clab_core::config::CaseConfig) {
