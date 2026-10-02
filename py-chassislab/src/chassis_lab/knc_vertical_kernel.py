@@ -3,13 +3,98 @@
 import json
 from datetime import datetime
 from io import BytesIO, StringIO
-from math import sqrt
+from math import atan, degrees, sqrt
 
 import numpy as np
+
+CORNERS = ("front_left", "front_right", "rear_left", "rear_right")
+
+# Metric name, response signal, unit, secant calculation.
+GRADIENT_METRICS = (
+    ("bump_steer_deg_per_mm", "toe", "deg/mm", "gradient"),
+    ("bump_camber_deg_per_mm", "camber", "deg/mm", "gradient"),
+    ("wheel_recession_angle_deg", "wheel_center_x", "deg", "angle"),
+    ("wheel_center_x_change_mm", "wheel_center_x", "mm", "change"),
+    ("wheel_center_y_change_mm", "wheel_center_y", "mm", "change"),
+    ("wheel_rate_n_per_mm", "wheel_load", "N/mm", "gradient"),
+)
 
 
 class VerticalKernelError(ValueError):
     """Curve data cannot be compared safely."""
+
+
+def metrics(request: dict[str, object]) -> str:
+    """Calculate secant KnC vertical metrics at symmetric travel points.
+
+    ``request["gradient_mm"]`` is positive offset ``g`` in millimetres.
+    ``request["curves"]`` is canonical curve JSON. Wheel-center Z is the travel
+    axis. Each response is averaged over monotonic branches and evaluated at
+    ``-g`` and ``+g``. Gradient metrics return ``(upper - lower) / (2 g)``;
+    change metrics return ``upper - lower``; recession angle returns
+    ``atan(-(x_upper - x_lower) / (2 g))`` in degrees. Unavailable metrics
+    return ``value = None`` and a ``reason``. Return JSON with ``metrics``.
+    """
+    gradient = float(request["gradient_mm"])
+    curves = json.loads(str(request["curves"]))
+    indexed = {(item["corner"], item["signal"]): item for item in curves}
+    grid = np.array([-gradient, gradient], dtype=np.float64)
+    results = []
+    for corner in CORNERS:
+        for name, signal, unit, kind in GRADIENT_METRICS:
+            result = {
+                "corner": corner,
+                "metric": f"{corner}_{name}",
+                "unit": unit,
+                "value": None,
+                "lower": None,
+                "upper": None,
+                "reason": None,
+            }
+            try:
+                lower, upper = _secant_points(indexed, corner, signal, grid)
+            except VerticalKernelError as error:
+                result["reason"] = str(error)
+            else:
+                delta = upper - lower
+                result["lower"] = lower
+                result["upper"] = upper
+                result["value"] = {
+                    "gradient": delta / (2.0 * gradient),
+                    "change": delta,
+                    "angle": degrees(atan(-delta / (2.0 * gradient))),
+                }[kind]
+            results.append(result)
+    return json.dumps({"metrics": results})
+
+
+def _secant_points(
+    indexed: dict[tuple[str, str], dict[str, object]],
+    corner: str,
+    signal: str,
+    grid: np.ndarray,
+) -> tuple[float, float]:
+    for required in ("wheel_center_z", signal):
+        if (corner, required) not in indexed:
+            raise VerticalKernelError(
+                f"missing canonical signal {corner}_{required}"
+            )
+    travel = np.asarray(
+        indexed[(corner, "wheel_center_z")]["values"], dtype=np.float64
+    )
+    response = np.asarray(indexed[(corner, signal)]["values"], dtype=np.float64)
+    if len(travel) != len(response):
+        raise VerticalKernelError(
+            f"{corner}_{signal} and {corner}_wheel_center_z lengths differ"
+        )
+    try:
+        lower, upper = _mean_monotonic(travel, response, grid, corner)
+    except VerticalKernelError:
+        raise VerticalKernelError(
+            f"{corner}_{signal} does not cover wheel-center travel "
+            f"{grid[0]:g}..{grid[-1]:g} mm"
+        ) from None
+    return float(lower), float(upper)
 
 
 def evaluate(request: dict[str, object]) -> str:

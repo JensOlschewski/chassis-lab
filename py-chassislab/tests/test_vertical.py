@@ -1,9 +1,86 @@
 import json
 import subprocess
 import sys
+from math import atan, degrees
 from pathlib import Path
 
-from chassis_lab.knc_vertical_kernel import evaluate, plot, plot_compare
+import pytest
+
+from chassis_lab.knc_vertical_kernel import (
+    evaluate,
+    metrics,
+    plot,
+    plot_compare,
+)
+
+
+def _metric_curves(**overrides: list[float]) -> str:
+    # Up and down branches with hysteresis-free linear responses.
+    z = [-10.0, -5.0, 0.0, 5.0, 10.0, 10.0, 5.0, 0.0, -5.0, -10.0]
+    responses = {
+        "wheel_center_z": z,
+        "wheel_center_x": [-0.1 * value for value in z],
+        "wheel_center_y": [0.2 * value for value in z],
+        "toe": [0.01 * value for value in z],
+        "camber": [-0.02 * value for value in z],
+        "wheel_load": [3000.0 + 25.0 * value for value in z],
+    }
+    responses.update(overrides)
+    return json.dumps(
+        [
+            {"corner": corner, "signal": signal, "unit": "", "values": values}
+            for corner in (
+                "front_left",
+                "front_right",
+                "rear_left",
+                "rear_right",
+            )
+            for signal, values in responses.items()
+        ]
+    )
+
+
+def test_metrics_use_secants_at_symmetric_travel_points() -> None:
+    response = json.loads(
+        metrics({"gradient_mm": 5.0, "curves": _metric_curves()})
+    )
+    values = {item["metric"]: item for item in response["metrics"]}
+    assert len(values) == 24
+    assert values["front_left_bump_steer_deg_per_mm"]["value"] == pytest.approx(
+        0.01
+    )
+    assert values["front_left_bump_camber_deg_per_mm"][
+        "value"
+    ] == pytest.approx(-0.02)
+    assert values["rear_right_wheel_rate_n_per_mm"]["value"] == pytest.approx(
+        25.0
+    )
+    assert values["front_left_wheel_center_x_change_mm"][
+        "value"
+    ] == pytest.approx(-1.0)
+    assert values["front_left_wheel_center_y_change_mm"][
+        "value"
+    ] == pytest.approx(2.0)
+    assert values["front_left_wheel_recession_angle_deg"][
+        "value"
+    ] == pytest.approx(degrees(atan(0.1)))
+    toe = values["front_left_bump_steer_deg_per_mm"]
+    assert (toe["lower"], toe["upper"]) == pytest.approx((-0.05, 0.05))
+
+
+def test_metrics_report_unavailable_reasons() -> None:
+    curves = json.loads(_metric_curves())
+    curves = [item for item in curves if item["signal"] != "toe"]
+    response = json.loads(
+        metrics({"gradient_mm": 20.0, "curves": json.dumps(curves)})
+    )
+    values = {item["metric"]: item for item in response["metrics"]}
+    toe = values["front_left_bump_steer_deg_per_mm"]
+    assert toe["value"] is None
+    assert toe["reason"] == "missing canonical signal front_left_toe"
+    camber = values["front_left_bump_camber_deg_per_mm"]
+    assert camber["value"] is None
+    assert "does not cover wheel-center travel -20..20 mm" in camber["reason"]
 
 
 def test_numeric_kernel_import_does_not_require_matplotlib() -> None:
