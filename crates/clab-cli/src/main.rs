@@ -33,6 +33,12 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    // Embedded CPython must not inherit host interpreter configuration.
+    unsafe {
+        std::env::remove_var("PYTHONHOME");
+        std::env::remove_var("PYTHONPATH");
+    }
+
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) if error.downcast_ref::<compare::ToleranceFailure>().is_some() => {
