@@ -42,6 +42,8 @@ pub struct VerticalWindow {
     pub minimum_mm: f64,
     pub maximum_mm: f64,
     pub step_mm: f64,
+    /// Symmetric wheel-center travel offset for secant gradient metrics.
+    pub metric_gradient_points_mm: Option<f64>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalConfig {
@@ -735,7 +737,14 @@ fn function_vertical(
     let mut setup_copy = setup.clone();
     let window = setup_copy.remove("window").unwrap_or_else(|| {
         let mut w = Map::new();
-        for key in ["minimum_mm", "maximum_mm", "step_mm"] {
+        for key in [
+            "travel_minimum_mm",
+            "travel_maximum_mm",
+            "minimum_mm",
+            "maximum_mm",
+            "step_mm",
+            "metric_gradient_points_mm",
+        ] {
             if let Some(value) = setup_copy.remove(key) {
                 w.insert(key.into(), value);
             }
@@ -1362,17 +1371,20 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
     let condensed = s.contains_key("window_minimum_mm")
         || s.contains_key("window_maximum_mm")
         || s.contains_key("window_step_mm");
-    let w = if condensed {
+    let (w, gradient) = if condensed {
         if v.contains_key("window") {
             return Err(ConfigError(
                 "[vertical] cannot define both condensed setup window and [vertical.window]".into(),
             )
             .into());
         }
-        ["window_minimum_mm", "window_maximum_mm", "window_step_mm"]
-            .iter()
-            .map(|k| value(s, k, "[vertical.setup]"))
-            .collect::<Result<Vec<_>, _>>()?
+        (
+            ["window_minimum_mm", "window_maximum_mm", "window_step_mm"]
+                .iter()
+                .map(|k| value(s, k, "[vertical.setup]"))
+                .collect::<Result<Vec<_>, _>>()?,
+            None,
+        )
     } else {
         let t = table(
             v.get("window")
@@ -1381,22 +1393,45 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
         )?;
         keys(
             t,
-            &["minimum_mm", "maximum_mm", "step_mm"],
+            &[
+                "travel_minimum_mm",
+                "travel_maximum_mm",
+                "minimum_mm",
+                "maximum_mm",
+                "step_mm",
+                "metric_gradient_points_mm",
+            ],
             "[vertical.window]",
         )?;
-        [
-            value(t, "minimum_mm", "[vertical.window]")?,
-            value(t, "maximum_mm", "[vertical.window]")?,
-            value(t, "step_mm", "[vertical.window]")?,
-        ]
-        .to_vec()
+        (
+            vec![
+                aliased(t, "travel_minimum_mm", "minimum_mm", "[vertical.window]")?,
+                aliased(t, "travel_maximum_mm", "maximum_mm", "[vertical.window]")?,
+                value(t, "step_mm", "[vertical.window]")?,
+            ],
+            t.get("metric_gradient_points_mm"),
+        )
     };
-    let min = finite(w[0], "minimum_mm")?;
-    let max = finite(w[1], "maximum_mm")?;
+    let min = finite(w[0], "travel_minimum_mm")?;
+    let max = finite(w[1], "travel_maximum_mm")?;
     let step = positive(w[2], "step_mm")?;
     if min >= max {
-        return Err(ConfigError("window minimum_mm must be less than maximum_mm".into()).into());
+        return Err(ConfigError(
+            "window travel_minimum_mm must be less than travel_maximum_mm".into(),
+        )
+        .into());
     };
+    let gradient = gradient
+        .map(|value| positive(value, "metric_gradient_points_mm"))
+        .transpose()?;
+    if let Some(gradient) = gradient
+        && (-gradient < min || gradient > max)
+    {
+        return Err(ConfigError(format!(
+            "metric_gradient_points_mm ±{gradient} must lie inside travel window {min}..{max} mm"
+        ))
+        .into());
+    }
     let source = signal_source(v, path, "[vertical]", Some(i))?;
     Ok(VerticalConfig {
         measurement_hdf5: resolve(
@@ -1440,6 +1475,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             minimum_mm: min,
             maximum_mm: max,
             step_mm: step,
+            metric_gradient_points_mm: gradient,
         },
         signals: source.1,
         signal_map: source.0,
@@ -1726,6 +1762,21 @@ fn require(
         Ok(())
     }
 }
+/// Read `key`, accepting legacy `alias`; reject both together.
+fn aliased<'a>(
+    t: &'a toml::map::Map<String, Value>,
+    key: &str,
+    alias: &str,
+    where_: &str,
+) -> Result<&'a Value, Box<dyn std::error::Error>> {
+    match (t.get(key), t.get(alias)) {
+        (Some(_), Some(_)) => {
+            Err(ConfigError(format!("{where_} cannot define both {key} and {alias}")).into())
+        }
+        (Some(value), None) | (None, Some(value)) => Ok(value),
+        (None, None) => Err(ConfigError(format!("{where_} is missing key(s): {key}")).into()),
+    }
+}
 fn value<'a>(
     t: &'a toml::map::Map<String, Value>,
     key: &str,
@@ -1972,6 +2023,45 @@ mod tests {
         fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.configured_domains(), vec![Domain::Knc]);
+    }
+
+    #[test]
+    fn parses_vertical_travel_window_and_metric_gradient_points() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        let write = |window: &str| {
+            fs::write(&p, format!("[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\n{window}\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n")).unwrap();
+        };
+        write(
+            "travel_minimum_mm=-10\ntravel_maximum_mm=10\nstep_mm=1\nmetric_gradient_points_mm=5",
+        );
+        let window = load_config(&p).unwrap().vertical.unwrap().window;
+        assert_eq!(
+            (window.minimum_mm, window.maximum_mm, window.step_mm),
+            (-10.0, 10.0, 1.0)
+        );
+        assert_eq!(window.metric_gradient_points_mm, Some(5.0));
+        write("minimum_mm=-1\nmaximum_mm=1\nstep_mm=1");
+        let window = load_config(&p).unwrap().vertical.unwrap().window;
+        assert_eq!(window.metric_gradient_points_mm, None);
+        for (window, error) in [
+            (
+                "travel_minimum_mm=-1\nminimum_mm=-1\ntravel_maximum_mm=1\nstep_mm=1",
+                "cannot define both travel_minimum_mm and minimum_mm",
+            ),
+            (
+                "travel_minimum_mm=-10\ntravel_maximum_mm=10\nstep_mm=1\nmetric_gradient_points_mm=0",
+                "metric_gradient_points_mm must be positive",
+            ),
+            (
+                "travel_minimum_mm=-10\ntravel_maximum_mm=4\nstep_mm=1\nmetric_gradient_points_mm=5",
+                "must lie inside travel window",
+            ),
+        ] {
+            write(window);
+            let message = load_config(&p).unwrap_err().to_string();
+            assert!(message.contains(error), "{message}");
+        }
     }
 
     #[test]

@@ -5,8 +5,11 @@ engine_running = false
 front_arb_connected = true
 rear_arb_connected = true
 
-# Travel positions included in the evaluation.
+# Wheel-center travel positions included in the evaluation.
+# Gradient metrics use secants between -metric_gradient_points_mm and
+# +metric_gradient_points_mm.
 [knc.vertical.window]
-minimum_mm = -1
-maximum_mm = 1
+travel_minimum_mm = -1
+travel_maximum_mm = 1
 step_mm = 1
+metric_gradient_points_mm = 0.5
