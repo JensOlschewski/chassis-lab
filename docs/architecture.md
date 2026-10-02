@@ -185,7 +185,10 @@ policy. `[meta]` contains optional run `name` and `loadcase`; domain is derived.
 Run metadata overrides shared configuration metadata, and absent values report
 as `undefined`. Paths resolve relative to main config.
 
-`[setup.knc.vertical]` contains setup flags and window bounds. Signal maps contain
+`[setup.knc.vertical]` contains setup flags and window bounds. Window keys are
+`travel_minimum_mm`, `travel_maximum_mm`, `step_mm`, and optional
+`metric_gradient_points_mm`; legacy `minimum_mm` and `maximum_mm` remain
+accepted. Gradient points must lie inside the travel window. Signal maps contain
 canonical names, entities, components, and units. Mapping precedence is shared <
 domain < test; child values override, child-only values add, missing values inherit,
 and nested tables deep-merge. External mapping files use same merge rules. Legacy
