@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     env, fmt, fs,
     io::IsTerminal,
     path::{Path, PathBuf},
@@ -63,7 +63,10 @@ struct Metric {
 
 enum ComparedDomain {
     Svc(Vec<svc::CanonicalMetric>),
-    Vertical(serde_json::Value),
+    Vertical {
+        curves: serde_json::Value,
+        metrics: Vec<serde_json::Value>,
+    },
 }
 
 struct Input {
@@ -128,13 +131,27 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                         serde_json::json!({"domain": "svc", "test": null, "status": "compared"}),
                     );
                 }
-                (ComparedDomain::Vertical(base), ComparedDomain::Vertical(candidate_curves)) => {
-                    let compared = compare_vertical_metrics(
+                (
+                    ComparedDomain::Vertical {
+                        curves: base_curves,
+                        metrics: base_metrics,
+                    },
+                    ComparedDomain::Vertical {
+                        curves: candidate_curves,
+                        metrics: candidate_metrics,
+                    },
+                ) => {
+                    let mut compared = compare_vertical_metrics(
                         &baseline.config,
-                        base,
+                        base_curves,
                         candidate_curves,
                         tolerances.as_ref().map(|value| &value.vertical),
                     )?;
+                    compared.extend(compare_vertical_gradient_metrics(
+                        base_metrics,
+                        candidate_metrics,
+                        tolerances.as_ref().map(|value| &value.vertical),
+                    ));
                     failed |= compared.iter().any(|metric| metric.status == "failed");
                     incomplete |= compared.iter().any(|metric| metric.status == "missing");
                     metrics.extend(compared);
@@ -182,7 +199,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
     if args.output.is_some()
-        && let Some(ComparedDomain::Vertical(base)) = baseline.domains.get("knc")
+        && let Some(ComparedDomain::Vertical { curves: base, .. }) = baseline.domains.get("knc")
     {
         let footer = std::iter::once(format!(
             "Config: {}",
@@ -332,7 +349,13 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         if let Some(static_input) = &vertical_config.static_simulation_hdf5 {
             sources.push(static_input.clone());
         }
-        domains.insert("knc", ComparedDomain::Vertical(detail["curves"].clone()));
+        domains.insert(
+            "knc",
+            ComparedDomain::Vertical {
+                curves: detail["curves"].clone(),
+                metrics: report.metrics,
+            },
+        );
     }
     Ok(Input {
         config: case,
@@ -442,6 +465,73 @@ fn compare_vertical_metrics(
                 allowed_difference,
                 status,
             })
+        })
+        .collect()
+}
+
+fn compare_vertical_gradient_metrics(
+    baseline: &[serde_json::Value],
+    candidate: &[serde_json::Value],
+    tolerances: Option<&clab_core::config::ValidationTolerances>,
+) -> Vec<Metric> {
+    let baseline = baseline
+        .iter()
+        .filter_map(|metric| metric["metric"].as_str().map(|name| (name, metric)))
+        .collect::<BTreeMap<_, _>>();
+    let candidate = candidate
+        .iter()
+        .filter_map(|metric| metric["metric"].as_str().map(|name| (name, metric)))
+        .collect::<BTreeMap<_, _>>();
+    baseline
+        .keys()
+        .chain(candidate.keys())
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|name| {
+            let baseline = baseline.get(name);
+            let candidate = candidate.get(name);
+            let base = baseline.and_then(|metric| metric["value"].as_f64());
+            let candidate_value = candidate.and_then(|metric| metric["value"].as_f64());
+            let absolute = tolerances.and_then(|value| value.absolute.get(name).copied());
+            let relative_percent =
+                tolerances.and_then(|value| value.relative_percent.get(name).copied());
+            let relative = base
+                .zip(relative_percent)
+                .map(|(value, percent)| value.abs() * percent / 100.0);
+            let allowed_difference = match (absolute, relative) {
+                (Some(absolute), Some(relative)) => Some(absolute.min(relative)),
+                (Some(value), None) | (None, Some(value)) => Some(value),
+                (None, None) => None,
+            };
+            let difference = base
+                .zip(candidate_value)
+                .map(|(left, right)| (right - left).abs());
+            let status = match (base, candidate_value, allowed_difference, difference) {
+                (Some(_), Some(_), Some(limit), Some(difference)) if difference <= limit => {
+                    "passed"
+                }
+                (Some(_), Some(_), Some(_), Some(_)) => "failed",
+                (Some(_), Some(_), None, _) => "informational",
+                _ => "missing",
+            };
+            Metric {
+                domain: "knc",
+                test: Some("vertical"),
+                metric: name.into(),
+                unit: baseline
+                    .or(candidate)
+                    .and_then(|metric| metric["unit"].as_str())
+                    .unwrap_or_default()
+                    .into(),
+                baseline_value: base,
+                candidate_value,
+                difference,
+                absolute_tolerance: absolute,
+                relative_percent,
+                allowed_difference,
+                status,
+            }
         })
         .collect()
 }
@@ -674,7 +764,7 @@ fn comparison_status(
     }
 }
 
-fn safe_cell(value: &str) -> String {
+pub(crate) fn safe_cell(value: &str) -> String {
     if matches!(
         value.trim_start().as_bytes().first(),
         Some(b'=' | b'+' | b'-' | b'@')

@@ -91,11 +91,16 @@ fn channel(signals: &Group, name: &str, values: &[f64], offset: f64) {
         .unwrap();
     string(&group, "original_name", name);
     string(&group, "description", name);
-    string(
-        &group,
-        "unit",
-        if name.ends_with("slope") { "" } else { "mm" },
-    );
+    let unit = if name.ends_with("slope") {
+        ""
+    } else if name.ends_with("steer") || name.ends_with("cam") {
+        "deg"
+    } else if name.ends_with("fz") {
+        "N"
+    } else {
+        "mm"
+    };
+    string(&group, "unit", unit);
     scalar(&group, "offset", offset);
     scalar(&group, "column", 0_u64);
 }
@@ -103,7 +108,7 @@ fn measurement(path: &std::path::Path) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 1_u32);
     scalar(&file, "sample_count", 6_u64);
-    scalar(&file, "signal_count", 16_u64);
+    scalar(&file, "signal_count", 28_u64);
     string(&file, "source_kind", "measurement");
     string(&file, "source_file", "fixture.acd");
     let axis = file.create_group("axis").unwrap();
@@ -138,6 +143,24 @@ fn measurement(path: &std::path::Path) {
             &format!("{prefix}wcz"),
             &[299., 300., 301., 301., 300., 299.],
             300.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}steer"),
+            &[-0.02, 0., 0.02, 0.02, 0., -0.02],
+            0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}cam"),
+            &[0.03, 0., -0.03, -0.03, 0., 0.03],
+            0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}fz"),
+            &[2970., 3000., 3030., 3030., 3000., 2970.],
+            0.,
         );
     }
     let metadata = file.create_group("measurement").unwrap();
@@ -217,8 +240,7 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
     assert!(report.contains("no static_simulation"));
     assert!(report.contains("\"method\": \"none\""));
     let stderr = String::from_utf8_lossy(&success.stderr);
-    assert!(stderr.contains("1 analysis warning; details in"));
-    assert!(!stderr.contains("no static_simulation"));
+    assert!(stderr.contains("analysis warning"));
     assert!(
         output
             .join("plots/knc/vertical/wheel-center-y-vs-wheel-center-x.svg")
@@ -266,6 +288,111 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
         .unwrap();
     assert_eq!(missing_result.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&missing_result.stderr).contains("mapping missing"));
+}
+
+#[test]
+fn analyzes_measurement_vertical_gradient_metrics() {
+    let directory = tempdir().unwrap();
+    let measurement_path = directory.path().join("measurement.h5");
+    closed_fixture(&measurement_path, measurement);
+    // Explicit gradient points and default limited to the ±1 mm window.
+    for gradient in ["metric_gradient_points_mm=0.5\n", ""] {
+        assert_measurement_metrics(directory.path(), &measurement_path, gradient);
+    }
+}
+
+fn assert_measurement_metrics(
+    directory: &std::path::Path,
+    measurement_path: &std::path::Path,
+    gradient: &str,
+) {
+    let config_path = directory.join("case.toml");
+    config(&config_path, false);
+    let text = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("step_mm=1\n", &format!("step_mm=1\n{gradient}"));
+    fs::write(&config_path, text).unwrap();
+    let output = directory.join("reports");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "analyze",
+            config_path.to_str().unwrap(),
+            measurement_path.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(stdout.contains("KnC Vertical\nrunning 24 metrics"));
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("warning:"));
+    if gradient.is_empty() {
+        return;
+    }
+    let detail: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("knc-vertical.json")).unwrap())
+            .unwrap();
+    let value = |name: &str| {
+        detail["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|metric| metric["metric"] == name)
+            .unwrap_or_else(|| panic!("missing metric {name}"))["value"]
+            .as_f64()
+            .unwrap()
+    };
+    let close = |actual: f64, expected: f64| assert!((actual - expected).abs() < 1e-9, "{actual}");
+    close(value("front_left_bump_steer_deg_per_mm"), 0.02);
+    close(value("front_right_bump_steer_deg_per_mm"), -0.02);
+    close(value("front_left_bump_camber_deg_per_mm"), -0.03);
+    close(value("front_left_wheel_center_x_change_mm"), 2.0);
+    close(value("front_left_wheel_center_y_change_mm"), 3.0);
+    close(
+        value("front_left_wheel_recession_angle_deg"),
+        (-2.0_f64).atan().to_degrees(),
+    );
+    close(value("rear_right_wheel_rate_n_per_mm"), 30.0);
+    let csv = fs::read_to_string(output.join("metrics.csv")).unwrap();
+    assert!(csv.starts_with("run,domain,test,metric,unit,value\n"));
+    assert!(csv.contains("fixture,knc,vertical,rear_right_wheel_rate_n_per_mm,N/mm,30"));
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["domains"][0]["metric_count"], 24);
+}
+
+#[test]
+fn skips_vertical_metrics_without_static_normalization() {
+    let directory = tempdir().unwrap();
+    let simulation_path = directory.path().join("simulation.h5");
+    closed_fixture(&simulation_path, simulation);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    let text = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("step_mm=1\n", "step_mm=1\nmetric_gradient_points_mm=0.5\n");
+    fs::write(&config_path, text).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "analyze",
+            config_path.to_str().unwrap(),
+            simulation_path.to_str().unwrap(),
+            "--verbose",
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    assert!(String::from_utf8_lossy(&result.stdout).contains("KnC Vertical\nrunning 0 metrics"));
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains("vertical metrics require static_simulation normalization")
+    );
 }
 
 #[test]
@@ -334,7 +461,7 @@ fn analyzes_simulation_with_missing_units_and_warns() {
 }
 
 #[test]
-fn run_simulation_static_normalizes_without_warning() {
+fn run_simulation_static_normalizes_and_reports_available_metrics() {
     let directory = tempdir().unwrap();
     let simulation_path = directory.path().join("simulation.h5");
     let static_path = directory.path().join("static.h5");
@@ -368,7 +495,7 @@ fn run_simulation_static_normalizes_without_warning() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert!(!String::from_utf8_lossy(&result.stderr).contains("warning:"));
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("no static_simulation"));
     let report = fs::read_to_string(output.join("report.json")).unwrap();
     assert!(report.contains("drop_initial_sample_and_subtract_final_sample"));
     assert!(!report.contains("no static_simulation"));
@@ -444,9 +571,24 @@ fn compares_direct_vertical_inputs_across_source_kinds_with_overlays() {
             .as_array()
             .unwrap()
             .iter()
+            .take(12)
             .map(|metric| metric["metric"].as_str().unwrap())
             .collect::<Vec<_>>(),
         expected.as_slice()
+    );
+    assert_eq!(
+        report["candidates"][0]["metrics"].as_array().unwrap().len(),
+        36
+    );
+    assert!(
+        report["candidates"][0]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |metric| metric["metric"] == "front_left_bump_steer_deg_per_mm"
+                    && metric["status"] == "missing"
+            )
     );
     assert!(
         report["candidates"][0]["metrics"]
