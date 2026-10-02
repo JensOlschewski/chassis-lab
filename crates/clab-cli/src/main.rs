@@ -32,11 +32,22 @@ enum Command {
     Completion { shell: Shell },
 }
 
+#[cfg(windows)]
+fn bundled_python_home() -> Option<std::path::PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    let python_home = executable.parent()?.parent()?.join("lib/python3.12");
+    python_home.is_dir().then_some(python_home)
+}
+
 fn main() -> ExitCode {
     // Embedded CPython must not inherit host interpreter configuration.
     unsafe {
         std::env::remove_var("PYTHONHOME");
         std::env::remove_var("PYTHONPATH");
+        #[cfg(windows)]
+        if let Some(python_home) = bundled_python_home() {
+            std::env::set_var("PYTHONHOME", python_home);
+        }
     }
 
     match run(Cli::parse()) {
