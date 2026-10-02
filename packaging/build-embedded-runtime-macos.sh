@@ -52,7 +52,15 @@ RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,@loader_path/../lib" \
     PYO3_CONFIG_FILE="$pyo3_config" \
     PYO3_PYTHON="$output/bin/python3.12" \
     cargo build --release --locked --target x86_64-apple-darwin -p clab-cli
-cp "$root/target/x86_64-apple-darwin/release/clab" "$output/bin/clab"
+cp "$root/target/x86_64-apple-darwin/release/clab" "$output/bin/clab-bin"
+cat > "$output/bin/clab" <<'SH'
+#!/bin/sh
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+unset PYTHONHOME PYTHONPATH VIRTUAL_ENV DYLD_LIBRARY_PATH
+export PYTHONHOME="$root"
+exec "$root/bin/clab-bin" "$@"
+SH
+chmod +x "$output/bin/clab"
 rm "$pyo3_config"
 
 find "$output" -type d -name __pycache__ -prune -exec rm -rf {} +
