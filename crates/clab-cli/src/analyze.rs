@@ -25,6 +25,9 @@ pub(crate) struct AnalyzeArgs {
     /// Replace report files already in output directory.
     #[arg(long)]
     force: bool,
+    /// Include KnC rate-filter diagnostic plots in the report (requires --report).
+    #[arg(long, requires = "output")]
+    debug: bool,
     /// Print individual analysis warnings.
     #[arg(short, long)]
     verbose: bool,
@@ -171,11 +174,13 @@ fn write_combined_run(
         }
     };
     let footer = analysis_footer(&args.config, config, vertical_path, Some(&args.input))?;
+    let debug = debug_info(args.debug, &args.config, &[vertical_path])?;
     let vertical_report = vertical::analyze_input_with_footer(
         config,
         vertical_path,
         args.output.is_some(),
         Some(&footer),
+        debug.as_deref(),
     )?;
     print_header("SVC", svc_metrics);
     let mut warnings = svc_warnings;
@@ -218,18 +223,21 @@ fn write_combined_run(
     }
     vertical_detail["inputs"] = vertical_inputs;
     let mut files = vec![
-        ("report.json", serde_json::to_string_pretty(&bundle)? + "\n"),
+        (
+            "report.json",
+            (serde_json::to_string_pretty(&bundle)? + "\n").into_bytes(),
+        ),
         (
             "metrics.csv",
-            svc_csv + &vertical_csv_rows(&config.name, &vertical_report.metrics)?,
+            (svc_csv + &vertical_csv_rows(&config.name, &vertical_report.metrics)?).into_bytes(),
         ),
         (
             "svc.json",
-            serde_json::to_string_pretty(&svc_detail)? + "\n",
+            (serde_json::to_string_pretty(&svc_detail)? + "\n").into_bytes(),
         ),
         (
             "knc-vertical.json",
-            serde_json::to_string_pretty(&vertical_detail)? + "\n",
+            (serde_json::to_string_pretty(&vertical_detail)? + "\n").into_bytes(),
         ),
     ];
     files.extend(
@@ -340,9 +348,9 @@ fn write_svc_reference(
         write_bundle(
             output,
             &[
-                ("report.json", reports.detail.clone()),
-                ("metrics.csv", reports.csv),
-                ("svc.json", reports.detail),
+                ("report.json", reports.detail.clone().into_bytes()),
+                ("metrics.csv", reports.csv.into_bytes()),
+                ("svc.json", reports.detail.into_bytes()),
             ],
             args.force,
             &[&args.config, &args.input, &reference.path],
@@ -438,9 +446,9 @@ fn write_svc_report(
         write_bundle(
             output,
             &[
-                ("report.json", detail.clone()),
-                ("metrics.csv", report.csv),
-                ("svc.json", detail),
+                ("report.json", detail.clone().into_bytes()),
+                ("metrics.csv", report.csv.into_bytes()),
+                ("svc.json", detail.into_bytes()),
             ],
             args.force,
             &[&args.config, &args.input, &config.simulation_json],
@@ -519,8 +527,14 @@ fn write_vertical(
     run: Option<&Path>,
 ) -> Result<()> {
     let footer = analysis_footer(&args.config, config, input, run)?;
-    let report =
-        vertical::analyze_input_with_footer(config, input, args.output.is_some(), Some(&footer))?;
+    let debug = debug_info(args.debug, &args.config, &[input])?;
+    let report = vertical::analyze_input_with_footer(
+        config,
+        input,
+        args.output.is_some(),
+        Some(&footer),
+        debug.as_deref(),
+    )?;
     print_header("KnC Vertical", report.metrics.len());
     print_metrics(&report.metrics);
     print_warnings(&report.warnings, args);
@@ -545,13 +559,17 @@ fn write_vertical(
     detail["inputs"] = bundle["inputs"].clone();
     let detail = serde_json::to_string_pretty(&detail)? + "\n";
     let mut files = vec![
-        ("report.json", serde_json::to_string_pretty(&bundle)? + "\n"),
+        (
+            "report.json",
+            (serde_json::to_string_pretty(&bundle)? + "\n").into_bytes(),
+        ),
         (
             "metrics.csv",
-            "run,domain,test,metric,unit,value\n".to_owned()
-                + &vertical_csv_rows(&config.name, &report.metrics)?,
+            ("run,domain,test,metric,unit,value\n".to_owned()
+                + &vertical_csv_rows(&config.name, &report.metrics)?)
+                .into_bytes(),
         ),
-        ("knc-vertical.json", detail),
+        ("knc-vertical.json", detail.into_bytes()),
     ];
     files.extend(
         report
@@ -619,6 +637,26 @@ fn analysis_footer(
     Ok(lines.join("\n"))
 }
 
+/// JSON for the Python debug plots: config path, creator, clab version and one input path per series.
+pub(crate) fn debug_info(enabled: bool, config: &Path, inputs: &[&Path]) -> Result<Option<String>> {
+    if !enabled {
+        return Ok(None);
+    }
+    let inputs = inputs
+        .iter()
+        .map(|path| absolute_path(path))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(
+        serde_json::json!({
+            "config": absolute_path(config)?,
+            "creator": report_creator(),
+            "version": env!("CARGO_PKG_VERSION"),
+            "inputs": inputs,
+        })
+        .to_string(),
+    ))
+}
+
 fn absolute_path(path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path.into())
@@ -652,7 +690,7 @@ fn provenance(path: &Path) -> Result<serde_json::Value> {
 
 pub(crate) fn write_bundle(
     output: &Path,
-    files: &[(&str, String)],
+    files: &[(&str, Vec<u8>)],
     force: bool,
     inputs: &[&Path],
 ) -> Result<()> {
@@ -719,7 +757,7 @@ pub(crate) fn write_bundle(
         let parent = path.parent().expect("relative report file has a parent");
         fs::create_dir_all(parent)?;
         let mut file = fs::File::create(&path)?;
-        file.write_all(contents.as_bytes())?;
+        file.write_all(contents)?;
         file.sync_all()?;
     }
     let staged = stage.keep();

@@ -1,22 +1,198 @@
 """Path-free numerical kernel for Rust-owned KnC vertical analysis."""
 
 import json
-from datetime import datetime
-from io import BytesIO, StringIO
 from math import atan, degrees, sqrt
+from typing import Any, NamedTuple, cast
 
 import numpy as np
 
+from chassis_lab.knc_plot_kernel import (
+    BranchOptions,
+    PlotSpec,
+    SignalStyle,
+    gradient_curve,
+    render_comparison_reports,
+    render_rate_debug,
+    render_reports,
+)
+
 CORNERS = ("front_left", "front_right", "rear_left", "rear_right")
 
-# Metric name, response signal, unit, secant calculation.
+
+class GradientMetric(NamedTuple):
+    """Secant metric of `signal` between travel points on `axis`.
+
+    `gradient` divides by the travel span, or by the span of `denominator`
+    when given. `angle` and `change` use the signal span only.
+    """
+
+    name: str
+    signal: str
+    unit: str
+    kind: str
+    axis: str = "wheel_center_z"
+    denominator: str | None = None
+
+
 GRADIENT_METRICS = (
-    ("bump_steer_deg_per_mm", "toe", "deg/mm", "gradient"),
-    ("bump_camber_deg_per_mm", "camber", "deg/mm", "gradient"),
-    ("wheel_recession_angle_deg", "wheel_center_x", "deg", "angle"),
-    ("wheel_center_x_change_mm", "wheel_center_x", "mm", "change"),
-    ("wheel_center_y_change_mm", "wheel_center_y", "mm", "change"),
-    ("wheel_rate_n_per_mm", "wheel_load", "N/mm", "gradient"),
+    GradientMetric("bump_steer_deg_per_mm", "toe", "deg/mm", "gradient"),
+    GradientMetric("bump_camber_deg_per_mm", "camber", "deg/mm", "gradient"),
+    GradientMetric(
+        "wheel_recession_angle_deg", "wheel_center_x", "deg", "angle"
+    ),
+    GradientMetric(
+        "wheel_center_x_change_mm", "wheel_center_x", "mm", "change"
+    ),
+    GradientMetric(
+        "wheel_center_y_change_mm", "wheel_center_y", "mm", "change"
+    ),
+    GradientMetric(
+        "suspension_rate_n_per_mm", "wheel_load", "N/mm", "gradient"
+    ),
+    GradientMetric(
+        "ride_rate_n_per_mm",
+        "wheel_load",
+        "N/mm",
+        "gradient",
+        axis="wheel_pad_z",
+    ),
+    GradientMetric(
+        "tire_rate_n_per_mm",
+        "wheel_load",
+        "N/mm",
+        "gradient",
+        axis="wheel_pad_z",
+        denominator="tire_deflection",
+    ),
+)
+
+PLOT_SIGNALS = {
+    "wheel_center_x": SignalStyle("Wheel center X", "mm"),
+    "wheel_center_y": SignalStyle("Wheel center Y", "mm"),
+    "wheel_center_z": SignalStyle("Wheel center Z", "mm"),
+    "wheel_pad_z": SignalStyle("Wheel pad Z", "mm"),
+    "tire_deflection": SignalStyle("Tire deflection", "mm"),
+    "wheel_load": SignalStyle("Wheel load", "newton"),
+    "toe": SignalStyle("Toe", "deg"),
+    "camber": SignalStyle("Camber", "deg"),
+    "suspension_rate": SignalStyle("Suspension rate", "newton/mm"),
+    "ride_rate": SignalStyle("Ride rate", "newton/mm"),
+    "tire_rate": SignalStyle("Tire rate", "newton/mm"),
+    "wheel_recession_angle": SignalStyle("Wheel recession angle", "deg"),
+}
+
+
+# ---------------------------------------------------------------------------
+# Plot catalog
+# ---------------------------------------------------------------------------
+
+
+def _recession_angle(gradient: np.ndarray) -> np.ndarray:
+    return np.degrees(np.arctan(-gradient))
+
+
+def _wheel_recession_angle(
+    x: np.ndarray,
+    y: np.ndarray,
+    denominator: np.ndarray | None,
+    sweeps: list[slice],
+    options: BranchOptions,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Local wheel recession angle per sweep, edge-trimmed like the rates."""
+    x_sweeps, gradient = gradient_curve(x, y, denominator, sweeps, options)
+    return x_sweeps, _recession_angle(gradient)
+
+
+# Add or modify plots here.
+#  `name` is the output filename
+#  `title` is the figure heading.
+#  `branch` optionally overrides BranchOptions for that plot only, e.g.
+#  branch={"direction": "fall", "index": 1, "plot_branches": "selected"} or
+#  branch={"edge_width": 100, "edge_percentile": 0.9}.
+#  Fields: see BranchOptions.
+PLOT_SPECS = (
+    PlotSpec(
+        "knc_vertical_wcz_vs_wcx",
+        "Bounce - Vertical Wheel Center Travel / "
+        "Longitudinal Disp. of Wheel Center",
+        "wheel_center_z",
+        "wheel_center_x",
+    ),
+    PlotSpec(
+        "knc_vertical_wcz_vs_wcy",
+        "Bounce - Vertical Wheel Center Travel / Lateral Disp. of Wheel Center",
+        "wheel_center_z",
+        "wheel_center_y",
+    ),
+    PlotSpec(
+        "knc_vertical_recession_angle",
+        "Bounce - Vertical Wheel center Travel / Wheel recession angle",
+        "wheel_center_z",
+        "wheel_center_x",
+        "wheel_recession_angle",
+        branch={"edge_width": 100, "edge_percentile": 0.95},
+        transform=_wheel_recession_angle,
+        from_gradient=_recession_angle,
+        gradient_markers=True,
+    ),
+    PlotSpec(
+        "knc_vertical_wheel_load",
+        "Bounce - Vertical Wheel center Travel / Wheel load",
+        "wheel_center_z",
+        "wheel_load",
+        optional=True,
+        gradient_markers=True,
+    ),
+    PlotSpec(
+        "knc_vertical_suspension_rate",
+        "Bounce - Vertical Wheel center Travel / Suspension rate",
+        "wheel_center_z",
+        "wheel_load",
+        "suspension_rate",
+        transform=gradient_curve,
+        optional=True,
+        y_limits=(0, 100),
+        gradient_markers=True,
+    ),
+    PlotSpec(
+        "knc_vertical_ride_rate",
+        "Bounce - Vertical Wheel pad Travel / Ride rate",
+        "wheel_pad_z",
+        "wheel_load",
+        "ride_rate",
+        branch={"edge_width": 100, "edge_percentile": 0.99},
+        transform=gradient_curve,
+        optional=True,
+        y_limits=(0, 100),
+        gradient_markers=True,
+    ),
+    PlotSpec(
+        "knc_vertical_tire_rate",
+        "Bounce - Vertical Wheel pad Travel / Tire rate",
+        "wheel_pad_z",
+        "wheel_load",
+        "tire_rate",
+        transform=gradient_curve,
+        optional=True,
+        denominator_signal="tire_deflection",
+        gradient_markers=True,
+    ),
+    PlotSpec(
+        "knc_vertical_toe",
+        "Bounce - Vertical Wheel center Travel / Toe",
+        "wheel_center_z",
+        "toe",
+        optional=True,
+        gradient_markers=True,
+    ),
+    PlotSpec(
+        "knc_vertical_camber",
+        "Bounce - Vertical Wheel center Travel / Camber",
+        "wheel_center_z",
+        "camber",
+        optional=True,
+        gradient_markers=True,
+    ),
 )
 
 
@@ -25,34 +201,42 @@ class VerticalKernelError(ValueError):
 
 
 def metrics(request: dict[str, object]) -> str:
-    """Calculate secant KnC vertical metrics at symmetric travel points.
-
-    ``request["gradient_mm"]`` is positive offset ``g`` in millimetres.
-    ``request["curves"]`` is canonical curve JSON. Wheel-center Z is the travel
-    axis. Each response is averaged over monotonic branches and evaluated at
-    ``-g`` and ``+g``. Gradient metrics return ``(upper - lower) / (2 g)``;
-    change metrics return ``upper - lower``; recession angle returns
-    ``atan(-(x_upper - x_lower) / (2 g))`` in degrees. Unavailable metrics
-    return ``value = None`` and a ``reason``. Return JSON with ``metrics``.
-    """
-    gradient = float(request["gradient_mm"])
-    curves = json.loads(str(request["curves"]))
+    """Calculate secant KnC vertical metrics at symmetric travel points."""
+    gradient = float(cast("float", request["gradient_mm"]))
+    curves = _with_pad_travel(json.loads(str(request["curves"])))
     indexed = {(item["corner"], item["signal"]): item for item in curves}
     grid = np.array([-gradient, gradient], dtype=np.float64)
+    options = BranchOptions.from_json(
+        cast("str | dict[str, Any] | None", request.get("branch"))
+    )
     results = []
     for corner in CORNERS:
-        for name, signal, unit, kind in GRADIENT_METRICS:
+        for metric in GRADIENT_METRICS:
             result = {
                 "corner": corner,
-                "metric": f"{corner}_{name}",
-                "unit": unit,
+                "metric": f"{corner}_{metric.name}",
+                "unit": metric.unit,
                 "value": None,
                 "lower": None,
                 "upper": None,
                 "reason": None,
             }
             try:
-                lower, upper = _secant_points(indexed, corner, signal, grid)
+                lower, upper = _secant_points(
+                    indexed, corner, metric.signal, grid, metric.axis, options
+                )
+                span = 2.0 * gradient
+                if metric.denominator is not None:
+                    span = _span(
+                        _secant_points(
+                            indexed,
+                            corner,
+                            metric.denominator,
+                            grid,
+                            metric.axis,
+                            options,
+                        )
+                    )
             except VerticalKernelError as error:
                 result["reason"] = str(error)
             else:
@@ -60,12 +244,44 @@ def metrics(request: dict[str, object]) -> str:
                 result["lower"] = lower
                 result["upper"] = upper
                 result["value"] = {
-                    "gradient": delta / (2.0 * gradient),
+                    "gradient": delta / span,
                     "change": delta,
                     "angle": degrees(atan(-delta / (2.0 * gradient))),
-                }[kind]
+                }[metric.kind]
             results.append(result)
     return json.dumps({"metrics": results})
+
+
+def _span(points: tuple[float, float]) -> float:
+    span = points[1] - points[0]
+    if span == 0.0:
+        raise VerticalKernelError("denominator signal does not change")
+    return span
+
+
+def _with_pad_travel(
+    curves: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Add wheel pad Z as wheel-center Z plus tire deflection when absent."""
+    indexed = {(item["corner"], item["signal"]): item for item in curves}
+    derived = []
+    for corner in CORNERS:
+        center = indexed.get((corner, "wheel_center_z"))
+        deflection = indexed.get((corner, "tire_deflection"))
+        if (corner, "wheel_pad_z") in indexed or not (center and deflection):
+            continue
+        values = np.asarray(center["values"], dtype=np.float64) + np.asarray(
+            deflection["values"], dtype=np.float64
+        )
+        derived.append(
+            {
+                "corner": corner,
+                "signal": "wheel_pad_z",
+                "values": values.tolist(),
+                "unit": "mm",
+            }
+        )
+    return [*curves, *derived]
 
 
 def _secant_points(
@@ -73,44 +289,49 @@ def _secant_points(
     corner: str,
     signal: str,
     grid: np.ndarray,
+    axis: str,
+    options: BranchOptions,
 ) -> tuple[float, float]:
-    for required in ("wheel_center_z", signal):
+    for required in (axis, signal):
         if (corner, required) not in indexed:
             raise VerticalKernelError(
                 f"missing canonical signal {corner}_{required}"
             )
-    travel = np.asarray(
-        indexed[(corner, "wheel_center_z")]["values"], dtype=np.float64
-    )
+    travel = np.asarray(indexed[(corner, axis)]["values"], dtype=np.float64)
     response = np.asarray(indexed[(corner, signal)]["values"], dtype=np.float64)
     if len(travel) != len(response):
         raise VerticalKernelError(
-            f"{corner}_{signal} and {corner}_wheel_center_z lengths differ"
+            f"{corner}_{signal} and {corner}_{axis} lengths differ"
         )
+    center = np.asarray(
+        indexed[(corner, "wheel_center_z")]["values"], dtype=np.float64
+    )
+    if len(center) != len(travel):
+        raise VerticalKernelError(
+            f"{corner}_{axis} and {corner}_wheel_center_z lengths differ"
+        )
+    sweep = options.metric_sweep(center)
+    if sweep is None:
+        raise VerticalKernelError(
+            f"{corner} has no {options.direction} branch {options.index}"
+        )
+    travel, response = travel[sweep], response[sweep]
     try:
-        lower, upper = _mean_monotonic(travel, response, grid, corner)
+        lower, upper = _interpolate(travel, response, grid, corner)
     except VerticalKernelError:
         raise VerticalKernelError(
-            f"{corner}_{signal} does not cover wheel-center travel "
+            f"{corner}_{signal} does not cover {axis} travel "
             f"{grid[0]:g}..{grid[-1]:g} mm"
         ) from None
     return float(lower), float(upper)
 
 
 def evaluate(request: dict[str, object]) -> str:
-    """Compare canonical KnC vertical curves on requested travel grid.
-
-    ``request["grid"]`` is travel in millimetres. ``request["curves"]`` is a
-    JSON object keyed by ``<corner>:<axis>`` for all four corners and ``x``,
-    ``y``, and ``z`` axes. Each value contains baseline and candidate travel/
-    value arrays in millimetres. Return JSON with normalized curves and scalar
-    comparison metrics. Raise ``VerticalKernelError`` when a curve cannot cover
-    requested grid through a finite monotonic branch.
-    """
+    """Compare canonical KnC vertical curves on requested travel grid."""
     grid = np.asarray(request["grid"], dtype=np.float64)
     curves = json.loads(str(request["curves"]))
     comparisons = []
-    for corner in ("front_left", "front_right", "rear_left", "rear_right"):
+    for corner in CORNERS:
         for axis in ("x", "y", "z"):
             curve = curves[f"{corner}:{axis}"]
             baseline = _curve(curve["baseline"], grid, f"baseline {corner}")
@@ -185,11 +406,7 @@ def _mean_monotonic(
 def _interpolate(
     x: np.ndarray, y: np.ndarray, grid: np.ndarray, source: str
 ) -> np.ndarray:
-    """Interpolate finite samples after stable sorting and duplicate averaging.
-
-    Reject curves with fewer than two finite samples or incomplete grid
-    coverage.
-    """
+    """Interpolate finite samples after sorting and duplicate averaging."""
     finite = np.isfinite(x) & np.isfinite(y)
     x, y = x[finite], y[finite]
     if len(x) < 2:
@@ -212,89 +429,38 @@ def plot(
     source_label: str = "Simulation",
     footer: str = "",
     logo: bytes | None = None,
-) -> str:
-    """Render direct vertical curves as deterministic four-corner SVG reports.
-
-    ``curves_json`` is a JSON array of canonical curve records with ``corner``,
-    ``signal``, ``unit``, and signal-unit ``values`` fields. Wheel-center values
-    are millimetres; optional load, toe, and camber values use their declared
-    units. ``source_label`` identifies each line in SVG legends. ``footer`` and
-    ``logo`` use comparison-report footer layout when supplied. Return JSON
-    mapping report-relative paths to SVG document strings.
-    """
-    plt = _pyplot()
-    logo_image = None
-    if footer and logo is not None:
-        logo_image = plt.imread(BytesIO(logo), format="png")
-    curves = json.loads(curves_json)
-    reports = {}
-    corners = (
-        ("front_left", "Front left"),
-        ("front_right", "Front right"),
-        ("rear_left", "Rear left"),
-        ("rear_right", "Rear right"),
+    gradient_points_mm: float | None = None,
+    branch: str | None = None,
+    debug: str | None = None,
+) -> dict[str, bytes]:
+    """Render vertical report catalog through generic KnC plot kernel."""
+    curves = _with_pad_travel(json.loads(curves_json))
+    options = BranchOptions.from_json(branch)
+    reports = render_reports(
+        curves,
+        PLOT_SPECS,
+        PLOT_SIGNALS,
+        source_label,
+        "plots/knc/vertical",
+        footer,
+        logo,
+        gradient_points_mm,
+        options,
     )
-    indexed = {(item["corner"], item["signal"]): item for item in curves}
-
-    for x_signal, y_signal in (
-        ("wheel_center_y", "wheel_center_z"),
-        ("wheel_center_x", "wheel_center_y"),
-        ("wheel_center_x", "wheel_center_z"),
-    ):
-        reports[
-            f"plots/knc/vertical/{y_signal.replace('_', '-')}-vs-"
-            f"{x_signal.replace('_', '-')}.svg"
-        ] = _plot_group(
-            corners,
-            indexed,
-            x_signal,
-            y_signal,
-            f"{_label(y_signal)} vs {_label(x_signal)}",
-            "mm",
-            source_label,
-            plt,
-            footer=footer,
-            logo_image=logo_image,
-        )
-
-    for signal, title, unit in (
-        ("wheel_load", "Wheel load vs Wheel center Z", "newton"),
-        ("toe", "Toe vs Wheel center Z", "deg"),
-        ("camber", "Camber vs Wheel center Z", "deg"),
-    ):
-        if all((corner, signal) in indexed for corner, _ in corners):
-            reports[
-                f"plots/knc/vertical/{signal.replace('_', '-')}-vs-"
-                "wheel-center-z.svg"
-            ] = _plot_group(
-                corners,
-                indexed,
-                "wheel_center_z",
-                signal,
-                title,
-                unit,
-                source_label,
-                plt,
-                footer=footer,
-                logo_image=logo_image,
+    if debug:
+        info = json.loads(debug)
+        reports.update(
+            render_rate_debug(
+                curves,
+                PLOT_SPECS,
+                options,
+                "plots/knc/vertical",
+                info,
+                info["inputs"][0],
+                logo,
             )
-            if signal == "wheel_load":
-                reports[
-                    "plots/knc/vertical/wheel-rate-vs-wheel-center-z.svg"
-                ] = _plot_group(
-                    corners,
-                    indexed,
-                    "wheel_center_z",
-                    signal,
-                    "Wheel rate vs Wheel center Z",
-                    "newton/mm",
-                    source_label,
-                    plt,
-                    transform=_wheel_rate,
-                    footer=footer,
-                    logo_image=logo_image,
-                )
-    return json.dumps(reports)
+        )
+    return reports
 
 
 def plot_compare(
@@ -303,239 +469,48 @@ def plot_compare(
     baseline_label: str,
     footer: str,
     logo: bytes,
-) -> str:
-    """Render baseline/candidate vertical SVG overlays.
-
-    Baseline JSON is canonical curve array. Candidate JSON is an array of
-    ``{"label": str, "curves": [...]}`` records with same curve coverage.
-    Footer and PNG logo are rendered in every SVG. Return JSON mapping
-    report-relative filenames to SVG document strings.
-    """
-    plt = _pyplot()
-    baseline = json.loads(baseline_json)
-    candidates = json.loads(candidates_json)
-    logo_image = plt.imread(BytesIO(logo), format="png")
-    corners = (
-        ("front_left", "Front left"),
-        ("front_right", "Front right"),
-        ("rear_left", "Rear left"),
-        ("rear_right", "Rear right"),
-    )
-    base = {(item["corner"], item["signal"]): item for item in baseline}
+    gradient_points_mm: float | None = None,
+    branches_json: str | None = None,
+    debug: str | None = None,
+) -> dict[str, bytes]:
+    """Render vertical overlays; `branches_json` has one entry per series."""
+    baseline = _with_pad_travel(json.loads(baseline_json))
     candidates = [
-        (
-            item["label"],
-            {
-                (curve["corner"], curve["signal"]): curve
-                for curve in item["curves"]
-            },
-        )
-        for item in candidates
+        {**item, "curves": _with_pad_travel(item["curves"])}
+        for item in json.loads(candidates_json)
     ]
-    reports = {}
-    for x_signal, y_signal in (
-        ("wheel_center_y", "wheel_center_z"),
-        ("wheel_center_x", "wheel_center_y"),
-        ("wheel_center_x", "wheel_center_z"),
-    ):
-        reports[
-            f"{y_signal.replace('_', '-')}-vs-{x_signal.replace('_', '-')}.svg"
-        ] = _plot_overlay_group(
-            corners,
-            base,
-            x_signal,
-            y_signal,
-            f"{_label(y_signal)} vs {_label(x_signal)}",
-            "mm",
-            baseline_label,
-            candidates,
-            footer,
-            logo_image,
-            plt,
-        )
-    return json.dumps(reports)
-
-
-def _plot_overlay_group(
-    corners: tuple[tuple[str, str], ...],
-    baseline: dict[tuple[str, str], dict[str, object]],
-    x_signal: str,
-    y_signal: str,
-    title: str,
-    unit: str,
-    baseline_label: str,
-    candidates: list[tuple[str, dict[tuple[str, str], dict[str, object]]]],
-    footer: str,
-    logo_image: np.ndarray,
-    plt: object,
-) -> str:
-    footer_lines = footer.count("\n") + 2
-    footer_height = min(0.12 + footer_lines * 0.025, 0.35)
-    figure, panels = plt.subplots(2, 2, figsize=(11.69, 8.27))
-    figure.subplots_adjust(
-        left=0.08,
-        right=0.97,
-        top=0.89,
-        bottom=footer_height,
-        wspace=0.28,
-        hspace=0.42,
+    branches = (
+        [BranchOptions.from_json(item) for item in json.loads(branches_json)]
+        if branches_json
+        else [BranchOptions()] * (len(candidates) + 1)
     )
-    figure.suptitle(title, fontsize=16, fontweight="bold")
-    for panel, (corner, label) in zip(panels.flat, corners, strict=True):
-        for curves, source_label, color in [
-            (baseline, baseline_label, "#000000"),
-            *[
-                (curves, label, _candidate_color(index))
-                for index, (label, curves) in enumerate(candidates)
-            ],
-        ]:
-            x = np.asarray(
-                curves[(corner, x_signal)]["values"], dtype=np.float64
-            )
-            y = np.asarray(
-                curves[(corner, y_signal)]["values"], dtype=np.float64
-            )
-            if len(x) != len(y):
-                raise VerticalKernelError(
-                    f"{corner} {y_signal} and {x_signal} lengths differ"
+    reports = render_comparison_reports(
+        baseline,
+        candidates,
+        PLOT_SPECS,
+        PLOT_SIGNALS,
+        baseline_label,
+        footer,
+        logo,
+        gradient_points_mm,
+        branches,
+    )
+    if debug:
+        info = json.loads(debug)
+        series = [baseline, *(item["curves"] for item in candidates)]
+        for index, (curves, options) in enumerate(
+            zip(series, branches, strict=True)
+        ):
+            reports.update(
+                render_rate_debug(
+                    curves,
+                    PLOT_SPECS,
+                    options,
+                    "",
+                    info,
+                    info["inputs"][index],
+                    logo,
+                    f"series_{index}",
                 )
-            panel.plot(x, y, color=color, linewidth=1.8, label=source_label)
-        panel.set_title(label, loc="left", fontweight="bold")
-        panel.set_xlabel(f"{_label(x_signal)} [mm]")
-        panel.set_ylabel(f"{_label(y_signal)} [{unit}]")
-        panel.grid(True, color="#d9e2f3", linewidth=0.8)
-        panel.legend(loc="best", frameon=False)
-    figure.text(
-        0.02,
-        0.025,
-        f"{footer}\nGenerated: {datetime.now().astimezone():%Y-%m-%d %H:%M %Z}",
-        fontsize=7,
-        color="#4a4a4a",
-        va="bottom",
-    )
-    logo_height = min(footer_lines * 0.017, footer_height - 0.05)
-    logo_panel = figure.add_axes((0.80, 0.025, 0.18, logo_height))
-    logo_panel.imshow(logo_image)
-    logo_panel.axis("off")
-    output = StringIO()
-    figure.savefig(
-        output, format="svg", metadata={"Date": None, "Creator": "ChassisLab"}
-    )
-    plt.close(figure)
-    return output.getvalue()
-
-
-def _candidate_color(index: int) -> str:
-    colors = ("#e41a1c", "#377eb8", "#e7298a", "#00a6a6", "#ff7f00", "#6a3d9a")
-    return colors[index % len(colors)]
-
-
-def _plot_group(
-    corners: tuple[tuple[str, str], ...],
-    indexed: dict[tuple[str, str], dict[str, object]],
-    x_signal: str,
-    y_signal: str,
-    title: str,
-    unit: str,
-    source_label: str,
-    plt: object,
-    transform: object = None,
-    footer: str = "",
-    logo_image: np.ndarray | None = None,
-) -> str:
-    if footer:
-        footer_lines = footer.count("\n") + 2
-        footer_height = min(0.12 + footer_lines * 0.025, 0.35)
-        figure, panels = plt.subplots(2, 2, figsize=(11.69, 8.27))
-        figure.subplots_adjust(
-            left=0.08,
-            right=0.97,
-            top=0.89,
-            bottom=footer_height,
-            wspace=0.28,
-            hspace=0.42,
-        )
-    else:
-        figure, panels = plt.subplots(
-            2, 2, figsize=(11.69, 8.27), layout="constrained"
-        )
-    figure.suptitle(title, fontsize=16)
-    for panel, (corner, label) in zip(panels.flat, corners, strict=True):
-        x = np.asarray(indexed[(corner, x_signal)]["values"], dtype=np.float64)
-        y = np.asarray(indexed[(corner, y_signal)]["values"], dtype=np.float64)
-        if len(x) != len(y):
-            raise VerticalKernelError(
-                f"{corner} {y_signal} and {x_signal} lengths differ"
             )
-        if transform is not None:
-            x, y = transform(x, y)
-        panel.plot(x, y, color="#000000", linewidth=1.8, label=source_label)
-        panel.set_title(label, loc="left", fontweight="bold")
-        panel.set_xlabel(f"{_label(x_signal)} [mm]")
-        panel.set_ylabel(f"{_label(y_signal)} [{unit}]")
-        panel.grid(True, color="#d9e2f3", linewidth=0.8)
-        panel.legend(loc="best", frameon=False)
-    if footer:
-        figure.text(
-            0.02,
-            0.025,
-            f"{footer}\nGenerated: "
-            f"{datetime.now().astimezone():%Y-%m-%d %H:%M %Z}",
-            fontsize=7,
-            color="#4a4a4a",
-            va="bottom",
-        )
-        if logo_image is not None:
-            logo_height = min(footer_lines * 0.017, footer_height - 0.05)
-            logo_panel = figure.add_axes((0.80, 0.025, 0.18, logo_height))
-            logo_panel.imshow(logo_image)
-            logo_panel.axis("off")
-    output = StringIO()
-    figure.savefig(
-        output, format="svg", metadata={"Date": None, "Creator": "ChassisLab"}
-    )
-    plt.close(figure)
-    return output.getvalue()
-
-
-def _pyplot() -> object:
-    import matplotlib
-
-    matplotlib.use("svg")
-    matplotlib.rcParams["svg.fonttype"] = "none"
-    matplotlib.rcParams["svg.hashsalt"] = "chassis-lab"
-    from matplotlib import pyplot
-
-    return pyplot
-
-
-def _wheel_rate(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Return load gradient on original finite travel samples."""
-    finite = np.isfinite(x) & np.isfinite(y)
-    if not np.any(finite):
-        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
-    x_finite, y_finite = x[finite], y[finite]
-    order = np.argsort(x_finite, kind="stable")
-    x_sorted, y_sorted = x_finite[order], y_finite[order]
-    unique, starts, counts = np.unique(
-        x_sorted, return_index=True, return_counts=True
-    )
-    averaged = np.add.reduceat(y_sorted, starts) / counts
-    gradient = (
-        np.zeros_like(averaged)
-        if len(unique) < 2
-        else np.gradient(averaged, unique)
-    )
-    return x_finite, np.interp(x_finite, unique, gradient)
-
-
-def _label(signal: str) -> str:
-    labels = {
-        "wheel_center_x": "Wheel center X",
-        "wheel_center_y": "Wheel center Y",
-        "wheel_center_z": "Wheel center Z",
-        "wheel_load": "Wheel load",
-        "toe": "Toe",
-        "camber": "Camber",
-    }
-    return labels[signal]
+    return reports

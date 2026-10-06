@@ -14,7 +14,7 @@ use sha2::Digest;
 
 use crate::{
     analysis::{svc, vertical},
-    analyze::write_bundle,
+    analyze::{debug_info, write_bundle},
 };
 
 #[derive(Debug, Args)]
@@ -35,6 +35,9 @@ pub(crate) struct CompareArgs {
     /// Replace report bundle already in output directory.
     #[arg(long)]
     force: bool,
+    /// Include KnC rate-filter diagnostic plots in the report (requires --report).
+    #[arg(long, requires = "output")]
+    debug: bool,
 }
 
 #[derive(Debug)]
@@ -66,6 +69,7 @@ enum ComparedDomain {
     Vertical {
         curves: serde_json::Value,
         metrics: Vec<serde_json::Value>,
+        branch: clab_core::config::VerticalBranch,
     },
 }
 
@@ -135,10 +139,12 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     ComparedDomain::Vertical {
                         curves: base_curves,
                         metrics: base_metrics,
+                        ..
                     },
                     ComparedDomain::Vertical {
                         curves: candidate_curves,
                         metrics: candidate_metrics,
+                        branch: candidate_branch,
                     },
                 ) => {
                     let mut compared = compare_vertical_metrics(
@@ -158,6 +164,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     vertical_candidates.push((
                         format!("Curve {}", index + 1),
                         candidate_curves.clone(),
+                        candidate_branch.clone(),
                         format!(
                             "Curve {}: {} | {} | {}",
                             index + 1,
@@ -165,6 +172,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                             candidate.config.loadcase,
                             absolute_path(path)?.display()
                         ),
+                        path.as_path(),
                     ));
                     domains.push(serde_json::json!({"domain": "knc", "test": "vertical", "status": "compared"}));
                 }
@@ -199,7 +207,11 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
     if args.output.is_some()
-        && let Some(ComparedDomain::Vertical { curves: base, .. }) = baseline.domains.get("knc")
+        && let Some(ComparedDomain::Vertical {
+            curves: base,
+            branch: base_branch,
+            ..
+        }) = baseline.domains.get("knc")
     {
         let footer = std::iter::once(format!(
             "Config: {}",
@@ -214,21 +226,31 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         .chain(
             vertical_candidates
                 .iter()
-                .map(|(_, _, metadata)| metadata.clone()),
+                .map(|(_, _, _, metadata, _)| metadata.clone()),
         )
         .chain(std::iter::once(format!("Created by: {}", report_creator())))
         .collect::<Vec<_>>()
         .join("\n");
+        let debug = debug_info(
+            args.debug,
+            &args.config,
+            &std::iter::once(args.baseline.as_path())
+                .chain(vertical_candidates.iter().map(|candidate| candidate.4))
+                .collect::<Vec<_>>(),
+        )?;
         let candidates = vertical_candidates
             .into_iter()
-            .map(|(label, curves, _)| (label, curves))
+            .map(|(label, curves, branch, _, _)| (label, curves, branch))
             .collect::<Vec<_>>();
         plots.extend(vertical::compare_plots(
+            &baseline.config,
             base,
+            base_branch,
             &candidates,
             "Baseline",
             &footer,
             "plots/knc/vertical/comparison",
+            debug.as_deref(),
         )?);
     }
     let report = serde_json::json!({
@@ -244,17 +266,20 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     if let Some(output) = &args.output {
         let csv = metrics_csv(&args.baseline, &rows)?;
         let detail = serde_json::to_string_pretty(&report)? + "\n";
-        let mut files = vec![("report.json", detail.clone()), ("metrics.csv", csv)];
+        let mut files = vec![
+            ("report.json", detail.clone().into_bytes()),
+            ("metrics.csv", csv.into_bytes()),
+        ];
         if baseline.domains.contains_key("svc") {
-            files.push(("svc.json", detail));
+            files.push(("svc.json", detail.into_bytes()));
         }
         if baseline.domains.contains_key("knc") {
             files.push((
                 "knc-vertical.json",
-                serde_json::to_string_pretty(&report)? + "\n",
+                (serde_json::to_string_pretty(&report)? + "\n").into_bytes(),
             ));
         }
-        files.extend(plots.iter().map(|(name, svg)| (name.as_str(), svg.clone())));
+        files.extend(plots.iter().map(|(name, pdf)| (name.as_str(), pdf.clone())));
         let mut inputs = vec![args.config.as_path(), args.baseline.as_path()];
         inputs.extend(baseline.sources.iter().map(PathBuf::as_path));
         inputs.extend(args.candidates.iter().map(PathBuf::as_path));
@@ -354,6 +379,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             ComparedDomain::Vertical {
                 curves: detail["curves"].clone(),
                 metrics: report.metrics,
+                branch: report.branch,
             },
         );
     }

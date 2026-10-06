@@ -13,3 +13,9 @@ travel_minimum_mm = -1
 travel_maximum_mm = 1
 step_mm = 1
 metric_gradient_points_mm = 0.5
+
+# Branch selection: metrics use this sweep; plots draw every sweep.
+[knc.vertical.branch]
+direction = "rise"
+index = 2
+plot_branches = "all"

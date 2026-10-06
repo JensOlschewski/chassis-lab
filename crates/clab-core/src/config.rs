@@ -53,9 +53,138 @@ pub struct VerticalConfig {
     pub static_simulation_hdf5: Option<PathBuf>,
     pub setup: VerticalSetup,
     pub window: VerticalWindow,
+    pub branch: VerticalBranches,
     pub signals: BTreeMap<String, SignalRef>,
     pub signal_map: Option<PathBuf>,
     pub tolerances: ValidationTolerances,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct VerticalBranch {
+    pub direction: String,
+    pub index: usize,
+    pub plot_branches: String,
+    /// Source kind, set by the parser rather than exposed as a config key.
+    pub measurement: bool,
+}
+
+impl VerticalBranch {
+    fn defaults(measurement: bool) -> Self {
+        Self {
+            direction: "rise".into(),
+            index: 2,
+            plot_branches: "all".into(),
+            measurement,
+        }
+    }
+
+    fn apply(
+        &mut self,
+        table: &toml::map::Map<String, Value>,
+        scope: &str,
+    ) -> Result<(), ConfigError> {
+        for (key, target, choices) in [
+            (
+                "direction",
+                &mut self.direction,
+                &["rise", "fall", "any"][..],
+            ),
+            (
+                "plot_branches",
+                &mut self.plot_branches,
+                &["all", "selected"][..],
+            ),
+        ] {
+            if let Some(raw) = table.get(key) {
+                let text = raw
+                    .as_str()
+                    .ok_or_else(|| ConfigError(format!("{scope}.{key} must be a string")))?;
+                if !choices.contains(&text) {
+                    return Err(ConfigError(format!(
+                        "{scope}.{key} must be one of {}",
+                        choices.join(", ")
+                    )));
+                }
+                *target = text.to_owned();
+            }
+        }
+        for (key, target) in [("index", &mut self.index)] {
+            if let Some(raw) = table.get(key) {
+                *target = raw
+                    .as_integer()
+                    .and_then(|count| usize::try_from(count).ok())
+                    .filter(|count| *count > 0)
+                    .ok_or_else(|| {
+                        ConfigError(format!("{scope}.{key} must be a positive integer"))
+                    })?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Branch detection settings; measurement and simulation sweeps differ in
+/// sampling density, so each source kind resolves its own options.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VerticalBranches {
+    pub measurement: VerticalBranch,
+    pub simulation: VerticalBranch,
+}
+
+impl VerticalBranches {
+    pub fn for_measurement(&self, measurement: bool) -> &VerticalBranch {
+        if measurement {
+            &self.measurement
+        } else {
+            &self.simulation
+        }
+    }
+
+    fn parse(raw: Option<&Value>) -> Result<Self, ConfigError> {
+        let mut branches = Self {
+            measurement: VerticalBranch::defaults(true),
+            simulation: VerticalBranch::defaults(false),
+        };
+        let Some(raw) = raw else {
+            return Ok(branches);
+        };
+        let table = raw
+            .as_table()
+            .ok_or_else(|| ConfigError("[vertical.branch] must be a table".into()))?;
+        let known = [
+            "direction",
+            "index",
+            "plot_branches",
+            "measurement",
+            "simulation",
+        ];
+        if let Some(key) = table.keys().find(|key| !known.contains(&key.as_str())) {
+            return Err(ConfigError(format!(
+                "unknown key '{key}' in [vertical.branch]"
+            )));
+        }
+        branches.measurement.apply(table, "[vertical.branch]")?;
+        branches.simulation.apply(table, "[vertical.branch]")?;
+        for (name, target) in [
+            ("measurement", &mut branches.measurement),
+            ("simulation", &mut branches.simulation),
+        ] {
+            if let Some(source) = table.get(name) {
+                let scope = format!("[vertical.branch.{name}]");
+                let source = source
+                    .as_table()
+                    .ok_or_else(|| ConfigError(format!("{scope} must be a table")))?;
+                if let Some(key) = source
+                    .keys()
+                    .find(|key| !["direction", "index", "plot_branches"].contains(&key.as_str()))
+                {
+                    return Err(ConfigError(format!("unknown key '{key}' in {scope}")));
+                }
+                target.apply(source, &scope)?;
+            }
+        }
+        Ok(branches)
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Domain {
@@ -751,6 +880,9 @@ fn function_vertical(
         }
         Value::Table(w)
     });
+    if let Some(branch) = setup_copy.remove("branch") {
+        vertical.insert("branch".into(), branch);
+    }
     vertical.insert("setup".into(), Value::Table(setup_copy));
     vertical.insert("window".into(), window);
     if let Some(validation) = knc_validation(root)? {
@@ -1325,6 +1457,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             "mappings",
             "setup",
             "window",
+            "branch",
             "signals",
             "signal_mappings",
             "validation",
@@ -1433,6 +1566,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
         .into());
     }
     let source = signal_source(v, path, "[vertical]", Some(i))?;
+    let branch = VerticalBranches::parse(v.get("branch"))?;
     Ok(VerticalConfig {
         measurement_hdf5: resolve(
             value(i, "measurement_hdf5", "[vertical.inputs]")?,
@@ -1477,6 +1611,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             step_mm: step,
             metric_gradient_points_mm: gradient,
         },
+        branch,
         signals: source.1,
         signal_map: source.0,
         tolerances: vertical_tolerances(v)?,
@@ -2023,6 +2158,34 @@ mod tests {
         fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.configured_domains(), vec![Domain::Knc]);
+    }
+
+    #[test]
+    fn validates_vertical_branch_options() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n";
+        fs::write(&p, base).unwrap();
+        let branch = load_config(&p).unwrap().vertical.unwrap().branch;
+        assert_eq!((branch.measurement.index, branch.simulation.index), (2, 2));
+        fs::write(
+            &p,
+            format!("{base}[vertical.branch]\nindex=1\n[vertical.branch.simulation]\nplot_branches='selected'\n"),
+        )
+        .unwrap();
+        let branch = load_config(&p).unwrap().vertical.unwrap().branch;
+        assert_eq!((branch.measurement.index, branch.simulation.index), (1, 1));
+        assert_eq!(branch.measurement.plot_branches, "all");
+        assert_eq!(branch.simulation.plot_branches, "selected");
+        for invalid in [
+            "index=0",
+            "smooth_window=5",
+            "min_samples=5",
+            "plot_branches='other'",
+        ] {
+            fs::write(&p, format!("{base}[vertical.branch]\n{invalid}\n")).unwrap();
+            assert!(load_config(&p).is_err(), "accepted {invalid}");
+        }
     }
 
     #[test]

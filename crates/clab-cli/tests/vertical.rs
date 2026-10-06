@@ -108,7 +108,7 @@ fn measurement(path: &std::path::Path) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 1_u32);
     scalar(&file, "sample_count", 6_u64);
-    scalar(&file, "signal_count", 28_u64);
+    scalar(&file, "signal_count", 36_u64);
     string(&file, "source_kind", "measurement");
     string(&file, "source_file", "fixture.acd");
     let axis = file.create_group("axis").unwrap();
@@ -161,6 +161,18 @@ fn measurement(path: &std::path::Path) {
             &format!("{prefix}fz"),
             &[2970., 3000., 3030., 3030., 3000., 2970.],
             0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}pz"),
+            &[-1.1, 0., 1.1, 1.1, 0., -1.1],
+            0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}tdef"),
+            &[16.9, 17., 17.1, 17.1, 17., 16.9],
+            17.,
         );
     }
     let metadata = file.create_group("measurement").unwrap();
@@ -219,7 +231,8 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
     config(&config_path, false);
     let output = directory.path().join("reports");
     let json = output.join("knc-vertical.json");
-    let svg = output.join("plots/knc/vertical/wheel-center-z-vs-wheel-center-y.svg");
+    let svg = output.join("plots/knc/vertical/knc_vertical_wcz_vs_wcy.pdf");
+    let recession = output.join("plots/knc/vertical/knc_vertical_recession_angle.pdf");
     let success = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([
             "analyze",
@@ -235,7 +248,8 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
         "{}",
         String::from_utf8_lossy(&success.stderr)
     );
-    assert!(json.is_file() && svg.is_file());
+    assert!(json.is_file() && svg.is_file() && recession.is_file());
+    assert!(fs::read(recession).unwrap().starts_with(b"%PDF"));
     let report = fs::read_to_string(output.join("report.json")).unwrap();
     assert!(report.contains("no static_simulation"));
     assert!(report.contains("\"method\": \"none\""));
@@ -243,22 +257,11 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
     assert!(stderr.contains("analysis warning"));
     assert!(
         output
-            .join("plots/knc/vertical/wheel-center-y-vs-wheel-center-x.svg")
+            .join("plots/knc/vertical/knc_vertical_wcz_vs_wcx.pdf")
             .is_file()
     );
-    assert!(
-        output
-            .join("plots/knc/vertical/wheel-center-z-vs-wheel-center-x.svg")
-            .is_file()
-    );
-    assert!(!output.join("knc-vertical.svg").exists());
-    let svg_text = fs::read_to_string(svg).unwrap();
-    assert!(svg_text.contains("Simulation"));
-    assert!(svg_text.contains("Front left"));
-    assert!(svg_text.contains(&format!("Config: {}", config_path.display())));
-    assert!(svg_text.contains("Case: fixture | L"));
-    assert!(svg_text.contains(&format!("Input: {}", simulation_path.display())));
-    assert!(svg_text.contains("Created by:"));
+    assert!(!output.join("knc-vertical.pdf").exists());
+    assert!(fs::read(svg).unwrap().starts_with(b"%PDF"));
     assert!(
         fs::read_to_string(&json)
             .unwrap()
@@ -311,7 +314,11 @@ fn assert_measurement_metrics(
     let text = fs::read_to_string(&config_path)
         .unwrap()
         .replace("step_mm=1\n", &format!("step_mm=1\n{gradient}"));
-    fs::write(&config_path, text).unwrap();
+    fs::write(
+        &config_path,
+        format!("{text}\n[setup.knc.vertical.branch]\ndirection='any'\nindex=1\n"),
+    )
+    .unwrap();
     let output = directory.join("reports");
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([
@@ -330,7 +337,7 @@ fn assert_measurement_metrics(
         String::from_utf8_lossy(&result.stderr)
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.contains("KnC Vertical\nrunning 24 metrics"));
+    assert!(stdout.contains("KnC Vertical\nrunning 32 metrics"));
     assert!(!String::from_utf8_lossy(&result.stderr).contains("warning:"));
     if gradient.is_empty() {
         return;
@@ -358,13 +365,15 @@ fn assert_measurement_metrics(
         value("front_left_wheel_recession_angle_deg"),
         (-2.0_f64).atan().to_degrees(),
     );
-    close(value("rear_right_wheel_rate_n_per_mm"), 30.0);
+    close(value("rear_right_suspension_rate_n_per_mm"), 30.0);
+    close(value("rear_right_ride_rate_n_per_mm"), 30.0 / 1.1);
+    close(value("rear_right_tire_rate_n_per_mm"), 300.0);
     let csv = fs::read_to_string(output.join("metrics.csv")).unwrap();
     assert!(csv.starts_with("run,domain,test,metric,unit,value\n"));
-    assert!(csv.contains("fixture,knc,vertical,rear_right_wheel_rate_n_per_mm,N/mm,30"));
+    assert!(csv.contains("fixture,knc,vertical,rear_right_suspension_rate_n_per_mm,N/mm,30"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["domains"][0]["metric_count"], 24);
+    assert_eq!(report["domains"][0]["metric_count"], 32);
 }
 
 #[test]
@@ -578,7 +587,7 @@ fn compares_direct_vertical_inputs_across_source_kinds_with_overlays() {
     );
     assert_eq!(
         report["candidates"][0]["metrics"].as_array().unwrap().len(),
-        36
+        44
     );
     assert!(
         report["candidates"][0]["metrics"]
@@ -615,13 +624,8 @@ fn compares_direct_vertical_inputs_across_source_kinds_with_overlays() {
         .map(|metric| stdout.find(&format!("knc::vertical::{metric}")).unwrap())
         .collect::<Vec<_>>();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-    let svg = output.join("plots/knc/vertical/comparison/wheel-center-z-vs-wheel-center-y.svg");
-    let text = fs::read_to_string(svg).unwrap();
-    assert!(text.contains("fixture"));
-    assert!(text.contains("Front left"));
-    assert!(text.contains("#000000"));
-    assert!(text.contains("#e41a1c"));
-    assert!(text.contains("<image"));
+    let svg = output.join("plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcy.pdf");
+    assert!(fs::read(svg).unwrap().starts_with(b"%PDF"));
     assert!(output.join("metrics.csv").is_file());
 }
 
