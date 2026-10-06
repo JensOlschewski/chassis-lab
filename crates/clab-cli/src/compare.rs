@@ -244,8 +244,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             .collect::<Vec<_>>();
         plots.extend(vertical::compare_plots(
             &baseline.config,
-            base,
-            base_branch,
+            (base, base_branch),
             &candidates,
             "Baseline",
             &footer,

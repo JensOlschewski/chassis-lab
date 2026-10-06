@@ -108,16 +108,13 @@ impl VerticalBranch {
                 *target = text.to_owned();
             }
         }
-        for (key, target) in [("index", &mut self.index)] {
-            if let Some(raw) = table.get(key) {
-                *target = raw
-                    .as_integer()
-                    .and_then(|count| usize::try_from(count).ok())
-                    .filter(|count| *count > 0)
-                    .ok_or_else(|| {
-                        ConfigError(format!("{scope}.{key} must be a positive integer"))
-                    })?;
-            }
+        let (key, target) = ("index", &mut self.index);
+        if let Some(raw) = table.get(key) {
+            *target = raw
+                .as_integer()
+                .and_then(|count| usize::try_from(count).ok())
+                .filter(|count| *count > 0)
+                .ok_or_else(|| ConfigError(format!("{scope}.{key} must be a positive integer")))?;
         }
         Ok(())
     }

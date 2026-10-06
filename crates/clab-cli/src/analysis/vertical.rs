@@ -237,8 +237,7 @@ fn effective_gradient_points(window: &clab_core::config::VerticalWindow) -> f64 
 /// Render same canonical curves together. Rust owns input selection; Python only draws arrays.
 pub(crate) fn compare_plots(
     config: &CaseConfig,
-    baseline: &serde_json::Value,
-    baseline_branch: &VerticalBranch,
+    (baseline, baseline_branch): (&serde_json::Value, &VerticalBranch),
     candidates: &[(String, serde_json::Value, VerticalBranch)],
     baseline_label: &str,
     footer: &str,
