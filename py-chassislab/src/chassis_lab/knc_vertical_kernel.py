@@ -8,6 +8,7 @@ import numpy as np
 
 from chassis_lab.knc_plot_kernel import (
     BranchOptions,
+    GradientDisplay,
     PlotSpec,
     SignalStyle,
     gradient_curve,
@@ -22,11 +23,13 @@ CORNERS = ("front_left", "front_right", "rear_left", "rear_right")
 class GradientMetric(NamedTuple):
     """Secant metric of `signal` between travel points on `axis`.
 
-    `gradient` divides by the travel span, or by the span of `denominator`
-    when given. `angle` and `change` use the signal span only.
+    The metric is named `<name>_<corner>_<suffix>`. `gradient` divides by the
+    travel span, or by the span of `denominator` when given. `angle` uses the
+    signal span only.
     """
 
     name: str
+    suffix: str
     signal: str
     unit: str
     kind: str
@@ -35,29 +38,25 @@ class GradientMetric(NamedTuple):
 
 
 GRADIENT_METRICS = (
-    GradientMetric("bump_steer_deg_per_mm", "toe", "deg/mm", "gradient"),
-    GradientMetric("bump_camber_deg_per_mm", "camber", "deg/mm", "gradient"),
+    GradientMetric("bump_steer", "deg_per_mm", "toe", "deg/mm", "gradient"),
+    GradientMetric("bump_camber", "deg_per_mm", "camber", "deg/mm", "gradient"),
     GradientMetric(
-        "wheel_recession_angle_deg", "wheel_center_x", "deg", "angle"
+        "wheel_recession_angle", "deg", "wheel_center_x", "deg", "angle"
     ),
     GradientMetric(
-        "wheel_center_x_change_mm", "wheel_center_x", "mm", "change"
+        "suspension_rate", "n_per_mm", "wheel_load", "N/mm", "gradient"
     ),
     GradientMetric(
-        "wheel_center_y_change_mm", "wheel_center_y", "mm", "change"
-    ),
-    GradientMetric(
-        "suspension_rate_n_per_mm", "wheel_load", "N/mm", "gradient"
-    ),
-    GradientMetric(
-        "ride_rate_n_per_mm",
+        "ride_rate",
+        "n_per_mm",
         "wheel_load",
         "N/mm",
         "gradient",
         axis="wheel_pad_z",
     ),
     GradientMetric(
-        "tire_rate_n_per_mm",
+        "tire_rate",
+        "n_per_mm",
         "wheel_load",
         "N/mm",
         "gradient",
@@ -117,6 +116,7 @@ PLOT_SPECS = (
         "Longitudinal Disp. of Wheel Center",
         "wheel_center_z",
         "wheel_center_x",
+        gradient=GradientDisplay("wheel recession angle", "deg", "angle"),
     ),
     PlotSpec(
         "knc_vertical_wcz_vs_wcy",
@@ -133,7 +133,6 @@ PLOT_SPECS = (
         branch={"edge_width": 100, "edge_percentile": 0.95},
         transform=_wheel_recession_angle,
         from_gradient=_recession_angle,
-        gradient_markers=True,
     ),
     PlotSpec(
         "knc_vertical_wheel_load",
@@ -141,7 +140,7 @@ PLOT_SPECS = (
         "wheel_center_z",
         "wheel_load",
         optional=True,
-        gradient_markers=True,
+        gradient=GradientDisplay("suspension rate", "N/mm"),
     ),
     PlotSpec(
         "knc_vertical_suspension_rate",
@@ -152,7 +151,6 @@ PLOT_SPECS = (
         transform=gradient_curve,
         optional=True,
         y_limits=(0, 100),
-        gradient_markers=True,
     ),
     PlotSpec(
         "knc_vertical_ride_rate",
@@ -164,7 +162,6 @@ PLOT_SPECS = (
         transform=gradient_curve,
         optional=True,
         y_limits=(0, 100),
-        gradient_markers=True,
     ),
     PlotSpec(
         "knc_vertical_tire_rate",
@@ -175,7 +172,6 @@ PLOT_SPECS = (
         transform=gradient_curve,
         optional=True,
         denominator_signal="tire_deflection",
-        gradient_markers=True,
     ),
     PlotSpec(
         "knc_vertical_toe",
@@ -183,7 +179,7 @@ PLOT_SPECS = (
         "wheel_center_z",
         "toe",
         optional=True,
-        gradient_markers=True,
+        gradient=GradientDisplay("bump steer", "deg/mm"),
     ),
     PlotSpec(
         "knc_vertical_camber",
@@ -191,7 +187,7 @@ PLOT_SPECS = (
         "wheel_center_z",
         "camber",
         optional=True,
-        gradient_markers=True,
+        gradient=GradientDisplay("bump camber", "deg/mm"),
     ),
 )
 
@@ -214,7 +210,7 @@ def metrics(request: dict[str, object]) -> str:
         for metric in GRADIENT_METRICS:
             result = {
                 "corner": corner,
-                "metric": f"{corner}_{metric.name}",
+                "metric": f"{metric.name}_{corner}_{metric.suffix}",
                 "unit": metric.unit,
                 "value": None,
                 "lower": None,
@@ -245,10 +241,10 @@ def metrics(request: dict[str, object]) -> str:
                 result["upper"] = upper
                 result["value"] = {
                     "gradient": delta / span,
-                    "change": delta,
                     "angle": degrees(atan(-delta / (2.0 * gradient))),
                 }[metric.kind]
             results.append(result)
+    results.sort(key=lambda item: str(item["metric"]))
     return json.dumps({"metrics": results})
 
 

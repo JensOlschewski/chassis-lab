@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
 const AXES: [&str; 3] = ["x", "y", "z"];
-const DEFAULT_GRADIENT_POINTS_MM: f64 = 5.0;
+const DEFAULT_GRADIENT_POINTS_MM: f64 = 10.0;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Curve {
@@ -30,15 +30,6 @@ struct Curve {
     unit: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     travel: Option<Vec<f64>>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct Comparison {
-    pub corner: String,
-    pub axis: String,
-    pub maximum_reference_mm: f64,
-    pub maximum_candidate_mm: f64,
-    pub maximum_error_mm: f64,
 }
 
 pub(crate) struct Reports {
@@ -106,6 +97,7 @@ pub(crate) fn analyze_input_with_footer(
         ),
     };
     let measurement = file.summary().source_kind == SourceKind::Measurement;
+    warnings.extend(default_warnings(config, measurement));
     let relative_travel = normalization["method"] != "none";
     let metrics = gradient_metrics(config, &curves, relative_travel, measurement, &mut warnings)?;
     warnings.sort();
@@ -148,6 +140,46 @@ pub(crate) fn analyze_input_with_footer(
     })
 }
 
+/// Warn about every optional vertical setting the configuration leaves unset.
+fn default_warnings(config: &CaseConfig, measurement: bool) -> Vec<String> {
+    let Some(vertical) = &config.vertical else {
+        return Vec::new();
+    };
+    let branch = vertical.branch.for_measurement(measurement);
+    let mut warnings = Vec::new();
+    let mut warn = |key: &str, table: &str, default: String| {
+        warnings.push(format!(
+            "KnC vertical config key '{key}' missing in [{table}]; using default {default}"
+        ));
+    };
+    if vertical.window.gradient_points_mm.is_none() {
+        let effective = effective_gradient_points(&vertical.window);
+        let limited = if effective < DEFAULT_GRADIENT_POINTS_MM {
+            format!(" (limited to travel window: {effective} mm)")
+        } else {
+            String::new()
+        };
+        warn(
+            "gradient_points_mm",
+            "setup.knc.metric",
+            format!("{DEFAULT_GRADIENT_POINTS_MM} mm{limited}"),
+        );
+    }
+    for key in &branch.defaulted {
+        match *key {
+            "direction" => warn("direction", "setup.knc.metric", branch.direction.clone()),
+            "index" => warn("index", "setup.knc.metric", branch.index.to_string()),
+            "plot_branches" => warn(
+                "plot_branches",
+                "setup.knc.window",
+                branch.plot_branches.clone(),
+            ),
+            _ => {}
+        }
+    }
+    warnings
+}
+
 fn branch_options(config: &CaseConfig, measurement: bool) -> &VerticalBranch {
     config
         .vertical
@@ -159,7 +191,7 @@ fn branch_options(config: &CaseConfig, measurement: bool) -> &VerticalBranch {
 
 /// Calculate secant metrics at configured symmetric wheel-center travel.
 ///
-/// Gradient points default to 5 mm, limited to the travel window. Wheel-center
+/// Gradient points default to 10 mm, limited to the travel window. Wheel-center
 /// Z must be relative travel: measurement offsets or a static simulation
 /// baseline. Unavailable metrics keep `value: null` and add one warning with
 /// reason.
@@ -227,7 +259,7 @@ fn gradient_metrics(
 }
 
 fn effective_gradient_points(window: &clab_core::config::VerticalWindow) -> f64 {
-    window.metric_gradient_points_mm.unwrap_or_else(|| {
+    window.gradient_points_mm.unwrap_or_else(|| {
         DEFAULT_GRADIENT_POINTS_MM
             .min(-window.minimum_mm)
             .min(window.maximum_mm)
@@ -279,99 +311,6 @@ pub(crate) fn compare_plots(
         .into_iter()
         .map(|(name, pdf)| (format!("{prefix}/{name}"), pdf))
         .collect())
-}
-
-/// Compare normalized canonical curves on configured travel grid.
-pub(crate) fn compare_metrics(
-    config: &CaseConfig,
-    baseline: &serde_json::Value,
-    candidate: &serde_json::Value,
-) -> Result<Vec<Comparison>> {
-    let vertical = config
-        .vertical
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("KnC vertical configuration is required"))?;
-    let mut grid = Vec::new();
-    let mut value = vertical.window.minimum_mm;
-    while value <= vertical.window.maximum_mm {
-        grid.push(value);
-        value += vertical.window.step_mm;
-    }
-    if grid
-        .last()
-        .is_some_and(|value| *value < vertical.window.maximum_mm)
-    {
-        grid.push(vertical.window.maximum_mm);
-    }
-    let curves = comparison_curves(baseline, candidate)?;
-    let curves = serde_json::to_string(&curves)?;
-    let response: String = with_kernel(|py, module| {
-        let request = PyDict::new(py);
-        request.set_item("grid", &grid)?;
-        request.set_item("curves", &curves)?;
-        module.getattr("evaluate")?.call1((request,))?.extract()
-    })
-    .context("failed to compare vertical curves with embedded Python")?;
-    let response: serde_json::Value = serde_json::from_str(&response)
-        .context("embedded Python returned invalid vertical comparison metrics")?;
-    serde_json::from_value(response["comparisons"].clone())
-        .context("embedded Python returned incomplete vertical comparison metrics")
-}
-
-fn comparison_curves(
-    baseline: &serde_json::Value,
-    candidate: &serde_json::Value,
-) -> Result<BTreeMap<String, serde_json::Value>> {
-    let baseline = index_curves(baseline)?;
-    let candidate = index_curves(candidate)?;
-    let mut curves = BTreeMap::new();
-    for corner in CORNERS {
-        for axis in AXES {
-            let coordinate = format!("wheel_center_{axis}");
-            let travel = "wheel_center_z".to_string();
-            let curve = |source: &BTreeMap<(String, String), serde_json::Value>| -> Result<serde_json::Value> {
-                let values = source.get(&(corner.into(), coordinate.clone())).ok_or_else(|| anyhow::anyhow!("canonical vertical curve missing: {corner} {coordinate}"))?;
-                let travel_values = match values.get("travel") {
-                    Some(travel) => travel,
-                    None => &source
-                        .get(&(corner.into(), travel.clone()))
-                        .ok_or_else(|| anyhow::anyhow!("canonical vertical travel curve missing: {corner}"))?
-                        ["values"],
-                };
-                Ok(serde_json::json!({"travel": travel_values, "values": values["values"]}))
-            };
-            curves.insert(
-                format!("{corner}:{axis}"),
-                serde_json::json!({"baseline": curve(&baseline)?, "candidate": curve(&candidate)?}),
-            );
-        }
-    }
-    Ok(curves)
-}
-
-fn index_curves(
-    curves: &serde_json::Value,
-) -> Result<BTreeMap<(String, String), serde_json::Value>> {
-    curves
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("canonical vertical curves must be an array"))?
-        .iter()
-        .map(|curve| {
-            Ok((
-                (
-                    curve["corner"]
-                        .as_str()
-                        .ok_or_else(|| anyhow::anyhow!("canonical vertical curve corner missing"))?
-                        .into(),
-                    curve["signal"]
-                        .as_str()
-                        .ok_or_else(|| anyhow::anyhow!("canonical vertical curve signal missing"))?
-                        .into(),
-                ),
-                curve.clone(),
-            ))
-        })
-        .collect()
 }
 
 fn subtract_static(

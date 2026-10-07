@@ -625,15 +625,18 @@ fn analysis_footer(
     input: &Path,
     run: Option<&Path>,
 ) -> Result<String> {
-    let mut lines = vec![
-        format!("Config: {}", absolute_path(config_path)?.display()),
-        format!("Case: {} | {}", config.name, config.loadcase),
-        format!("Input: {}", absolute_path(input)?.display()),
-    ];
+    let mut lines = Vec::new();
+    if let Some(vertical) = &config.vertical {
+        lines.push(format!("KnC setup: {}", vertical.setup.summary()));
+    }
+    lines.push(format!("Config: {}", absolute_path(config_path)?.display()));
+    lines.push(format!("Case: {} | {}", config.name, config.loadcase));
+    lines.push(format!("Input: {}", absolute_path(input)?.display()));
     if let Some(run) = run {
         lines.push(format!("Run: {}", absolute_path(run)?.display()));
     }
     lines.push(format!("Created by: {}", report_creator()));
+    lines.push(format!("clab version: {}", env!("CARGO_PKG_VERSION")));
     Ok(lines.join("\n"))
 }
 
@@ -657,12 +660,25 @@ pub(crate) fn debug_info(enabled: bool, config: &Path, inputs: &[&Path]) -> Resu
     ))
 }
 
-fn absolute_path(path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        Ok(path.into())
+/// Absolute path without `.` components or `..` hops, without touching the
+/// file system (symlinks stay as written).
+pub(crate) fn absolute_path(path: &Path) -> Result<PathBuf> {
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
     } else {
-        Ok(env::current_dir()?.join(path))
+        env::current_dir()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other),
+        }
     }
+    Ok(normalized)
 }
 
 fn report_creator() -> String {
@@ -775,4 +791,22 @@ pub(crate) fn write_bundle(
         fs::remove_dir_all(backup)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::absolute_path;
+    use std::path::Path;
+
+    #[test]
+    fn absolute_path_drops_current_directory_components() {
+        assert_eq!(
+            absolute_path(Path::new("/data/./run/../input/./a.toml")).unwrap(),
+            Path::new("/data/input/a.toml")
+        );
+        let relative = absolute_path(Path::new("./ford/./config.toml")).unwrap();
+        assert!(relative.is_absolute());
+        assert!(!relative.to_string_lossy().contains("/./"));
+        assert!(relative.ends_with("ford/config.toml"));
+    }
 }

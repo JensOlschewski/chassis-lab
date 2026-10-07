@@ -37,13 +37,30 @@ pub struct VerticalSetup {
     pub front_arb_connected: bool,
     pub rear_arb_connected: Option<bool>,
 }
+
+impl VerticalSetup {
+    /// One-line test setup description for report footers.
+    pub fn summary(&self) -> String {
+        let yes_no = |value: bool| if value { "yes" } else { "no" };
+        let mut parts = vec![
+            format!("brakes applied: {}", yes_no(self.brakes_applied)),
+            format!("engine running: {}", yes_no(self.engine_running)),
+            format!("front ARB connected: {}", yes_no(self.front_arb_connected)),
+        ];
+        if let Some(rear) = self.rear_arb_connected {
+            parts.push(format!("rear ARB connected: {}", yes_no(rear)));
+        }
+        parts.join(" | ")
+    }
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalWindow {
     pub minimum_mm: f64,
     pub maximum_mm: f64,
     pub step_mm: f64,
-    /// Symmetric wheel-center travel offset for secant gradient metrics.
-    pub metric_gradient_points_mm: Option<f64>,
+    /// Symmetric wheel-center travel offset for secant gradient metrics;
+    /// `None` when the configuration does not set it.
+    pub gradient_points_mm: Option<f64>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalConfig {
@@ -66,6 +83,9 @@ pub struct VerticalBranch {
     pub plot_branches: String,
     /// Source kind, set by the parser rather than exposed as a config key.
     pub measurement: bool,
+    /// Keys the configuration left unset, so their defaults apply.
+    #[serde(skip)]
+    pub defaulted: Vec<&'static str>,
 }
 
 impl VerticalBranch {
@@ -75,9 +95,11 @@ impl VerticalBranch {
             index: 2,
             plot_branches: "all".into(),
             measurement,
+            defaulted: vec!["direction", "index", "plot_branches"],
         }
     }
 
+    /// Apply the branch keys present in `table`.
     fn apply(
         &mut self,
         table: &toml::map::Map<String, Value>,
@@ -106,6 +128,7 @@ impl VerticalBranch {
                     )));
                 }
                 *target = text.to_owned();
+                self.defaulted.retain(|name| *name != key);
             }
         }
         let (key, target) = ("index", &mut self.index);
@@ -115,13 +138,19 @@ impl VerticalBranch {
                 .and_then(|count| usize::try_from(count).ok())
                 .filter(|count| *count > 0)
                 .ok_or_else(|| ConfigError(format!("{scope}.{key} must be a positive integer")))?;
+            self.defaulted.retain(|name| *name != key);
         }
         Ok(())
     }
 }
 
-/// Branch detection settings; measurement and simulation sweeps differ in
-/// sampling density, so each source kind resolves its own options.
+/// Branch settings; measurement and simulation sweeps differ in sampling
+/// density, so each source kind resolves its own options.
+///
+/// `[metric]` chooses the sweep the metrics use (`direction`, `index`);
+/// `[window]` chooses which sweeps the plots draw (`plot_branches`). Either
+/// table may override per source kind in `[metric.measurement]`,
+/// `[metric.simulation]`, `[window.measurement]` or `[window.simulation]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalBranches {
     pub measurement: VerticalBranch,
@@ -137,52 +166,101 @@ impl VerticalBranches {
         }
     }
 
-    fn parse(raw: Option<&Value>) -> Result<Self, ConfigError> {
+    fn parse(
+        metric: &toml::map::Map<String, Value>,
+        window: &toml::map::Map<String, Value>,
+    ) -> Result<Self, ConfigError> {
         let mut branches = Self {
             measurement: VerticalBranch::defaults(true),
             simulation: VerticalBranch::defaults(false),
         };
-        let Some(raw) = raw else {
-            return Ok(branches);
-        };
-        let table = raw
-            .as_table()
-            .ok_or_else(|| ConfigError("[vertical.branch] must be a table".into()))?;
-        let known = [
-            "direction",
-            "index",
-            "plot_branches",
-            "measurement",
-            "simulation",
-        ];
-        if let Some(key) = table.keys().find(|key| !known.contains(&key.as_str())) {
-            return Err(ConfigError(format!(
-                "unknown key '{key}' in [vertical.branch]"
-            )));
-        }
-        branches.measurement.apply(table, "[vertical.branch]")?;
-        branches.simulation.apply(table, "[vertical.branch]")?;
         for (name, target) in [
             ("measurement", &mut branches.measurement),
             ("simulation", &mut branches.simulation),
         ] {
-            if let Some(source) = table.get(name) {
-                let scope = format!("[vertical.branch.{name}]");
-                let source = source
+            for (scope, source, allowed) in [
+                ("[vertical.metric]", metric, &["direction", "index"][..]),
+                ("[vertical.window]", window, &["plot_branches"][..]),
+            ] {
+                target.apply(source, scope)?;
+                let Some(sub) = source.get(name) else {
+                    continue;
+                };
+                let scope = format!("{scope}.{name}");
+                let sub = sub
                     .as_table()
                     .ok_or_else(|| ConfigError(format!("{scope} must be a table")))?;
-                if let Some(key) = source
-                    .keys()
-                    .find(|key| !["direction", "index", "plot_branches"].contains(&key.as_str()))
-                {
+                if let Some(key) = sub.keys().find(|key| !allowed.contains(&key.as_str())) {
                     return Err(ConfigError(format!("unknown key '{key}' in {scope}")));
                 }
-                target.apply(source, &scope)?;
+                target.apply(sub, &scope)?;
             }
         }
         Ok(branches)
     }
 }
+
+/// Fold the deprecated `[vertical.branch]` table into `metric` and `window`.
+///
+/// `direction` and `index` belong to `[metric]`, `plot_branches` to `[window]`;
+/// keys already set there win.
+fn fold_legacy_branch(
+    branch: &Value,
+    metric: &mut Map<String, Value>,
+    window: &mut Map<String, Value>,
+) -> Result<(), ConfigError> {
+    let branch = branch
+        .as_table()
+        .ok_or_else(|| ConfigError("[vertical.branch] must be a table".into()))?;
+    let fold = |scope: &str,
+                source: &Map<String, Value>,
+                metric: &mut Map<String, Value>,
+                window: &mut Map<String, Value>|
+     -> Result<(), ConfigError> {
+        for (key, value) in source {
+            let target = match key.as_str() {
+                "direction" | "index" => &mut *metric,
+                "plot_branches" => &mut *window,
+                _ => return Err(ConfigError(format!("unknown key '{key}' in {scope}"))),
+            };
+            target.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+        Ok(())
+    };
+    let top: Map<String, Value> = branch
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "measurement" | "simulation"))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    fold("[vertical.branch]", &top, metric, window)?;
+    for name in ["measurement", "simulation"] {
+        let Some(source) = branch.get(name) else {
+            continue;
+        };
+        let scope = format!("[vertical.branch.{name}]");
+        let source = source
+            .as_table()
+            .ok_or_else(|| ConfigError(format!("{scope} must be a table")))?;
+        let mut sub_metric = Map::new();
+        let mut sub_window = Map::new();
+        fold(&scope, source, &mut sub_metric, &mut sub_window)?;
+        for (target, sub) in [(&mut *metric, sub_metric), (&mut *window, sub_window)] {
+            if sub.is_empty() {
+                continue;
+            }
+            let entry = target
+                .entry(name.to_string())
+                .or_insert_with(|| Value::Table(Map::new()));
+            if let Value::Table(existing) = entry {
+                for (key, value) in sub {
+                    existing.entry(key).or_insert(value);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Domain {
     Svc,
@@ -861,6 +939,13 @@ fn function_vertical(
     vertical.insert("inputs".into(), Value::Table(inputs));
     vertical.insert("signals".into(), Value::Table(mappings));
     let mut setup_copy = setup.clone();
+    // `[meta]` holds the test setup flags; flags directly in `[setup.knc]`
+    // remain accepted.
+    if let Some(meta) = setup_copy.remove("meta") {
+        for (key, value) in table(&meta, "[setup.knc.meta]")? {
+            setup_copy.insert(key.clone(), value.clone());
+        }
+    }
     let window = setup_copy.remove("window").unwrap_or_else(|| {
         let mut w = Map::new();
         for key in [
@@ -877,6 +962,9 @@ fn function_vertical(
         }
         Value::Table(w)
     });
+    if let Some(metric) = setup_copy.remove("metric") {
+        vertical.insert("metric".into(), metric);
+    }
     if let Some(branch) = setup_copy.remove("branch") {
         vertical.insert("branch".into(), branch);
     }
@@ -1454,6 +1542,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             "mappings",
             "setup",
             "window",
+            "metric",
             "branch",
             "signals",
             "signal_mappings",
@@ -1501,7 +1590,28 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
     let condensed = s.contains_key("window_minimum_mm")
         || s.contains_key("window_maximum_mm")
         || s.contains_key("window_step_mm");
-    let (w, gradient) = if condensed {
+    let mut metric = v
+        .get("metric")
+        .map(|raw| table(raw, "[vertical.metric]"))
+        .transpose()?
+        .cloned()
+        .unwrap_or_default();
+    keys(
+        &metric,
+        &[
+            "gradient_points_mm",
+            "direction",
+            "index",
+            "measurement",
+            "simulation",
+        ],
+        "[vertical.metric]",
+    )?;
+    let mut window_extra = Map::new();
+    if let Some(branch) = v.get("branch") {
+        fold_legacy_branch(branch, &mut metric, &mut window_extra)?;
+    }
+    let (w, window_table) = if condensed {
         if v.contains_key("window") {
             return Err(ConfigError(
                 "[vertical] cannot define both condensed setup window and [vertical.window]".into(),
@@ -1513,7 +1623,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
                 .iter()
                 .map(|k| value(s, k, "[vertical.setup]"))
                 .collect::<Result<Vec<_>, _>>()?,
-            None,
+            Map::new(),
         )
     } else {
         let t = table(
@@ -1530,6 +1640,9 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
                 "maximum_mm",
                 "step_mm",
                 "metric_gradient_points_mm",
+                "plot_branches",
+                "measurement",
+                "simulation",
             ],
             "[vertical.window]",
         )?;
@@ -1539,7 +1652,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
                 aliased(t, "travel_maximum_mm", "maximum_mm", "[vertical.window]")?,
                 value(t, "step_mm", "[vertical.window]")?,
             ],
-            t.get("metric_gradient_points_mm"),
+            t.clone(),
         )
     };
     let min = finite(w[0], "travel_minimum_mm")?;
@@ -1551,19 +1664,26 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
         )
         .into());
     };
-    let gradient = gradient
-        .map(|value| positive(value, "metric_gradient_points_mm"))
+    // Deprecated: `metric_gradient_points_mm` in the window table.
+    let gradient = metric
+        .get("gradient_points_mm")
+        .or_else(|| window_table.get("metric_gradient_points_mm"))
+        .map(|value| positive(value, "gradient_points_mm"))
         .transpose()?;
     if let Some(gradient) = gradient
         && (-gradient < min || gradient > max)
     {
         return Err(ConfigError(format!(
-            "metric_gradient_points_mm ±{gradient} must lie inside travel window {min}..{max} mm"
+            "gradient_points_mm ±{gradient} must lie inside travel window {min}..{max} mm"
         ))
         .into());
     }
+    let mut window_branch = window_table;
+    for (key, value) in window_extra {
+        window_branch.entry(key).or_insert(value);
+    }
     let source = signal_source(v, path, "[vertical]", Some(i))?;
-    let branch = VerticalBranches::parse(v.get("branch"))?;
+    let branch = VerticalBranches::parse(&metric, &window_branch)?;
     Ok(VerticalConfig {
         measurement_hdf5: resolve(
             value(i, "measurement_hdf5", "[vertical.inputs]")?,
@@ -1606,7 +1726,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             minimum_mm: min,
             maximum_mm: max,
             step_mm: step,
-            metric_gradient_points_mm: gradient,
+            gradient_points_mm: gradient,
         },
         branch,
         signals: source.1,
@@ -2200,10 +2320,10 @@ mod tests {
             (window.minimum_mm, window.maximum_mm, window.step_mm),
             (-10.0, 10.0, 1.0)
         );
-        assert_eq!(window.metric_gradient_points_mm, Some(5.0));
+        assert_eq!(window.gradient_points_mm, Some(5.0));
         write("minimum_mm=-1\nmaximum_mm=1\nstep_mm=1");
         let window = load_config(&p).unwrap().vertical.unwrap().window;
-        assert_eq!(window.metric_gradient_points_mm, None);
+        assert_eq!(window.gradient_points_mm, None);
         for (window, error) in [
             (
                 "travel_minimum_mm=-1\nminimum_mm=-1\ntravel_maximum_mm=1\nstep_mm=1",
@@ -2211,7 +2331,7 @@ mod tests {
             ),
             (
                 "travel_minimum_mm=-10\ntravel_maximum_mm=10\nstep_mm=1\nmetric_gradient_points_mm=0",
-                "metric_gradient_points_mm must be positive",
+                "gradient_points_mm must be positive",
             ),
             (
                 "travel_minimum_mm=-10\ntravel_maximum_mm=4\nstep_mm=1\nmetric_gradient_points_mm=5",
@@ -2369,6 +2489,94 @@ mod tests {
             vertical.tolerances.relative_percent["rear_left_wheel_center_x_mm"],
             2.0
         );
+    }
+
+    #[test]
+    fn vertical_meta_window_and_metric_override_knc_level() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("input.toml"),
+            "[knc.vertical.simulation]\nfile='simulation.h5'\n",
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("setup.toml"),
+            "[knc.meta]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\nrear_arb_connected=true\n\
+             [knc.window]\nminimum_mm=-80\nmaximum_mm=80\nstep_mm=1\nplot_branches='selected'\n\
+             [knc.metric]\ngradient_points_mm=10\ndirection='fall'\nindex=3\n\
+             [knc.vertical.window]\nminimum_mm=-60\nmaximum_mm=60\n\
+             [knc.vertical.metric]\ngradient_points_mm=5\n\
+             [knc.vertical.metric.measurement]\nindex=1\n",
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("signals.toml"),
+            "[knc.vertical.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n",
+        )
+        .unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[meta]\nname='n'\nloadcase='l'\n[input]\nfile='input.toml'\n[setup]\nfile='setup.toml'\n[signals]\nfile='signals.toml'\n",
+        )
+        .unwrap();
+
+        let vertical = load_config(&p).unwrap().vertical.unwrap();
+
+        assert!(vertical.setup.brakes_applied);
+        assert_eq!(vertical.setup.rear_arb_connected, Some(true));
+        assert_eq!(
+            vertical.setup.summary(),
+            "brakes applied: yes | engine running: no | front ARB connected: yes | rear ARB connected: yes"
+        );
+        // Vertical overrides per key; unset keys inherit from [knc].
+        assert_eq!(
+            (
+                vertical.window.minimum_mm,
+                vertical.window.maximum_mm,
+                vertical.window.step_mm
+            ),
+            (-60.0, 60.0, 1.0)
+        );
+        assert_eq!(vertical.window.gradient_points_mm, Some(5.0));
+        let (measurement, simulation) = (&vertical.branch.measurement, &vertical.branch.simulation);
+        assert_eq!((measurement.index, simulation.index), (1, 3));
+        assert_eq!(measurement.direction, "fall");
+        assert_eq!(simulation.plot_branches, "selected");
+        assert!(measurement.defaulted.is_empty() && simulation.defaulted.is_empty());
+    }
+
+    #[test]
+    fn vertical_reports_defaulted_branch_keys() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n";
+        fs::write(&p, base).unwrap();
+        let branch = load_config(&p).unwrap().vertical.unwrap().branch;
+        assert_eq!(
+            branch.simulation.defaulted,
+            ["direction", "index", "plot_branches"]
+        );
+        fs::write(&p, format!("{base}[vertical.metric]\nindex=1\n")).unwrap();
+        let branch = load_config(&p).unwrap().vertical.unwrap().branch;
+        assert_eq!(branch.simulation.defaulted, ["direction", "plot_branches"]);
+        // A key set only for one source kind stays defaulted for the other.
+        fs::write(
+            &p,
+            format!("{base}[vertical.metric.measurement]\nindex=1\n"),
+        )
+        .unwrap();
+        let branch = load_config(&p).unwrap().vertical.unwrap().branch;
+        assert!(!branch.measurement.defaulted.contains(&"index"));
+        assert!(branch.simulation.defaulted.contains(&"index"));
+        for invalid in [
+            "[vertical.metric]\nplot_branches='all'\n",
+            "[vertical.metric]\nindex=0\n",
+            "[vertical.metric.simulation]\ngradient_points_mm=1\n",
+        ] {
+            fs::write(&p, format!("{base}{invalid}")).unwrap();
+            assert!(load_config(&p).is_err(), "accepted {invalid}");
+        }
     }
 
     #[test]

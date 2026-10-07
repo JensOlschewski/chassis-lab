@@ -185,10 +185,20 @@ policy. `[meta]` contains optional run `name` and `loadcase`; domain is derived.
 Run metadata overrides shared configuration metadata, and absent values report
 as `undefined`. Paths resolve relative to main config.
 
-`[setup.knc.vertical]` contains setup flags and window bounds. Window keys are
-`travel_minimum_mm`, `travel_maximum_mm`, `step_mm`, and optional
-`metric_gradient_points_mm`; legacy `minimum_mm` and `maximum_mm` remain
-accepted. Gradient points must lie inside the travel window. Signal maps contain
+KnC setup lives under `[setup.knc]`; `[setup.knc.vertical]` holds vertical-only
+values and overrides `[setup.knc]` key by key (nested tables deep-merge).
+`[meta]` holds the test setup flags (`brakes_applied`, `engine_running`,
+`front_arb_connected`, optional `rear_arb_connected`), which also appear in the
+report footer. `[window]` defines the plot range (`minimum_mm`, `maximum_mm`,
+`step_mm`; legacy `travel_minimum_mm` and `travel_maximum_mm` remain accepted) and
+`plot_branches` (`all` or `selected`). `[metric]` defines the metric computation:
+`gradient_points_mm` (default 10, limited to the travel window and required to lie
+inside it when set), `direction` (`rise`, `fall`, `any`) and `index` (default 2).
+`[metric.measurement]` and `[metric.simulation]` override `direction` and `index`
+per source kind; `[window.measurement]` and `[window.simulation]` do the same for
+`plot_branches`. Setting flags directly under `[setup.knc]`, the `[branch]` table
+and `metric_gradient_points_mm` in the window remain accepted. Optional keys that
+are left out use their default and produce one analysis warning each. Signal maps contain
 canonical names, entities, components, and units. Mapping precedence is shared <
 domain < test; child values override, child-only values add, missing values inherit,
 and nested tables deep-merge. External mapping files use same merge rules. Legacy

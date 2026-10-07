@@ -1,11 +1,13 @@
 import json
 import subprocess
 import sys
+from io import BytesIO
 from math import atan, degrees
 from pathlib import Path
 
 import numpy as np
 import pytest
+from pypdf import PdfReader
 
 from chassis_lab.knc_plot_kernel import (
     BranchOptions,
@@ -101,7 +103,7 @@ def test_rates_follow_each_branch_without_mixing_hysteresis() -> None:
     rate_metric = next(
         m
         for m in response["metrics"]
-        if m["metric"] == "front_left_suspension_rate_n_per_mm"
+        if m["metric"] == "suspension_rate_front_left_n_per_mm"
     )
     assert rate_metric["value"] == pytest.approx(40.0)
 
@@ -119,37 +121,31 @@ def test_metrics_use_secants_at_symmetric_travel_points() -> None:
         )
     )
     values = {item["metric"]: item for item in response["metrics"]}
-    assert len(values) == 32
-    assert values["front_left_bump_steer_deg_per_mm"]["value"] == pytest.approx(
+    assert len(values) == 24
+    assert values["bump_steer_front_left_deg_per_mm"]["value"] == pytest.approx(
         0.01
     )
-    assert values["front_left_bump_camber_deg_per_mm"][
+    assert values["bump_camber_front_left_deg_per_mm"][
         "value"
     ] == pytest.approx(-0.02)
-    assert values["rear_right_suspension_rate_n_per_mm"][
+    assert values["suspension_rate_rear_right_n_per_mm"][
         "value"
     ] == pytest.approx(25.0)
     # Pad travel is 1.1 x wheel-center travel: ride = 25 / 1.1, tire = 25 / 0.1.
-    assert values["rear_right_ride_rate_n_per_mm"]["value"] == pytest.approx(
+    assert values["ride_rate_rear_right_n_per_mm"]["value"] == pytest.approx(
         25.0 / 1.1
     )
-    assert values["rear_right_tire_rate_n_per_mm"]["value"] == pytest.approx(
+    assert values["tire_rate_rear_right_n_per_mm"]["value"] == pytest.approx(
         250.0
     )
-    ride = values["rear_right_ride_rate_n_per_mm"]
+    ride = values["ride_rate_rear_right_n_per_mm"]
     assert (ride["lower"], ride["upper"]) == pytest.approx(
         (3000.0 - 5.0 * 25.0 / 1.1, 3000.0 + 5.0 * 25.0 / 1.1)
     )
-    assert values["front_left_wheel_center_x_change_mm"][
-        "value"
-    ] == pytest.approx(-1.0)
-    assert values["front_left_wheel_center_y_change_mm"][
-        "value"
-    ] == pytest.approx(2.0)
-    assert values["front_left_wheel_recession_angle_deg"][
+    assert values["wheel_recession_angle_front_left_deg"][
         "value"
     ] == pytest.approx(degrees(atan(0.1)))
-    toe = values["front_left_bump_steer_deg_per_mm"]
+    toe = values["bump_steer_front_left_deg_per_mm"]
     assert (toe["lower"], toe["upper"]) == pytest.approx((-0.05, 0.05))
 
 
@@ -168,10 +164,10 @@ def test_metrics_report_unavailable_reasons() -> None:
         )
     )
     values = {item["metric"]: item for item in response["metrics"]}
-    toe = values["front_left_bump_steer_deg_per_mm"]
+    toe = values["bump_steer_front_left_deg_per_mm"]
     assert toe["value"] is None
     assert toe["reason"] == "missing canonical signal front_left_toe"
-    camber = values["front_left_bump_camber_deg_per_mm"]
+    camber = values["bump_camber_front_left_deg_per_mm"]
     assert camber["value"] is None
     assert "does not cover wheel_center_z travel -20..20 mm" in camber["reason"]
 
@@ -353,6 +349,76 @@ def test_comparison_plot_uses_ordered_curve_colors_and_footer() -> None:
     assert "knc_vertical_toe.pdf" in reports
     assert "knc_vertical_suspension_rate.pdf" in reports
     assert "knc_vertical_recession_angle.pdf" in reports
+
+
+def _pdf_text(report: bytes) -> str:
+    return PdfReader(BytesIO(report)).pages[0].extract_text()
+
+
+def test_gradient_overlay_and_metric_table_only_on_selected_plots() -> None:
+    reports = plot(
+        _metric_curves(),
+        "Simulation",
+        "Config: case.toml",
+        None,
+        5.0,
+        json.dumps({"index": 1}),
+    )
+    tables = {
+        "knc_vertical_wheel_load": "Left front suspension rate in N/mm:",
+        "knc_vertical_camber": "Right front bump camber in deg/mm:",
+        "knc_vertical_toe": "Left rear bump steer in deg/mm:",
+        "knc_vertical_wcz_vs_wcx": "Right rear wheel recession angle in deg:",
+    }
+    for path, report in reports.items():
+        text = _pdf_text(report)
+        name = Path(path).stem
+        if name in tables:
+            assert tables[name] in text
+            assert "Simulation" in text
+        else:
+            assert "secant between" not in text
+
+
+def test_metric_table_lists_every_source_with_metric_values() -> None:
+    reports = plot_compare(
+        _metric_curves(),
+        json.dumps(
+            [
+                {
+                    "label": "Curve_1",
+                    "curves": json.loads(
+                        _metric_curves(
+                            wheel_load=[
+                                3000.0 + 50.0 * value
+                                for value in (
+                                    -10.0,
+                                    -5.0,
+                                    0.0,
+                                    5.0,
+                                    10.0,
+                                    10.0,
+                                    5.0,
+                                    0.0,
+                                    -5.0,
+                                    -10.0,
+                                )
+                            ]
+                        )
+                    ),
+                }
+            ]
+        ),
+        "Baseline",
+        "Config: case.toml",
+        None,
+        5.0,
+        json.dumps([{"index": 1}, {"index": 1}]),
+    )
+    text = _pdf_text(reports["knc_vertical_wheel_load.pdf"])
+    assert "Left front suspension rate in N/mm:" in text
+    assert "Baseline 25" in text
+    assert "Curve_1 50" in text
 
 
 def test_branch_detection_discards_short_turnaround_jitter() -> None:

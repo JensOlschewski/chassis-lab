@@ -5,7 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from io import BytesIO
-from typing import Any, cast
+from math import floor, log10
+from typing import Any, NamedTuple, cast
 
 import numpy as np
 from pypdf import PdfReader, PdfWriter, Transformation
@@ -21,7 +22,10 @@ CORNERS = (
     ("rear_right", "Rear right"),
 )
 
+# Also used for clab analyze
 BASELINE_COLOR = "#000000"
+
+# Used for clab compare reports, in candidate order.
 CANDIDATE_COLORS = (
     "#e41a1c",
     "#377eb8",
@@ -37,7 +41,34 @@ USED_COLOR = "#2ca02c"
 CUT_COLOR = "#d62728"
 METRIC_COLOR = "#ffbf00"
 
-MARKER_LINE_COLOR = "#7f7f7f"
+# Gradient secant line: drawn in the color of its source, dashed.
+# Any matplotlib linestyle ("dashed", "dotted", "dashdot", "solid").
+GRADIENT_LINESTYLE = "dashed"
+GRADIENT_LINEWIDTH = 0.9
+
+# Marker at each of the two points the gradient is defined at: a circle with a
+# short vertical line through it. Any matplotlib marker works for either.
+GRADIENT_MARKER_COLOR = "#d62728"
+GRADIENT_MARKER = "o"
+GRADIENT_MARKER_SIZE = 5
+GRADIENT_MARKER_WIDTH = 1.2
+GRADIENT_TICK_MARKER = "|"
+GRADIENT_TICK_SIZE = 12
+
+# Gradient metric table above the footer.
+METRIC_FONTSIZE = 8
+METRIC_TITLE_COLOR = "#222222"
+METRIC_VALUE_COLOR = "#222222"
+METRIC_LINE_HEIGHT = 0.185  # [inch] per table row
+METRIC_GAP = 0.08  # [inch] between footer and table
+XLABEL_CLEARANCE = 0.62  # [inch] reserved below the lowest panels
+METRIC_LEFT = 0.02  # same left edge as the footer text
+METRIC_CORNER_LABELS = {
+    "front_left": "Left front",
+    "front_right": "Right front",
+    "rear_left": "Left rear",
+    "rear_right": "Right rear",
+}
 
 # Figure sizes [inch]: report page (A4 landscape) and debug sheet (A3).
 REPORT_FIGSIZE = (11.69, 8.27)
@@ -77,6 +108,25 @@ PDF_METADATA = {
 class SignalStyle:
     label: str
     unit: str
+
+
+@dataclass(frozen=True)
+class GradientDisplay:
+    """Secant of `PlotSpec.y_signal` over `x_signal` drawn on a plot.
+
+    The metric is the secant between the two travel points; `kind` is
+    "gradient" (dy/dx) or "angle" (atan(-dy/dx) in degrees). Its values are
+    listed in a table above the footer as "<corner> <label> in <unit>".
+    """
+
+    label: str
+    unit: str
+    kind: str = "gradient"
+
+    def value(self, delta: float, span: float) -> float:
+        if self.kind == "angle":
+            return float(np.degrees(np.arctan(-delta / span)))
+        return delta / span
 
 
 @dataclass(frozen=True)
@@ -131,8 +181,17 @@ Transform = Callable[
     tuple[np.ndarray, np.ndarray],
 ]
 CurveIndex = dict[tuple[str, str], dict[str, object]]
-# (label, curves, color) per plotted source
-Series = list[tuple[str, CurveIndex, str]]
+
+
+class Source(NamedTuple):
+    """One plotted source: curves and line color."""
+
+    label: str
+    curves: CurveIndex
+    color: str
+
+
+Series = list[Source]
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +326,8 @@ class PlotSpec:
     output_signal: str | None = None
     transform: Transform | None = None
     optional: bool = False
-    gradient_markers: bool = False
+    # Draw the secant between the +-gradient travel points and list its metric.
+    gradient: GradientDisplay | None = None
     denominator_signal: str | None = None
     # Maps the sweep gradient to the plotted value (rate debug plots only).
     from_gradient: Callable[[np.ndarray], np.ndarray] | None = None
@@ -318,7 +378,13 @@ def render_reports(
     branches: BranchOptions | None = None,
 ) -> dict[str, bytes]:
     """Render one source using same catalog as comparison reports."""
-    series = [(source_label, _index(curves), BASELINE_COLOR)]
+    series = [
+        Source(
+            source_label,
+            _index(curves),
+            BASELINE_COLOR,
+        )
+    ]
     return _render_catalog(
         specs,
         signals,
@@ -343,9 +409,15 @@ def render_comparison_reports(
     branches: list[BranchOptions] | None = None,
 ) -> dict[str, bytes]:
     """Render baseline and candidates using one declarative plot catalog."""
-    series = [(baseline_label, _index(baseline), BASELINE_COLOR)]
+    series = [
+        Source(
+            baseline_label,
+            _index(baseline),
+            BASELINE_COLOR,
+        )
+    ]
     series.extend(
-        (
+        Source(
             str(candidate["label"]),
             _index(cast("list[dict[str, object]]", candidate["curves"])),
             CANDIDATE_COLORS[index % len(CANDIDATE_COLORS)],
@@ -376,7 +448,7 @@ def _render_catalog(
 ) -> dict[str, bytes]:
     reports = {}
     for spec in specs:
-        if not _available(spec, [curves for _, curves, _ in series]):
+        if not _available(spec, [source.curves for source in series]):
             if spec.optional:
                 continue
             raise ValueError(
@@ -407,21 +479,47 @@ def _render_plot(
     branches: list[BranchOptions],
 ) -> bytes:
     plt = _pyplot()
-    figure, panels = _new_figure(plt, 2, 2, REPORT_FIGSIZE, footer)
+    gradient = (
+        spec.gradient
+        if gradient_points_mm is not None and gradient_points_mm > 0
+        else None
+    )
+    figure, panels = _new_figure(
+        plt,
+        2,
+        2,
+        REPORT_FIGSIZE,
+        footer,
+        len(CORNERS) + 1 if gradient else 0,
+    )
     x_style = signals[spec.x_signal]
     y_style = signals[spec.plotted_signal]
     figure.suptitle(spec.title, fontsize=16)
+    table: list[tuple[str, list[float | None]]] = []
     for panel, (corner, corner_label) in zip(panels.flat, CORNERS, strict=True):
+        values: list[float | None] = []
         for (source_label, curves, color), options in zip(
             series, branches, strict=True
         ):
             x, y = _curve_xy(spec, curves, corner, spec.branch_options(options))
             panel.plot(x, y, color=color, linewidth=1.8, label=source_label)
-        if spec.gradient_markers and gradient_points_mm is not None:
-            for point in (-gradient_points_mm, gradient_points_mm):
-                panel.axvline(
-                    point, color=MARKER_LINE_COLOR, linestyle="--", linewidth=1
+            if gradient and gradient_points_mm is not None:
+                secant = _secant(
+                    spec, curves, corner, options, gradient_points_mm
                 )
+                values.append(
+                    None
+                    if secant is None
+                    else _draw_secant(
+                        panel,
+                        gradient,
+                        secant,
+                        gradient_points_mm,
+                        color,
+                    )
+                )
+        if gradient:
+            table.append((corner, values))
         panel.set_title(corner_label, loc="left", fontweight="bold")
         panel.set_xlabel(f"{x_style.label} [{x_style.unit}]")
         panel.set_ylabel(f"{y_style.label} [{y_style.unit}]")
@@ -430,7 +528,75 @@ def _render_plot(
         panel.legend(loc="best", frameon=False)
     if footer:
         _add_footer(figure, footer)
+    if gradient and gradient_points_mm is not None:
+        _add_metric_table(
+            figure, gradient, gradient_points_mm, table, series, footer
+        )
     return _save_pdf(figure, plt, footer, logo)
+
+
+def _secant(
+    spec: PlotSpec,
+    curves: CurveIndex,
+    corner: str,
+    options: BranchOptions,
+    gradient_mm: float,
+) -> tuple[float, float] | None:
+    """Plotted response at -gradient and +gradient travel, if covered.
+
+    Uses the metric sweep of `wheel_center_z`, like the vertical metrics.
+    """
+    travel = _values(curves, corner, spec.x_signal)
+    response = _values(curves, corner, spec.y_signal)
+    sweep = options.metric_sweep(_values(curves, corner, "wheel_center_z"))
+    if sweep is None or len(travel) != len(response):
+        return None
+    travel, response = travel[sweep], response[sweep]
+    finite = np.isfinite(travel) & np.isfinite(response)
+    travel, response = travel[finite], response[finite]
+    if len(travel) < 2:
+        return None
+    order = np.argsort(travel, kind="stable")
+    unique, starts, counts = np.unique(
+        travel[order], return_index=True, return_counts=True
+    )
+    mean = np.add.reduceat(response[order], starts) / counts
+    if unique[0] > -gradient_mm or unique[-1] < gradient_mm:
+        return None
+    lower, upper = np.interp([-gradient_mm, gradient_mm], unique, mean)
+    return float(lower), float(upper)
+
+
+def _draw_secant(
+    panel: Any,
+    gradient: GradientDisplay,
+    secant: tuple[float, float],
+    gradient_mm: float,
+    color: str,
+) -> float:
+    """Draw the dashed secant over the panel, markers at its two points."""
+    points = ((-gradient_mm, secant[0]), (gradient_mm, secant[1]))
+    panel.axline(
+        *points,
+        color=color,
+        linestyle=GRADIENT_LINESTYLE,
+        linewidth=GRADIENT_LINEWIDTH,
+        zorder=3,
+    )
+    for marker, size in (
+        (GRADIENT_MARKER, GRADIENT_MARKER_SIZE),
+        (GRADIENT_TICK_MARKER, GRADIENT_TICK_SIZE),
+    ):
+        panel.plot(
+            *zip(*points, strict=True),
+            linestyle="none",
+            color=GRADIENT_MARKER_COLOR,
+            marker=marker,
+            markersize=size,
+            markeredgewidth=GRADIENT_MARKER_WIDTH,
+            zorder=4,
+        )
+    return gradient.value(secant[1] - secant[0], 2.0 * gradient_mm)
 
 
 def _curve_xy(
@@ -652,20 +818,60 @@ def _available(spec: PlotSpec, sources: list[CurveIndex]) -> bool:
 
 
 def _new_figure(
-    plt: Any, rows: int, columns: int, size: tuple[float, float], footer: str
+    plt: Any,
+    rows: int,
+    columns: int,
+    size: tuple[float, float],
+    footer: str,
+    metric_rows: int = 0,
 ) -> tuple[Any, Any]:
-    if not footer:
+    if not footer and not metric_rows:
         return plt.subplots(rows, columns, figsize=size, layout="constrained")
     figure, panels = plt.subplots(rows, columns, figsize=size)
     figure.subplots_adjust(
         left=PAGE_LEFT,
         right=PAGE_RIGHT,
         top=PAGE_TOP,
-        bottom=_footer_height(footer, size[1]),
+        bottom=_metric_layout(footer, size[1], metric_rows)[2],
         wspace=PAGE_WSPACE,
         hspace=PAGE_HSPACE if rows <= 2 else DEBUG_HSPACE,
     )
     return figure, panels
+
+
+def _metric_layout(
+    footer: str, figure_height: float, rows: int
+) -> tuple[float, float, float]:
+    """Metric table bottom, height and panel bottom as figure fractions.
+
+    The table sits above the footer text and the logo; the panels start above
+    it with room left for their x labels.
+    """
+    band = _footer_height(footer, figure_height) if footer else 0.0
+    text = (
+        (footer.count("\n") + 2) * FOOTER_FONTSIZE * 1.2 / 72 if footer else 0.0
+    )
+    logo = (
+        min(
+            (footer.count("\n") + 2) * LOGO_PER_LINE,
+            band - LOGO_MARGIN,
+        )
+        * figure_height
+        if footer
+        else 0.0
+    )
+    base = 0.025 * figure_height
+    box_bottom = max(base + text, base + logo) + (METRIC_GAP if rows else 0.0)
+    box_height = rows * METRIC_LINE_HEIGHT
+    panels = max(
+        band * figure_height,
+        box_bottom + box_height + (XLABEL_CLEARANCE if rows else 0.0),
+    )
+    return (
+        box_bottom / figure_height,
+        box_height / figure_height,
+        panels / figure_height,
+    )
 
 
 def _footer_height(footer: str, figure_height: float) -> float:
@@ -685,6 +891,98 @@ def _add_footer(figure: Any, footer: str) -> None:
         color=FOOTER_COLOR,
         va="bottom",
     )
+
+
+def _metric_decimals(values: list[float]) -> int:
+    """Decimals that give four significant digits to the smallest value."""
+    nonzero = [abs(value) for value in values if value]
+    if not nonzero:
+        return 0
+    return min(max(0, 3 - floor(log10(min(nonzero)))), 8)
+
+
+def _add_metric_table(
+    figure: Any,
+    gradient: GradientDisplay,
+    gradient_mm: float,
+    table: list[tuple[str, list[float | None]]],
+    series: Series,
+    footer: str,
+) -> None:
+    """Table above the footer: one row per corner, one cell per source.
+
+    Cells show the source name in its plot color followed by the metric. All
+    values share one number of decimals.
+    """
+    height = figure.get_figheight()
+    bottom, table_height, _ = _metric_layout(footer, height, len(table) + 1)
+    decimals = _metric_decimals(
+        [value for _, values in table for value in values if value is not None]
+    )
+    renderer = figure._get_renderer()
+    page_width = figure.bbox.width
+    row = METRIC_LINE_HEIGHT / height
+    top = bottom + table_height
+
+    def put(x: float, y: float, text: str, **style: Any) -> float:
+        """Draw text; return its right edge as figure fraction."""
+        artist = figure.text(
+            x, y, text, fontsize=METRIC_FONTSIZE, va="top", **style
+        )
+        return x + artist.get_window_extent(renderer).width / page_width
+
+    def width(text: str, **style: Any) -> float:
+        artist = figure.text(0, 0, text, fontsize=METRIC_FONTSIZE, **style)
+        extent = artist.get_window_extent(renderer).width / page_width
+        artist.remove()
+        return extent
+
+    put(
+        METRIC_LEFT,
+        top,
+        f"{gradient.label.capitalize()}, secant between "
+        f"{-gradient_mm:+g} mm and {gradient_mm:+g} mm wheel center travel",
+        color=METRIC_TITLE_COLOR,
+        fontweight="bold",
+    )
+    labels = [
+        f"{METRIC_CORNER_LABELS[corner]} {gradient.label} in {gradient.unit}:"
+        for corner, _ in table
+    ]
+    cells = [
+        [
+            (name, "n/a" if value is None else f"{value:.{decimals}f}")
+            for (name, *_), value in zip(series, values, strict=True)
+        ]
+        for _, values in table
+    ]
+    start = METRIC_LEFT + max(width(label) for label in labels) + 0.02
+    columns = [
+        max(
+            width(cells[row][column][0], fontweight="bold")
+            + 0.006
+            + width(cells[row][column][1], fontweight="bold")
+            for row in range(len(cells))
+        )
+        + 0.025
+        for column in range(len(series))
+    ]
+    for index, (label, line) in enumerate(zip(labels, cells, strict=True)):
+        y = top - (index + 1) * row
+        put(METRIC_LEFT, y, label, color=METRIC_TITLE_COLOR)
+        x = start
+        for (name, value), (_, _, color), step in zip(
+            line, series, columns, strict=True
+        ):
+            end = put(x, y, name, color=color, fontweight="bold")
+            put(
+                end + 0.006,
+                y,
+                value,
+                color=METRIC_VALUE_COLOR,
+                fontweight="bold",
+            )
+            x += step
 
 
 def _save_pdf(figure: Any, plt: Any, footer: str, logo: bytes | None) -> bytes:

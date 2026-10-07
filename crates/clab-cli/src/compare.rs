@@ -14,7 +14,7 @@ use sha2::Digest;
 
 use crate::{
     analysis::{svc, vertical},
-    analyze::{debug_info, write_bundle},
+    analyze::{absolute_path, debug_info, write_bundle},
 };
 
 #[derive(Debug, Args)]
@@ -137,7 +137,6 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 }
                 (
                     ComparedDomain::Vertical {
-                        curves: base_curves,
                         metrics: base_metrics,
                         ..
                     },
@@ -147,17 +146,11 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                         branch: candidate_branch,
                     },
                 ) => {
-                    let mut compared = compare_vertical_metrics(
-                        &baseline.config,
-                        base_curves,
-                        candidate_curves,
-                        tolerances.as_ref().map(|value| &value.vertical),
-                    )?;
-                    compared.extend(compare_vertical_gradient_metrics(
+                    let compared = compare_vertical_gradient_metrics(
                         base_metrics,
                         candidate_metrics,
                         tolerances.as_ref().map(|value| &value.vertical),
-                    ));
+                    );
                     failed |= compared.iter().any(|metric| metric.status == "failed");
                     incomplete |= compared.iter().any(|metric| metric.status == "missing");
                     metrics.extend(compared);
@@ -213,24 +206,32 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             ..
         }) = baseline.domains.get("knc")
     {
-        let footer = std::iter::once(format!(
-            "Config: {}",
-            absolute_path(&args.config)?.display()
-        ))
-        .chain(std::iter::once(format!(
-            "Baseline: {} | {} | {}",
-            baseline.config.name,
-            baseline.config.loadcase,
-            absolute_path(&args.baseline)?.display()
-        )))
-        .chain(
-            vertical_candidates
-                .iter()
-                .map(|(_, _, _, metadata, _)| metadata.clone()),
-        )
-        .chain(std::iter::once(format!("Created by: {}", report_creator())))
-        .collect::<Vec<_>>()
-        .join("\n");
+        let footer = baseline
+            .config
+            .vertical
+            .iter()
+            .map(|vertical| format!("KnC setup: {}", vertical.setup.summary()))
+            .chain(std::iter::once(format!(
+                "Config: {}",
+                absolute_path(&args.config)?.display()
+            )))
+            .chain(std::iter::once(format!(
+                "Baseline: {} | {} | {}",
+                baseline.config.name,
+                baseline.config.loadcase,
+                absolute_path(&args.baseline)?.display()
+            )))
+            .chain(
+                vertical_candidates
+                    .iter()
+                    .map(|(_, _, _, metadata, _)| metadata.clone()),
+            )
+            .chain([
+                format!("Created by: {}", report_creator()),
+                format!("clab version: {}", env!("CARGO_PKG_VERSION")),
+            ])
+            .collect::<Vec<_>>()
+            .join("\n");
         let debug = debug_info(
             args.debug,
             &args.config,
@@ -448,48 +449,6 @@ fn compare_metrics(
                 allowed_difference: allowed,
                 status,
             }
-        })
-        .collect()
-}
-
-fn compare_vertical_metrics(
-    config: &clab_core::config::CaseConfig,
-    baseline: &serde_json::Value,
-    candidate: &serde_json::Value,
-    tolerances: Option<&clab_core::config::ValidationTolerances>,
-) -> Result<Vec<Metric>> {
-    vertical::compare_metrics(config, baseline, candidate)?
-        .into_iter()
-        .map(|comparison| {
-            let metric = format!("{}_wheel_center_{}_mm", comparison.corner, comparison.axis);
-            let absolute = tolerances.and_then(|value| value.absolute.get(&metric).copied());
-            let relative_percent =
-                tolerances.and_then(|value| value.relative_percent.get(&metric).copied());
-            let relative =
-                relative_percent.map(|percent| comparison.maximum_reference_mm * percent / 100.0);
-            let allowed_difference = match (absolute, relative) {
-                (Some(absolute), Some(relative)) => Some(absolute.min(relative)),
-                (Some(value), None) | (None, Some(value)) => Some(value),
-                (None, None) => None,
-            };
-            let status = match allowed_difference {
-                Some(limit) if comparison.maximum_error_mm <= limit => "passed",
-                Some(_) => "failed",
-                None => "informational",
-            };
-            Ok(Metric {
-                domain: "knc",
-                test: Some("vertical"),
-                metric,
-                unit: "mm".into(),
-                baseline_value: Some(comparison.maximum_reference_mm),
-                candidate_value: Some(comparison.maximum_candidate_mm),
-                difference: Some(comparison.maximum_error_mm),
-                absolute_tolerance: absolute,
-                relative_percent,
-                allowed_difference,
-                status,
-            })
         })
         .collect()
 }
@@ -797,13 +756,6 @@ pub(crate) fn safe_cell(value: &str) -> String {
         format!("'{value}")
     } else {
         value.into()
-    }
-}
-fn absolute_path(path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        Ok(path.into())
-    } else {
-        Ok(env::current_dir()?.join(path))
     }
 }
 fn report_creator() -> String {

@@ -1,21 +1,45 @@
-# Defines test condition
-[knc]
+# KnC test setup. This file is the [setup] table of config.toml.
+#
+# Layers: [knc.*] applies to every KnC test. [knc.vertical.*] applies to the
+# vertical test only and overrides [knc.*] key by key.
+# Optional keys that are left out fall back to their default, and clab warns
+# about each one (details with --verbose).
+
+# Test condition, shown in the report footer.
+[knc.meta]
 brakes_applied = false
 engine_running = false
 front_arb_connected = true
 rear_arb_connected = true
 
-# Wheel-center travel positions included in the evaluation.
-# Gradient metrics use secants between -metric_gradient_points_mm and
-# +metric_gradient_points_mm.
-[knc.vertical.window]
-travel_minimum_mm = -1
-travel_maximum_mm = 1
+# Plot range: wheel-center travel positions included in the evaluation, and
+# which sweeps the plots draw.
+# The example data covers -1 mm to +1 mm; typical vehicle tests use e.g. +-80 mm.
+[knc.window]
+minimum_mm = -1
+maximum_mm = 1
 step_mm = 1
-metric_gradient_points_mm = 0.5
+plot_branches = "all"     # all | selected (only the sweep used by the metrics)
 
-# Branch selection: metrics use this sweep; plots draw every sweep.
-[knc.vertical.branch]
-direction = "rise"
-index = 2
-plot_branches = "all"
+# Metric computation: secants between -gradient_points_mm and +gradient_points_mm
+# wheel-center travel, evaluated on one sweep.
+# gradient_points_mm: default 10, limited to the travel window.
+[knc.metric]
+gradient_points_mm = 0.5
+direction = "rise"        # rise | fall | any
+index = 2                 # nth sweep of that direction, 1-based
+
+# Vertical test: only keys that differ from [knc.*].
+# [knc.vertical.window]
+# minimum_mm = -60
+# maximum_mm = 60
+# plot_branches = "all"
+#
+# [knc.vertical.metric]
+# gradient_points_mm = 10
+#
+# Per source kind override of the sweep used by the metrics.
+# [knc.vertical.metric.measurement]
+# index = 2
+# [knc.vertical.metric.simulation]
+# index = 1
