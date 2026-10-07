@@ -5,17 +5,30 @@ use tempfile::NamedTempFile;
 
 pub mod acd;
 pub mod hdf5_writer;
+pub mod identity;
 pub mod measurement_hdf5;
 pub mod model;
 pub mod parser;
 
 /// Converts an Adams RES result to simulation HDF5 without leaving a partial output on failure.
-pub fn convert_res(source: &Path, output: &Path, overwrite: bool) -> Result<()> {
+///
+/// Returns warnings for a declared `identity` the data contradicts.
+pub fn convert_res(
+    source: &Path,
+    output: &Path,
+    overwrite: bool,
+    identity: &identity::Identity,
+) -> Result<Vec<String>> {
     let result = parser::parse_file(source)
         .with_context(|| format!("failed to parse RES file '{}'", source.display()))?;
     write_atomically(output, overwrite, |temporary| {
-        hdf5_writer::write_file(temporary, source, &result)
-    })
+        hdf5_writer::write_file(temporary, source, &result, identity)
+    })?;
+    Ok(identity::res_warnings(
+        &result,
+        identity,
+        &source.display().to_string(),
+    ))
 }
 
 /// Publish completed output atomically from a temporary file near destination.

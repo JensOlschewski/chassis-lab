@@ -1,18 +1,30 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use clab_converter::identity::Identity;
 use clap::Args;
 
 #[derive(Debug, Args)]
+#[command(
+    override_usage = "clab convert --domain <DOMAIN> [--test <TEST>] [OPTIONS] <INPUT>",
+    after_help = "Domains and tests:\n  svc            no test\n  knc            --test vertical\n\nExample:\n  clab convert run.res -d knc -t vertical -o converted/"
+)]
 pub(crate) struct ConvertArgs {
     /// Adams RES simulation or Lommel ACD measurement input.
     input: PathBuf,
-    /// Output HDF5 file. An existing directory receives derived output filename.
+    /// Output HDF5 file, or a directory that receives the derived filename.
+    /// A path ending in `/` is a directory and is created if missing.
     #[arg(short, long, value_name = "OUTPUT")]
     output: Option<PathBuf>,
     /// Replace an existing output file.
     #[arg(long)]
     force: bool,
+    /// Domain the data belongs to: svc or knc (required). Stored in the HDF5 file.
+    #[arg(short, long, value_name = "DOMAIN")]
+    domain: String,
+    /// Test within the domain: required for knc (vertical), not allowed for svc.
+    #[arg(short, long, value_name = "TEST", required_if_eq("domain", "knc"))]
+    test: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -58,24 +70,43 @@ impl InputKind {
 
 pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     let kind = InputKind::from_path(&args.input)?;
+    let identity = Identity::new(&args.domain, args.test.as_deref())?;
     let output = resolve_output(kind, &args.input, args.output.as_deref());
+    if let (Some(requested), Some(parent)) = (args.output.as_deref(), output.parent())
+        && is_directory_request(requested)
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output directory '{}'", parent.display()))?;
+    }
     validate_output(&args.input, &output, args.force)?;
 
-    match kind {
-        InputKind::Res => clab_converter::convert_res(&args.input, &output, args.force),
-        InputKind::Acd => {
-            clab_converter::measurement_hdf5::import_acd(&args.input, &output, args.force)
-        }
+    let warnings = match kind {
+        InputKind::Res => clab_converter::convert_res(&args.input, &output, args.force, &identity),
+        InputKind::Acd => clab_converter::measurement_hdf5::import_acd(
+            &args.input,
+            &output,
+            args.force,
+            &identity,
+        ),
     }
     .with_context(|| format!("failed to generate '{}'", output.display()))?;
+    for warning in warnings {
+        eprintln!("warning: {warning}");
+    }
 
     println!("generated {} ({})", output.display(), kind.output_type());
     Ok(())
 }
 
+/// An existing directory, or a path written with a trailing separator.
+fn is_directory_request(output: &Path) -> bool {
+    let text = output.to_string_lossy();
+    output.is_dir() || text.ends_with('/') || text.ends_with(std::path::MAIN_SEPARATOR)
+}
+
 fn resolve_output(kind: InputKind, input: &Path, output: Option<&Path>) -> PathBuf {
     match output {
-        Some(output) if output.is_dir() => {
+        Some(output) if is_directory_request(output) => {
             let derived = kind.default_output(input);
             let filename = derived.file_name().expect("derived output has a filename");
             output.join(filename)
@@ -128,7 +159,21 @@ mod tests {
 
     #[test]
     fn parses_convert_command() {
-        let cli = Cli::try_parse_from(["clab", "convert", "input.res", "-o", "output.h5"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "clab",
+            "convert",
+            "input.res",
+            "-d",
+            "knc",
+            "-t",
+            "vertical",
+            "-o",
+            "output.h5",
+        ])
+        .unwrap();
         assert!(format!("{cli:?}").contains("Convert"));
+        // --domain is required, also for svc.
+        assert!(Cli::try_parse_from(["clab", "convert", "input.res"]).is_err());
+        assert!(Cli::try_parse_from(["clab", "convert", "input.res", "--domain", "svc"]).is_ok());
     }
 }

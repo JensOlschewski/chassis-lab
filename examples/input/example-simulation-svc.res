@@ -33,10 +33,14 @@
     <Component name="rear_left_camber" unitsValue="deg" id="23" />
     <Component name="rear_right_camber" unitsValue="deg" id="24" />
   </Entity>
+  <Entity type="variable" name="analysis_type" entity="example.analysis_type" entType="ADAMS_Variable">
+    <Component name="Q" id="26" />
+  </Entity>
   <Step type="input">
     4118.793 4020.7265 3726.527 3824.5935
     2500.0 1500.0 1480.0 600.0 100000.0 200000.0 250000.0 0.0 0.0
     350.0 349.0 340.0 339.0
     0.1 -0.1 0.2 -0.2 -1.0 -1.1 -1.2 -1.3
+    1
   </Step>
 </Result>

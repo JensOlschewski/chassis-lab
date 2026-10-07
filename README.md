@@ -68,13 +68,24 @@ comparison.
 ### clab convert
 
 Convert raw simulation or measurement data to HDF5. Default output is
-`INPUT.h5`. Use `--output` for explicit file definition or write in an existing
-directory. Use `--force` to replace an existing output.
+`INPUT.h5`. Use `--output` for an explicit file, or a directory (a trailing `/`
+creates it) that receives the derived filename. Use `--force` to replace an
+existing output.
+
+`--domain` (`-d`) is required and names the data: `svc` or `knc`. `--test`
+(`-t`) is required for `knc` (`vertical`) and not allowed for `svc`. Both are
+stored in the HDF5 file, and `analyze`, `compare` and run manifests use them to
+pick the analysis. Where the data identifies itself (`analysis_type` in `.res`,
+`testtype` in `.acd`), a contradicting flag gives a warning.
 
 ```bash
 clab convert examples/input/example-measurement-knc-vertical.acd \
-    --output input/converted-measurement-knc-vertical.h5
+    -d knc -t vertical --output input/converted-measurement-knc-vertical.h5
+clab convert examples/input/example-simulation-svc.res -d svc
 ```
+
+HDF5 files converted without `--domain` and `--test` still load. They are
+identified from the config and give a warning; convert them again to fix it.
 
 ### clab inspect
 

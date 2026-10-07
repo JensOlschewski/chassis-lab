@@ -24,10 +24,12 @@ fn scalar<T: hdf5::H5Type>(location: &Location, name: &str, value: T) {
 }
 fn simulation(path: &std::path::Path) {
     let file = File::create(path).unwrap();
-    scalar(&file, "schema_version", 1_u32);
+    scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 5_u64);
     scalar(&file, "signal_count", 16_u64);
     string(&file, "source_kind", "simulation");
+    string(&file, "domain", "knc");
+    string(&file, "test", "vertical");
     string(&file, "source_file", "fixture.res");
     let axis = file.create_group("axis").unwrap();
     string(&axis, "kind", "sample_index");
@@ -106,10 +108,12 @@ fn channel(signals: &Group, name: &str, values: &[f64], offset: f64) {
 }
 fn measurement(path: &std::path::Path) {
     let file = File::create(path).unwrap();
-    scalar(&file, "schema_version", 1_u32);
+    scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 6_u64);
     scalar(&file, "signal_count", 36_u64);
     string(&file, "source_kind", "measurement");
+    string(&file, "domain", "knc");
+    string(&file, "test", "vertical");
     string(&file, "source_file", "fixture.acd");
     let axis = file.create_group("axis").unwrap();
     string(&axis, "kind", "time");

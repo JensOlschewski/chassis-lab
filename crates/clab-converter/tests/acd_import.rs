@@ -16,6 +16,10 @@ fn write_acd(path: &std::path::Path, names: &str) {
     .unwrap();
 }
 
+fn vertical() -> clab_converter::identity::Identity {
+    clab_converter::identity::Identity::new("knc", Some("vertical")).unwrap()
+}
+
 #[test]
 fn imports_acd_into_measurement_schema_without_normalizing_values() {
     let directory = tempdir().unwrap();
@@ -23,10 +27,10 @@ fn imports_acd_into_measurement_schema_without_normalizing_values() {
     let output = directory.path().join("measurement.h5");
     write_acd(&source, "time\twheel/travel\twheel travel");
 
-    measurement_hdf5::import_acd(&source, &output, false).unwrap();
+    measurement_hdf5::import_acd(&source, &output, false, &vertical()).unwrap();
 
     let measurement = CanonicalFile::open(&output).unwrap();
-    assert_eq!(measurement.summary().schema_version, 1);
+    assert_eq!(measurement.summary().schema_version, 2);
     assert_eq!(measurement.summary().source_kind, SourceKind::Measurement);
     assert_eq!(
         measurement.summary().source_file,
@@ -71,7 +75,7 @@ fn rejects_acd_without_exact_time_channel() {
     let output = directory.path().join("measurement.h5");
     write_acd(&source, "Time\twheel/travel\twheel travel");
 
-    let error = measurement_hdf5::import_acd(&source, &output, false).unwrap_err();
+    let error = measurement_hdf5::import_acd(&source, &output, false, &vertical()).unwrap_err();
     assert!(error.to_string().contains("named exactly 'time'"));
 }
 
@@ -83,7 +87,7 @@ fn committed_vertical_measurement_example_imports() {
     let directory = tempdir().unwrap();
     let output = directory.path().join("example-vertical.h5");
 
-    measurement_hdf5::import_acd(&source, &output, false).unwrap();
+    measurement_hdf5::import_acd(&source, &output, false, &vertical()).unwrap();
     let imported = CanonicalFile::open(output).unwrap();
 
     assert_eq!(imported.read_axis().unwrap().len(), 6);

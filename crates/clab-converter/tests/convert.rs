@@ -1,4 +1,4 @@
-use clab_converter::{hdf5_writer, parser};
+use clab_converter::{hdf5_writer, identity::Identity, parser};
 use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
 use hdf5::types::VarLenUnicode;
 use tempfile::tempdir;
@@ -13,7 +13,8 @@ fn converts_a_result_file_to_hdf5() {
     let result = parser::parse_file(&source).unwrap();
     let output = directory.path().join("minimal.h5");
 
-    hdf5_writer::write_file(&output, &source, &result).unwrap();
+    let identity = Identity::new("knc", Some("vertical")).unwrap();
+    hdf5_writer::write_file(&output, &source, &result, &identity).unwrap();
 
     let file = hdf5::File::open(&output).unwrap();
     assert_eq!(
@@ -29,7 +30,7 @@ fn converts_a_result_file_to_hdf5() {
             .unwrap()
             .read_scalar::<u32>()
             .unwrap(),
-        1
+        2
     );
     assert_eq!(
         file.attr("source_kind")

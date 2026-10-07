@@ -48,6 +48,10 @@ fn inspects_measurement_hdf5_and_lists_channels() {
         .args([
             "convert",
             source.to_str().unwrap(),
+            "-d",
+            "knc",
+            "-t",
+            "vertical",
             "-o",
             path.to_str().unwrap(),
         ])
@@ -63,7 +67,7 @@ fn inspects_measurement_hdf5_and_lists_channels() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("example-measurement-knc-vertical.acd"));
-    assert!(stdout.contains("schema version: 1"));
+    assert!(stdout.contains("schema version: 2"));
     assert!(stdout.contains("source kind: measurement\nsamples: 6\nsignals: 17\ntest metadata: 5"));
     assert!(stdout.contains("SIGNAL\tCOMPONENT\tUNIT\tSOURCE"));
     assert!(stdout.contains("lfwcx"));
@@ -122,4 +126,66 @@ fn rejects_raw_and_unsupported_extensions() {
                 .contains("clab inspect accepts .json, .h5, or .hdf5")
         );
     }
+}
+
+#[test]
+fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/input");
+    let source = examples.join("example-measurement-knc-vertical.acd");
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("measurement.h5");
+    let converted = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "convert",
+            source.to_str().unwrap(),
+            "-d",
+            "knc",
+            "-t",
+            "vertical",
+            "-o",
+        ])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(converted.status.success());
+    let inspect = |path: &Path| {
+        Command::new(env!("CARGO_BIN_EXE_clab"))
+            .args(["inspect", path.to_str().unwrap()])
+            .output()
+            .unwrap()
+    };
+
+    let current = inspect(&path);
+    assert!(current.status.success());
+    assert!(String::from_utf8_lossy(&current.stdout).contains("schema version: 2"));
+    assert!(!String::from_utf8_lossy(&current.stderr).contains("warning"));
+
+    // Version 1: no domain or test, still readable, with a warning.
+    let legacy = directory.path().join("legacy.h5");
+    std::fs::copy(&path, &legacy).unwrap();
+    let file = hdf5::File::open_rw(&legacy).unwrap();
+    file.attr("schema_version")
+        .unwrap()
+        .write_scalar(&1_u32)
+        .unwrap();
+    file.delete_attr("domain").unwrap();
+    file.delete_attr("test").unwrap();
+    file.close().unwrap();
+    let result = inspect(&legacy);
+    assert!(result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("warning:") && stderr.contains("schema version 1"),
+        "{stderr}"
+    );
+
+    // Version 2 requires the domain.
+    let broken = directory.path().join("broken.h5");
+    std::fs::copy(&path, &broken).unwrap();
+    let file = hdf5::File::open_rw(&broken).unwrap();
+    file.delete_attr("domain").unwrap();
+    file.close().unwrap();
+    let result = inspect(&broken);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("missing HDF5 attribute: domain"));
 }

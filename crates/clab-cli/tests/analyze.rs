@@ -41,6 +41,8 @@ fn analyzes_svc_with_report_bundle() {
         .args([
             "convert",
             source.to_str().unwrap(),
+            "-d",
+            "svc",
             "-o",
             input.to_str().unwrap(),
         ])
@@ -86,6 +88,54 @@ fn analyzes_svc_with_report_bundle() {
     assert_eq!(report["case"]["name"], "undefined");
     assert_eq!(report["case"]["loadcase"], "undefined");
     assert!(report["metrics"].as_array().unwrap().len() > 20);
+}
+
+#[test]
+fn warns_when_run_manifest_uses_schema_version_one() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("legacy.h5");
+    let converted = clab()
+        .args([
+            "convert",
+            examples
+                .join("input/example-simulation-svc.res")
+                .to_str()
+                .unwrap(),
+            "-d",
+            "svc",
+            "-o",
+            input.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(converted.status.success());
+    let file = File::open_rw(&input).unwrap();
+    file.attr("schema_version")
+        .unwrap()
+        .write_scalar(&1_u32)
+        .unwrap();
+    file.delete_attr("domain").unwrap();
+    file.close().unwrap();
+
+    let config = directory.path().join("config.toml");
+    fs::write(
+        &config,
+        format!("[signals]\nfile={:?}\n", examples.join("mappings.toml")),
+    )
+    .unwrap();
+    let run = directory.path().join("run.toml");
+    fs::write(&run, format!("[input.svc]\nfile={input:?}\n")).unwrap();
+    let result = clab()
+        .args(["analyze", config.to_str().unwrap(), run.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stderr).contains("uses schema version 1"));
 }
 
 #[test]
@@ -310,7 +360,7 @@ fn rejects_missing_normalized_input_without_hdf5_diagnostics() {
 }
 
 #[test]
-fn rejects_svc_measurement_hdf5_without_json_reference_parsing() {
+fn analyzes_knc_measurement_hdf5_when_config_also_defines_svc() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
     let source = examples.join("input/example-measurement-knc-vertical.acd");
@@ -323,6 +373,10 @@ fn rejects_svc_measurement_hdf5_without_json_reference_parsing() {
         .args([
             "convert",
             source.to_str().unwrap(),
+            "-d",
+            "knc",
+            "-t",
+            "vertical",
             "-o",
             input.to_str().unwrap(),
         ])
@@ -338,10 +392,16 @@ fn rejects_svc_measurement_hdf5_without_json_reference_parsing() {
         .args(["analyze", config.to_str().unwrap(), input.to_str().unwrap()])
         .output()
         .unwrap();
-    assert_eq!(result.status.code(), Some(2));
+    // The converted ACD is KnC data and the config defines a KnC vertical test,
+    // so it is not mistaken for an unsupported SVC measurement HDF5.
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(stderr.contains("SVC analysis does not support measurement HDF5 input"));
-    assert!(!stderr.contains("invalid SVC reference JSON"));
+    assert!(!stderr.contains("SVC analysis does not support"));
+    assert!(String::from_utf8_lossy(&result.stdout).contains("KnC Vertical"));
 }
 
 #[test]
@@ -358,6 +418,8 @@ fn analyzes_svc_hdf5_with_report_bundle() {
         .args([
             "convert",
             source.to_str().unwrap(),
+            "-d",
+            "svc",
             "-o",
             input.to_str().unwrap(),
         ])
@@ -412,6 +474,8 @@ fn analyzes_svc_hdf5_run_with_hdf5_analyzer() {
         .args([
             "convert",
             source.to_str().unwrap(),
+            "-d",
+            "svc",
             "-o",
             input.to_str().unwrap(),
         ])
@@ -456,6 +520,8 @@ fn analyzes_svc_hdf5_with_missing_units_and_warns() {
         .args([
             "convert",
             source.to_str().unwrap(),
+            "-d",
+            "svc",
             "-o",
             input.to_str().unwrap(),
         ])
@@ -527,6 +593,8 @@ fn analyze_force_rejects_output_containing_input() {
         .args([
             "convert",
             source.to_str().unwrap(),
+            "-d",
+            "svc",
             "-o",
             simulation.to_str().unwrap(),
         ])
@@ -568,6 +636,10 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         .args([
             "convert",
             vertical.to_str().unwrap(),
+            "-d",
+            "knc",
+            "-t",
+            "vertical",
             "-o",
             vertical_simulation.to_str().unwrap(),
         ])
@@ -583,6 +655,8 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         .args([
             "convert",
             svc.to_str().unwrap(),
+            "-d",
+            "svc",
             "-o",
             svc_simulation.to_str().unwrap(),
         ])
@@ -640,4 +714,63 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         assert_eq!(detail["case"], report["case"]);
         assert_eq!(detail["inputs"]["run"], report["inputs"]["run"]);
     }
+}
+
+#[test]
+fn analyze_routes_hdf5_by_declared_domain() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let config = examples.join("config.toml");
+    let source = examples.join("input/example-measurement-knc-vertical.acd");
+    let directory = tempdir().unwrap();
+    let declared = directory.path().join("declared.h5");
+    let converted = clab()
+        .args([
+            "convert",
+            source.to_str().unwrap(),
+            "-d",
+            "knc",
+            "-t",
+            "vertical",
+            "-o",
+        ])
+        .arg(&declared)
+        .output()
+        .unwrap();
+    assert!(converted.status.success());
+
+    let result = clab()
+        .args([
+            "analyze",
+            config.to_str().unwrap(),
+            declared.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).contains("KnC Vertical"));
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("schema version"));
+
+    // Same data declared as svc: measurement HDF5 is not an SVC input.
+    let wrong = directory.path().join("wrong.h5");
+    let converted = clab()
+        .args(["convert", source.to_str().unwrap(), "-d", "svc", "-o"])
+        .arg(&wrong)
+        .output()
+        .unwrap();
+    assert!(converted.status.success());
+    assert!(String::from_utf8_lossy(&converted.stderr).contains("indicates knc"));
+    let result = clab()
+        .args(["analyze", config.to_str().unwrap(), wrong.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains("SVC analysis does not support measurement HDF5")
+    );
 }

@@ -1104,14 +1104,18 @@ fn validate_vertical_hdf5_source(
         ))
         .into());
     }
-    Ok(())
+    check_hdf5_identity(path, Domain::Knc)
 }
 
 fn source_kind(path: &Path, domain: Domain) -> Result<SourceKind, Box<dyn std::error::Error>> {
     match path.extension().and_then(|extension| extension.to_str()) {
         // Config templates may name a normalized simulation output before conversion.
         Some("h5" | "hdf5") if !path.exists() => Ok(SourceKind::Simulation),
-        Some("h5" | "hdf5") => hdf5_source_kind(path, "input"),
+        Some("h5" | "hdf5") => {
+            let kind = hdf5_source_kind(path, "input")?;
+            check_hdf5_identity(path, domain)?;
+            Ok(kind)
+        }
         Some("json") if domain == Domain::Svc => {
             let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)
                 .map_err(|error| {
@@ -1143,6 +1147,53 @@ fn source_kind(path: &Path, domain: Domain) -> Result<SourceKind, Box<dyn std::e
         ))
         .into()),
     }
+}
+
+/// Reject an HDF5 file whose declared domain or test differs from the one the
+/// config expects. Files converted before `domain` and `test` were stored carry
+/// neither and are accepted.
+fn check_hdf5_identity(path: &Path, domain: Domain) -> Result<(), Box<dyn std::error::Error>> {
+    let file = hdf5::File::open(path).map_err(|error| {
+        ConfigError(format!(
+            "failed to open input '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let optional = |name: &str| -> Result<Option<String>, Box<dyn std::error::Error>> {
+        use hdf5::types::VarLenUnicode;
+        if !file.attr_names()?.iter().any(|value| value == name) {
+            return Ok(None);
+        }
+        let value = file
+            .attr(name)?
+            .read_scalar::<VarLenUnicode>()
+            .map_err(|_| ConfigError(format!("input '{}' has invalid {name}", path.display())))?;
+        Ok(Some(value.as_str().to_owned()))
+    };
+    let (found_domain, found_test) = (optional("domain")?, optional("test")?);
+    let (expected_domain, expected_test) = match domain {
+        Domain::Svc => ("svc", None),
+        Domain::Knc => ("knc", Some("vertical")),
+    };
+    if let Some(found) = found_domain.as_deref()
+        && found != expected_domain
+    {
+        return Err(ConfigError(format!(
+            "input '{}' has domain '{found}', expected '{expected_domain}'",
+            path.display()
+        ))
+        .into());
+    }
+    if let (Some(found), Some(expected)) = (found_test.as_deref(), expected_test)
+        && found != expected
+    {
+        return Err(ConfigError(format!(
+            "input '{}' has test '{found}', expected '{expected}'",
+            path.display()
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 fn hdf5_source_kind(path: &Path, role: &str) -> Result<SourceKind, Box<dyn std::error::Error>> {
@@ -2599,6 +2650,55 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("source_kind must be simulation")
+        );
+    }
+
+    #[test]
+    fn rejects_input_whose_declared_domain_or_test_differs() {
+        let d = tempfile::tempdir().unwrap();
+        let config = d.path().join("case.toml");
+        for (attrs, expected) in [
+            (&[("domain", "svc")][..], "has domain 'svc', expected 'knc'"),
+            (
+                &[("domain", "knc"), ("test", "static")][..],
+                "has test 'static', expected 'vertical'",
+            ),
+        ] {
+            let input = d.path().join("input.h5");
+            source_kind(&input, "simulation");
+            let file = File::open_rw(&input).unwrap();
+            for (name, value) in attrs {
+                string(&file, name, value);
+            }
+            file.close().unwrap();
+            fs::write(
+                &config,
+                format!(
+                    "[meta]\nname='n'\nloadcase='l'\n[input.knc.vertical.simulation]\nfile='{}'\n",
+                    input.display()
+                ),
+            )
+            .unwrap();
+
+            let message = load_config(&config).unwrap_err().to_string();
+            assert!(message.contains(expected), "{message}");
+            fs::remove_file(&input).unwrap();
+        }
+        // Files without domain and test (converted earlier) are accepted.
+        let input = d.path().join("input.h5");
+        source_kind(&input, "simulation");
+        fs::write(
+            &config,
+            format!(
+                "[meta]\nname='n'\nloadcase='l'\n[input.knc.vertical.simulation]\nfile='{}'\n",
+                input.display()
+            ),
+        )
+        .unwrap();
+        assert!(
+            !load_config(&config)
+                .err()
+                .is_some_and(|error| error.to_string().contains("expected"))
         );
     }
 

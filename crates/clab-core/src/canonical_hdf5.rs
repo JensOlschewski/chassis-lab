@@ -1,8 +1,10 @@
-//! Version 1 canonical HDF5 input schema.
+//! Canonical HDF5 input schema (version 2; version 1 remains readable).
 //!
 //! Root attributes:
 //! `schema_version` (uint32),
 //! `source_kind` (`simulation` or `measurement`),
+//! `domain` (`svc` or `knc`; required in version 2),
+//! `test` (`vertical` for KnC; absent for SVC),
 //! `source_file` (UTF-8 string),
 //! `sample_count` (uint64),
 //! `signal_count` (uint64)
@@ -19,12 +21,28 @@ use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group, Location};
 use thiserror::Error;
 
-pub const SCHEMA_VERSION: u32 = 1;
+/// Current schema version. Version 2 adds the required `domain` and optional `test`.
+pub const SCHEMA_VERSION: u32 = 2;
+/// Oldest schema version that is still read, without `domain` and `test`.
+pub const LEGACY_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
     Simulation,
     Measurement,
+}
+
+impl Summary {
+    /// Warning for files converted before `domain` and `test` were stored.
+    pub fn legacy_warning(&self) -> Option<String> {
+        (self.schema_version < SCHEMA_VERSION).then(|| {
+            format!(
+                "'{}' uses schema version {}, which has no domain or test; inferring from the config. Convert again with --domain and --test to get schema version {SCHEMA_VERSION}",
+                self.path.display(),
+                self.schema_version
+            )
+        })
+    }
 }
 
 impl SourceKind {
@@ -41,6 +59,10 @@ pub struct Summary {
     pub path: PathBuf,
     pub schema_version: u32,
     pub source_kind: SourceKind,
+    /// Declared domain (`svc`, `knc`); `None` for files converted before it was stored.
+    pub domain: Option<String>,
+    /// Declared test within the domain (`vertical`); `None` for domains without tests.
+    pub test: Option<String>,
     pub source_file: String,
     pub sample_count: usize,
     pub signal_count: usize,
@@ -228,11 +250,21 @@ fn validate(
     file: &File,
 ) -> Result<(Summary, Vec<SignalInfo>, Vec<TestInfo>), CanonicalHdf5Error> {
     let schema_version = u32_attr(file, "schema_version")?;
-    if schema_version != SCHEMA_VERSION {
-        return format(
-            "unsupported canonical HDF5 schema version {schema_version}; expected {SCHEMA_VERSION}"
-                .into(),
-        );
+    if !(LEGACY_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&schema_version) {
+        return format(format!(
+            "unsupported canonical HDF5 schema version {schema_version}; expected {LEGACY_SCHEMA_VERSION} or {SCHEMA_VERSION}"
+        ));
+    }
+    let domain = optional_string(file, "domain")?;
+    let test = optional_string(file, "test")?;
+    if schema_version >= 2 && domain.is_none() {
+        return format("missing HDF5 attribute: domain (required since schema version 2)".into());
+    }
+    if schema_version >= 2 && domain.as_deref() == Some("knc") && test.is_none() {
+        return format("missing HDF5 attribute: test (required for KnC)".into());
+    }
+    if schema_version >= 2 && domain.as_deref() == Some("svc") && test.is_some() {
+        return format("HDF5 attribute test must be absent for SVC".into());
     }
     let source_kind = match string(file, "source_kind")?.as_str() {
         "simulation" => SourceKind::Simulation,
@@ -330,6 +362,8 @@ fn validate(
             path: path.into(),
             schema_version,
             source_kind,
+            domain,
+            test,
             source_file,
             sample_count,
             signal_count,
