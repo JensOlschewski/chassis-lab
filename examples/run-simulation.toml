@@ -3,9 +3,10 @@
 # Convert committed raw results first:
 # clab convert input/example-simulation-svc.res -o input/generated-simulation-svc.h5
 # clab convert input/example-simulation-knc-vertical.res -o input/generated-simulation-knc-vertical.h5
+
 [meta]
-name = "example-run"
-loadcase = "example-loadcase"
+name = "example_run_simulation"
+loadcase = "example_loadcase"
 
 [input.svc]
 file = "input/generated-simulation-svc.h5"

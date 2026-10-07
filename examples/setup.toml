@@ -1,12 +1,45 @@
-# Defines test condition
-[knc]
+# This file is the [setup] table of config.toml.
+#
+# [knc.*] applies to every KnC test
+# [knc.vertical.*] applies to the vertical test only and overrides [knc.*]
+#
+# Optional keys that are left out fall back to their default, and clab warns
+# about each one (details with --verbose).
+
+# Test condition, shown in the report footer.
+[knc.meta]
 brakes_applied = false
 engine_running = false
 front_arb_connected = true
 rear_arb_connected = true
 
-# Travel positions included in the evaluation.
-[knc.vertical.window]
+# Plot range defined by wheel-center travel
+# The example data covers -1 mm to +1 mm, typical vehicle tests use about +-80 mm.
+[knc.window]
 minimum_mm = -1
 maximum_mm = 1
 step_mm = 1
+plot_branches = "all"     # all | selected (only the sweep used by the metrics)
+
+# Metric computation
+# secants between -gradient_points_mm and +gradient_points_mm
+# gradient_points_mm: default 10 and limited to the travel window.
+[knc.metric]
+gradient_points_mm = 0.5
+direction = "rise"        # rise | fall | any
+index = 2                 # nth sweep of that direction, 1-based
+
+# Vertical test: only keys that differ from [knc.*].
+# [knc.vertical.window]
+# minimum_mm = -60
+# maximum_mm = 60
+# plot_branches = "all"
+#
+# [knc.vertical.metric]
+# gradient_points_mm = 10
+#
+# Per source kind override of the sweep used by the metrics.
+# [knc.vertical.metric.measurement]
+# index = 2
+# [knc.vertical.metric.simulation]
+# index = 1

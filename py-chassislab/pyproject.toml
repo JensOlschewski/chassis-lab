@@ -12,6 +12,7 @@ dependencies = [
     "h5py>=3.11,<4",
     "matplotlib>=3.9,<4",
     "numpy>=2,<3",
+    "pypdf>=5,<7",
 ]
 
 [project.optional-dependencies]
@@ -33,3 +34,6 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.basedpyright]
+typeCheckingMode = "basic"

@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     env, fmt, fs,
     io::IsTerminal,
     path::{Path, PathBuf},
@@ -14,7 +14,7 @@ use sha2::Digest;
 
 use crate::{
     analysis::{svc, vertical},
-    analyze::write_bundle,
+    analyze::{absolute_path, debug_info, write_bundle},
 };
 
 #[derive(Debug, Args)]
@@ -35,6 +35,9 @@ pub(crate) struct CompareArgs {
     /// Replace report bundle already in output directory.
     #[arg(long)]
     force: bool,
+    /// Include KnC rate-filter diagnostic plots in the report (requires --report).
+    #[arg(long, requires = "output")]
+    debug: bool,
 }
 
 #[derive(Debug)]
@@ -63,7 +66,11 @@ struct Metric {
 
 enum ComparedDomain {
     Svc(Vec<svc::CanonicalMetric>),
-    Vertical(serde_json::Value),
+    Vertical {
+        curves: serde_json::Value,
+        metrics: Vec<serde_json::Value>,
+        branch: clab_core::config::VerticalBranch,
+    },
 }
 
 struct Input {
@@ -128,19 +135,29 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                         serde_json::json!({"domain": "svc", "test": null, "status": "compared"}),
                     );
                 }
-                (ComparedDomain::Vertical(base), ComparedDomain::Vertical(candidate_curves)) => {
-                    let compared = compare_vertical_metrics(
-                        &baseline.config,
-                        base,
-                        candidate_curves,
+                (
+                    ComparedDomain::Vertical {
+                        metrics: base_metrics,
+                        ..
+                    },
+                    ComparedDomain::Vertical {
+                        curves: candidate_curves,
+                        metrics: candidate_metrics,
+                        branch: candidate_branch,
+                    },
+                ) => {
+                    let compared = compare_vertical_gradient_metrics(
+                        base_metrics,
+                        candidate_metrics,
                         tolerances.as_ref().map(|value| &value.vertical),
-                    )?;
+                    );
                     failed |= compared.iter().any(|metric| metric.status == "failed");
                     incomplete |= compared.iter().any(|metric| metric.status == "missing");
                     metrics.extend(compared);
                     vertical_candidates.push((
                         format!("Curve {}", index + 1),
                         candidate_curves.clone(),
+                        candidate_branch.clone(),
                         format!(
                             "Curve {}: {} | {} | {}",
                             index + 1,
@@ -148,6 +165,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                             candidate.config.loadcase,
                             absolute_path(path)?.display()
                         ),
+                        path.as_path(),
                     ));
                     domains.push(serde_json::json!({"domain": "knc", "test": "vertical", "status": "compared"}));
                 }
@@ -182,36 +200,57 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
     if args.output.is_some()
-        && let Some(ComparedDomain::Vertical(base)) = baseline.domains.get("knc")
+        && let Some(ComparedDomain::Vertical {
+            curves: base,
+            branch: base_branch,
+            ..
+        }) = baseline.domains.get("knc")
     {
-        let footer = std::iter::once(format!(
-            "Config: {}",
-            absolute_path(&args.config)?.display()
-        ))
-        .chain(std::iter::once(format!(
-            "Baseline: {} | {} | {}",
-            baseline.config.name,
-            baseline.config.loadcase,
-            absolute_path(&args.baseline)?.display()
-        )))
-        .chain(
-            vertical_candidates
-                .iter()
-                .map(|(_, _, metadata)| metadata.clone()),
-        )
-        .chain(std::iter::once(format!("Created by: {}", report_creator())))
-        .collect::<Vec<_>>()
-        .join("\n");
+        let footer = baseline
+            .config
+            .vertical
+            .iter()
+            .map(|vertical| format!("KnC setup: {}", vertical.setup.summary()))
+            .chain(std::iter::once(format!(
+                "Config: {}",
+                absolute_path(&args.config)?.display()
+            )))
+            .chain(std::iter::once(format!(
+                "Baseline: {} | {} | {}",
+                baseline.config.name,
+                baseline.config.loadcase,
+                absolute_path(&args.baseline)?.display()
+            )))
+            .chain(
+                vertical_candidates
+                    .iter()
+                    .map(|(_, _, _, metadata, _)| metadata.clone()),
+            )
+            .chain([
+                format!("Created by: {}", report_creator()),
+                format!("clab version: {}", env!("CARGO_PKG_VERSION")),
+            ])
+            .collect::<Vec<_>>()
+            .join("\n");
+        let debug = debug_info(
+            args.debug,
+            &args.config,
+            &std::iter::once(args.baseline.as_path())
+                .chain(vertical_candidates.iter().map(|candidate| candidate.4))
+                .collect::<Vec<_>>(),
+        )?;
         let candidates = vertical_candidates
             .into_iter()
-            .map(|(label, curves, _)| (label, curves))
+            .map(|(label, curves, branch, _, _)| (label, curves, branch))
             .collect::<Vec<_>>();
         plots.extend(vertical::compare_plots(
-            base,
+            &baseline.config,
+            (base, base_branch),
             &candidates,
             "Baseline",
             &footer,
             "plots/knc/vertical/comparison",
+            debug.as_deref(),
         )?);
     }
     let report = serde_json::json!({
@@ -227,17 +266,20 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     if let Some(output) = &args.output {
         let csv = metrics_csv(&args.baseline, &rows)?;
         let detail = serde_json::to_string_pretty(&report)? + "\n";
-        let mut files = vec![("report.json", detail.clone()), ("metrics.csv", csv)];
+        let mut files = vec![
+            ("report.json", detail.clone().into_bytes()),
+            ("metrics.csv", csv.into_bytes()),
+        ];
         if baseline.domains.contains_key("svc") {
-            files.push(("svc.json", detail));
+            files.push(("svc.json", detail.into_bytes()));
         }
         if baseline.domains.contains_key("knc") {
             files.push((
                 "knc-vertical.json",
-                serde_json::to_string_pretty(&report)? + "\n",
+                (serde_json::to_string_pretty(&report)? + "\n").into_bytes(),
             ));
         }
-        files.extend(plots.iter().map(|(name, svg)| (name.as_str(), svg.clone())));
+        files.extend(plots.iter().map(|(name, pdf)| (name.as_str(), pdf.clone())));
         let mut inputs = vec![args.config.as_path(), args.baseline.as_path()];
         inputs.extend(baseline.sources.iter().map(PathBuf::as_path));
         inputs.extend(args.candidates.iter().map(PathBuf::as_path));
@@ -332,7 +374,14 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         if let Some(static_input) = &vertical_config.static_simulation_hdf5 {
             sources.push(static_input.clone());
         }
-        domains.insert("knc", ComparedDomain::Vertical(detail["curves"].clone()));
+        domains.insert(
+            "knc",
+            ComparedDomain::Vertical {
+                curves: detail["curves"].clone(),
+                metrics: report.metrics,
+                branch: report.branch,
+            },
+        );
     }
     Ok(Input {
         config: case,
@@ -404,44 +453,69 @@ fn compare_metrics(
         .collect()
 }
 
-fn compare_vertical_metrics(
-    config: &clab_core::config::CaseConfig,
-    baseline: &serde_json::Value,
-    candidate: &serde_json::Value,
+fn compare_vertical_gradient_metrics(
+    baseline: &[serde_json::Value],
+    candidate: &[serde_json::Value],
     tolerances: Option<&clab_core::config::ValidationTolerances>,
-) -> Result<Vec<Metric>> {
-    vertical::compare_metrics(config, baseline, candidate)?
+) -> Vec<Metric> {
+    let baseline = baseline
+        .iter()
+        .filter_map(|metric| metric["metric"].as_str().map(|name| (name, metric)))
+        .collect::<BTreeMap<_, _>>();
+    let candidate = candidate
+        .iter()
+        .filter_map(|metric| metric["metric"].as_str().map(|name| (name, metric)))
+        .collect::<BTreeMap<_, _>>();
+    baseline
+        .keys()
+        .chain(candidate.keys())
+        .copied()
+        .collect::<BTreeSet<_>>()
         .into_iter()
-        .map(|comparison| {
-            let metric = format!("{}_wheel_center_{}_mm", comparison.corner, comparison.axis);
-            let absolute = tolerances.and_then(|value| value.absolute.get(&metric).copied());
+        .map(|name| {
+            let baseline = baseline.get(name);
+            let candidate = candidate.get(name);
+            let base = baseline.and_then(|metric| metric["value"].as_f64());
+            let candidate_value = candidate.and_then(|metric| metric["value"].as_f64());
+            let absolute = tolerances.and_then(|value| value.absolute.get(name).copied());
             let relative_percent =
-                tolerances.and_then(|value| value.relative_percent.get(&metric).copied());
-            let relative =
-                relative_percent.map(|percent| comparison.maximum_reference_mm * percent / 100.0);
+                tolerances.and_then(|value| value.relative_percent.get(name).copied());
+            let relative = base
+                .zip(relative_percent)
+                .map(|(value, percent)| value.abs() * percent / 100.0);
             let allowed_difference = match (absolute, relative) {
                 (Some(absolute), Some(relative)) => Some(absolute.min(relative)),
                 (Some(value), None) | (None, Some(value)) => Some(value),
                 (None, None) => None,
             };
-            let status = match allowed_difference {
-                Some(limit) if comparison.maximum_error_mm <= limit => "passed",
-                Some(_) => "failed",
-                None => "informational",
+            let difference = base
+                .zip(candidate_value)
+                .map(|(left, right)| (right - left).abs());
+            let status = match (base, candidate_value, allowed_difference, difference) {
+                (Some(_), Some(_), Some(limit), Some(difference)) if difference <= limit => {
+                    "passed"
+                }
+                (Some(_), Some(_), Some(_), Some(_)) => "failed",
+                (Some(_), Some(_), None, _) => "informational",
+                _ => "missing",
             };
-            Ok(Metric {
+            Metric {
                 domain: "knc",
                 test: Some("vertical"),
-                metric,
-                unit: "mm".into(),
-                baseline_value: Some(comparison.maximum_reference_mm),
-                candidate_value: Some(comparison.maximum_candidate_mm),
-                difference: Some(comparison.maximum_error_mm),
+                metric: name.into(),
+                unit: baseline
+                    .or(candidate)
+                    .and_then(|metric| metric["unit"].as_str())
+                    .unwrap_or_default()
+                    .into(),
+                baseline_value: base,
+                candidate_value,
+                difference,
                 absolute_tolerance: absolute,
                 relative_percent,
                 allowed_difference,
                 status,
-            })
+            }
         })
         .collect()
 }
@@ -674,7 +748,7 @@ fn comparison_status(
     }
 }
 
-fn safe_cell(value: &str) -> String {
+pub(crate) fn safe_cell(value: &str) -> String {
     if matches!(
         value.trim_start().as_bytes().first(),
         Some(b'=' | b'+' | b'-' | b'@')
@@ -682,13 +756,6 @@ fn safe_cell(value: &str) -> String {
         format!("'{value}")
     } else {
         value.into()
-    }
-}
-fn absolute_path(path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        Ok(path.into())
-    } else {
-        Ok(env::current_dir()?.join(path))
     }
 }
 fn report_creator() -> String {

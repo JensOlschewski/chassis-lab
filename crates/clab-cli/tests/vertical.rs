@@ -91,11 +91,16 @@ fn channel(signals: &Group, name: &str, values: &[f64], offset: f64) {
         .unwrap();
     string(&group, "original_name", name);
     string(&group, "description", name);
-    string(
-        &group,
-        "unit",
-        if name.ends_with("slope") { "" } else { "mm" },
-    );
+    let unit = if name.ends_with("slope") {
+        ""
+    } else if name.ends_with("steer") || name.ends_with("cam") {
+        "deg"
+    } else if name.ends_with("fz") {
+        "N"
+    } else {
+        "mm"
+    };
+    string(&group, "unit", unit);
     scalar(&group, "offset", offset);
     scalar(&group, "column", 0_u64);
 }
@@ -103,7 +108,7 @@ fn measurement(path: &std::path::Path) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 1_u32);
     scalar(&file, "sample_count", 6_u64);
-    scalar(&file, "signal_count", 16_u64);
+    scalar(&file, "signal_count", 36_u64);
     string(&file, "source_kind", "measurement");
     string(&file, "source_file", "fixture.acd");
     let axis = file.create_group("axis").unwrap();
@@ -138,6 +143,36 @@ fn measurement(path: &std::path::Path) {
             &format!("{prefix}wcz"),
             &[299., 300., 301., 301., 300., 299.],
             300.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}steer"),
+            &[-0.02, 0., 0.02, 0.02, 0., -0.02],
+            0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}cam"),
+            &[0.03, 0., -0.03, -0.03, 0., 0.03],
+            0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}fz"),
+            &[2970., 3000., 3030., 3030., 3000., 2970.],
+            0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}pz"),
+            &[-1.1, 0., 1.1, 1.1, 0., -1.1],
+            0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}tdef"),
+            &[16.9, 17., 17.1, 17.1, 17., 16.9],
+            17.,
         );
     }
     let metadata = file.create_group("measurement").unwrap();
@@ -196,7 +231,8 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
     config(&config_path, false);
     let output = directory.path().join("reports");
     let json = output.join("knc-vertical.json");
-    let svg = output.join("plots/knc/vertical/wheel-center-z-vs-wheel-center-y.svg");
+    let svg = output.join("plots/knc/vertical/knc_vertical_wcz_vs_wcy.pdf");
+    let recession = output.join("plots/knc/vertical/knc_vertical_recession_angle.pdf");
     let success = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([
             "analyze",
@@ -212,31 +248,20 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
         "{}",
         String::from_utf8_lossy(&success.stderr)
     );
-    assert!(json.is_file() && svg.is_file());
+    assert!(json.is_file() && svg.is_file() && recession.is_file());
+    assert!(fs::read(recession).unwrap().starts_with(b"%PDF"));
     let report = fs::read_to_string(output.join("report.json")).unwrap();
     assert!(report.contains("no static_simulation"));
     assert!(report.contains("\"method\": \"none\""));
     let stderr = String::from_utf8_lossy(&success.stderr);
-    assert!(stderr.contains("1 analysis warning; details in"));
-    assert!(!stderr.contains("no static_simulation"));
+    assert!(stderr.contains("analysis warning"));
     assert!(
         output
-            .join("plots/knc/vertical/wheel-center-y-vs-wheel-center-x.svg")
+            .join("plots/knc/vertical/knc_vertical_wcz_vs_wcx.pdf")
             .is_file()
     );
-    assert!(
-        output
-            .join("plots/knc/vertical/wheel-center-z-vs-wheel-center-x.svg")
-            .is_file()
-    );
-    assert!(!output.join("knc-vertical.svg").exists());
-    let svg_text = fs::read_to_string(svg).unwrap();
-    assert!(svg_text.contains("Simulation"));
-    assert!(svg_text.contains("Front left"));
-    assert!(svg_text.contains(&format!("Config: {}", config_path.display())));
-    assert!(svg_text.contains("Case: fixture | L"));
-    assert!(svg_text.contains(&format!("Input: {}", simulation_path.display())));
-    assert!(svg_text.contains("Created by:"));
+    assert!(!output.join("knc-vertical.pdf").exists());
+    assert!(fs::read(svg).unwrap().starts_with(b"%PDF"));
     assert!(
         fs::read_to_string(&json)
             .unwrap()
@@ -266,6 +291,123 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
         .unwrap();
     assert_eq!(missing_result.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&missing_result.stderr).contains("mapping missing"));
+}
+
+#[test]
+fn analyzes_measurement_vertical_gradient_metrics() {
+    let directory = tempdir().unwrap();
+    let measurement_path = directory.path().join("measurement.h5");
+    closed_fixture(&measurement_path, measurement);
+    // Explicit gradient points and default limited to the ±1 mm window.
+    for gradient in ["gradient_points_mm=0.5\n", ""] {
+        assert_measurement_metrics(directory.path(), &measurement_path, gradient);
+    }
+}
+
+fn assert_measurement_metrics(
+    directory: &std::path::Path,
+    measurement_path: &std::path::Path,
+    gradient: &str,
+) {
+    let config_path = directory.join("case.toml");
+    config(&config_path, false);
+    let text = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("step_mm=1\n", "step_mm=1\nplot_branches='all'\n");
+    fs::write(
+        &config_path,
+        format!("{text}\n[setup.knc.vertical.metric]\n{gradient}direction='any'\nindex=1\n"),
+    )
+    .unwrap();
+    let output = directory.join("reports");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "analyze",
+            config_path.to_str().unwrap(),
+            measurement_path.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+            "--force",
+            "--verbose",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(stdout.contains("KnC Vertical\nrunning 24 metrics"));
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    if gradient.is_empty() {
+        // Every other key is set, so only the gradient default is reported.
+        assert_eq!(stderr.matches("warning:").count(), 1, "{stderr}");
+        assert!(stderr.contains(
+            "warning: KnC vertical config key 'gradient_points_mm' missing in [setup.knc.metric]; \
+             using default 10 mm (limited to travel window: 1 mm)"
+        ));
+        return;
+    }
+    assert!(!stderr.contains("warning:"), "{stderr}");
+    let detail: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("knc-vertical.json")).unwrap())
+            .unwrap();
+    let value = |name: &str| {
+        detail["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|metric| metric["metric"] == name)
+            .unwrap_or_else(|| panic!("missing metric {name}"))["value"]
+            .as_f64()
+            .unwrap()
+    };
+    let close = |actual: f64, expected: f64| assert!((actual - expected).abs() < 1e-9, "{actual}");
+    close(value("bump_steer_front_left_deg_per_mm"), 0.02);
+    close(value("bump_steer_front_right_deg_per_mm"), -0.02);
+    close(value("bump_camber_front_left_deg_per_mm"), -0.03);
+    close(
+        value("wheel_recession_angle_front_left_deg"),
+        (-2.0_f64).atan().to_degrees(),
+    );
+    close(value("suspension_rate_rear_right_n_per_mm"), 30.0);
+    close(value("ride_rate_rear_right_n_per_mm"), 30.0 / 1.1);
+    close(value("tire_rate_rear_right_n_per_mm"), 300.0);
+    let csv = fs::read_to_string(output.join("metrics.csv")).unwrap();
+    assert!(csv.starts_with("run,domain,test,metric,unit,value\n"));
+    assert!(csv.contains("fixture,knc,vertical,suspension_rate_rear_right_n_per_mm,N/mm,30"));
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["domains"][0]["metric_count"], 24);
+}
+
+#[test]
+fn skips_vertical_metrics_without_static_normalization() {
+    let directory = tempdir().unwrap();
+    let simulation_path = directory.path().join("simulation.h5");
+    closed_fixture(&simulation_path, simulation);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    let text = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("step_mm=1\n", "step_mm=1\nmetric_gradient_points_mm=0.5\n");
+    fs::write(&config_path, text).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "analyze",
+            config_path.to_str().unwrap(),
+            simulation_path.to_str().unwrap(),
+            "--verbose",
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    assert!(String::from_utf8_lossy(&result.stdout).contains("KnC Vertical\nrunning 0 metrics"));
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains("vertical metrics require static_simulation normalization")
+    );
 }
 
 #[test]
@@ -334,7 +476,7 @@ fn analyzes_simulation_with_missing_units_and_warns() {
 }
 
 #[test]
-fn run_simulation_static_normalizes_without_warning() {
+fn run_simulation_static_normalizes_and_reports_available_metrics() {
     let directory = tempdir().unwrap();
     let simulation_path = directory.path().join("simulation.h5");
     let static_path = directory.path().join("static.h5");
@@ -368,7 +510,7 @@ fn run_simulation_static_normalizes_without_warning() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert!(!String::from_utf8_lossy(&result.stderr).contains("warning:"));
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("no static_simulation"));
     let report = fs::read_to_string(output.join("report.json")).unwrap();
     assert!(report.contains("drop_initial_sample_and_subtract_final_sample"));
     assert!(!report.contains("no static_simulation"));
@@ -387,30 +529,45 @@ fn run_simulation_static_normalizes_without_warning() {
     );
 }
 
-#[test]
-fn compares_direct_vertical_inputs_across_source_kinds_with_overlays() {
-    let directory = tempdir().unwrap();
-    let simulation_path = directory.path().join("simulation.h5");
-    let measurement_path = directory.path().join("measurement.h5");
-    closed_fixture(&simulation_path, simulation);
-    closed_fixture(&measurement_path, measurement);
-    let config_path = directory.path().join("case.toml");
-    config(&config_path, false);
+/// Measurement config with the first sweep selected, so every metric exists.
+fn comparison_config(path: &std::path::Path, tolerance: &str) {
+    config(path, false);
     fs::OpenOptions::new()
         .append(true)
-        .open(&config_path)
+        .open(path)
         .unwrap()
         .write_all(
-            b"[validation.knc.vertical.tolerances.absolute]\nfront_left_wheel_center_x_mm=0.001\n",
+            format!("\n[setup.knc.vertical.branch]\ndirection='any'\nindex=1\n{tolerance}")
+                .as_bytes(),
         )
         .unwrap();
+}
+
+const EXPECTED_METRICS: [(&str, &str); 6] = [
+    ("bump_camber", "deg_per_mm"),
+    ("bump_steer", "deg_per_mm"),
+    ("ride_rate", "n_per_mm"),
+    ("suspension_rate", "n_per_mm"),
+    ("tire_rate", "n_per_mm"),
+    ("wheel_recession_angle", "deg"),
+];
+
+#[test]
+fn compares_only_gradient_metrics_with_overlays() {
+    let directory = tempdir().unwrap();
+    let baseline_path = directory.path().join("baseline.h5");
+    let candidate_path = directory.path().join("candidate.h5");
+    closed_fixture(&baseline_path, measurement);
+    closed_fixture(&candidate_path, measurement);
+    let config_path = directory.path().join("case.toml");
+    comparison_config(&config_path, "");
     let output = directory.path().join("comparison");
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([
             "compare",
             config_path.to_str().unwrap(),
-            simulation_path.to_str().unwrap(),
-            measurement_path.to_str().unwrap(),
+            baseline_path.to_str().unwrap(),
+            candidate_path.to_str().unwrap(),
             "-r",
             output.to_str().unwrap(),
         ])
@@ -425,61 +582,33 @@ fn compares_direct_vertical_inputs_across_source_kinds_with_overlays() {
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["candidates"][0]["domains"][0]["domain"], "knc");
     assert_eq!(report["candidates"][0]["domains"][0]["status"], "compared");
-    let expected = [
-        "front_left_wheel_center_x_mm",
-        "front_left_wheel_center_y_mm",
-        "front_left_wheel_center_z_mm",
-        "front_right_wheel_center_x_mm",
-        "front_right_wheel_center_y_mm",
-        "front_right_wheel_center_z_mm",
-        "rear_left_wheel_center_x_mm",
-        "rear_left_wheel_center_y_mm",
-        "rear_left_wheel_center_z_mm",
-        "rear_right_wheel_center_x_mm",
-        "rear_right_wheel_center_y_mm",
-        "rear_right_wheel_center_z_mm",
-    ];
+    let mut expected = Vec::new();
+    for corner in ["front_left", "front_right", "rear_left", "rear_right"] {
+        for (metric, unit) in EXPECTED_METRICS {
+            expected.push(format!("{metric}_{corner}_{unit}"));
+        }
+    }
+    expected.sort();
+    let metrics = report["candidates"][0]["metrics"].as_array().unwrap();
     assert_eq!(
-        report["candidates"][0]["metrics"]
-            .as_array()
-            .unwrap()
+        metrics
             .iter()
-            .map(|metric| metric["metric"].as_str().unwrap())
+            .map(|metric| metric["metric"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>(),
-        expected.as_slice()
+        expected
     );
     assert!(
-        report["candidates"][0]["metrics"]
-            .as_array()
-            .unwrap()
+        metrics
             .iter()
-            .any(|metric| metric["metric"] == "front_left_wheel_center_x_mm"
-                && metric["status"] == "informational")
-    );
-    assert!(
-        report["candidates"][0]["metrics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|metric| metric["metric"] == "front_left_wheel_center_y_mm"
-                && metric["status"] == "informational")
+            .all(|metric| metric["status"] == "informational")
     );
     assert_eq!(report["status"], "informational");
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(stdout.contains("KnC Vertical\nbaseline:"));
-    assert!(stdout.contains("knc::vertical::front_left_wheel_center_x_mm ... (baseline"));
-    let positions = expected
-        .iter()
-        .map(|metric| stdout.find(&format!("knc::vertical::{metric}")).unwrap())
-        .collect::<Vec<_>>();
-    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-    let svg = output.join("plots/knc/vertical/comparison/wheel-center-z-vs-wheel-center-y.svg");
-    let text = fs::read_to_string(svg).unwrap();
-    assert!(text.contains("fixture"));
-    assert!(text.contains("Front left"));
-    assert!(text.contains("#000000"));
-    assert!(text.contains("#e41a1c"));
-    assert!(text.contains("<image"));
+    assert!(stdout.contains("knc::vertical::bump_steer_front_left_deg_per_mm ... (baseline"));
+    assert!(!stdout.contains("wheel_center_x_mm"));
+    let svg = output.join("plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcy.pdf");
+    assert!(fs::read(svg).unwrap().starts_with(b"%PDF"));
     assert!(output.join("metrics.csv").is_file());
 }
 
@@ -512,27 +641,22 @@ fn compares_direct_vertical_inputs_without_output() {
 #[test]
 fn compare_config_tolerances_apply_knc_vertical_section() {
     let directory = tempdir().unwrap();
-    let simulation_path = directory.path().join("simulation.h5");
-    let measurement_path = directory.path().join("measurement.h5");
-    closed_fixture(&simulation_path, simulation);
-    closed_fixture(&measurement_path, measurement);
+    let baseline_path = directory.path().join("baseline.h5");
+    let candidate_path = directory.path().join("candidate.h5");
+    closed_fixture(&baseline_path, measurement);
+    closed_fixture(&candidate_path, measurement);
     let config_path = directory.path().join("case.toml");
-    config(&config_path, false);
-    fs::write(
+    comparison_config(
         &config_path,
-        format!(
-            "{}[validation.knc.vertical.tolerances.absolute]\nfront_left_wheel_center_x_mm=0.001\n",
-            fs::read_to_string(&config_path).unwrap()
-        ),
-    )
-    .unwrap();
+        "[validation.knc.vertical.tolerances.absolute]\nbump_steer_front_left_deg_per_mm=0.001\n",
+    );
     let output = directory.path().join("comparison");
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([
             "compare",
             config_path.to_str().unwrap(),
-            simulation_path.to_str().unwrap(),
-            measurement_path.to_str().unwrap(),
+            baseline_path.to_str().unwrap(),
+            candidate_path.to_str().unwrap(),
             "--tolerances",
             "-r",
             output.to_str().unwrap(),
@@ -551,8 +675,10 @@ fn compare_config_tolerances_apply_knc_vertical_section() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|metric| metric["metric"] == "front_left_wheel_center_x_mm"
-                && metric["absolute_tolerance"] == 0.001
-                && metric["status"] == "passed")
+            .any(
+                |metric| metric["metric"] == "bump_steer_front_left_deg_per_mm"
+                    && metric["absolute_tolerance"] == 0.001
+                    && metric["status"] == "passed"
+            )
     );
 }

@@ -418,6 +418,7 @@ pub fn vertical_conventions() -> BTreeMap<String, SignalConvention> {
             "wheel_center_x",
             "wheel_center_y",
             "wheel_center_z",
+            "tire_deflection",
         ] {
             conventions.insert(
                 format!("{}_{}", corner.as_str(), suffix),
@@ -556,7 +557,7 @@ mod tests {
         assert_eq!(SVC_METRICS.len(), 29);
         assert_eq!(SVC_METRICS[0], ("front_left_mass_kg", "kg"));
         assert_eq!(SVC_METRICS[28], ("inertia_zz_kg_mm2", "kg*mm^2"));
-        assert_eq!(vertical_conventions().len(), 28);
+        assert_eq!(vertical_conventions().len(), 32);
         assert_eq!(vertical_conventions()["front_right_toe"].sign, -1);
     }
 }

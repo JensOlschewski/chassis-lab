@@ -25,6 +25,9 @@ pub(crate) struct AnalyzeArgs {
     /// Replace report files already in output directory.
     #[arg(long)]
     force: bool,
+    /// Include KnC rate-filter diagnostic plots in the report (requires --report).
+    #[arg(long, requires = "output")]
+    debug: bool,
     /// Print individual analysis warnings.
     #[arg(short, long)]
     verbose: bool,
@@ -171,18 +174,22 @@ fn write_combined_run(
         }
     };
     let footer = analysis_footer(&args.config, config, vertical_path, Some(&args.input))?;
+    let debug = debug_info(args.debug, &args.config, &[vertical_path])?;
     let vertical_report = vertical::analyze_input_with_footer(
         config,
         vertical_path,
         args.output.is_some(),
         Some(&footer),
+        debug.as_deref(),
     )?;
-    print_svc_header(svc_metrics);
+    print_header("SVC", svc_metrics);
     let mut warnings = svc_warnings;
     warnings.extend(vertical_report.warnings.iter().cloned());
     warnings.sort();
     warnings.dedup();
-    print_svc_metrics(svc_report["metrics"].as_array().unwrap());
+    print_metrics(svc_report["metrics"].as_array().unwrap());
+    print_header("KnC Vertical", vertical_report.metrics.len());
+    print_metrics(&vertical_report.metrics);
     print_warnings(&warnings, args);
     let Some(output) = &args.output else {
         return Ok(());
@@ -194,9 +201,9 @@ fn write_combined_run(
         "inputs": {"config": provenance(&args.config)?, "run": provenance(&args.input)?},
         "domains": [
             {"domain": "svc", "metric_count": svc_metrics},
-            {"domain": "knc", "test": "vertical", "metric_count": 0, "curve_count": vertical_report.curve_count}
+            {"domain": "knc", "test": "vertical", "metric_count": vertical_report.metrics.len(), "curve_count": vertical_report.curve_count}
         ],
-        "metrics": svc_report["metrics"],
+        "metrics": svc_report["metrics"].as_array().unwrap().iter().chain(&vertical_report.metrics).collect::<Vec<_>>(),
         "warnings": warnings,
         "normalization": vertical_report.normalization,
     });
@@ -216,15 +223,21 @@ fn write_combined_run(
     }
     vertical_detail["inputs"] = vertical_inputs;
     let mut files = vec![
-        ("report.json", serde_json::to_string_pretty(&bundle)? + "\n"),
-        ("metrics.csv", svc_csv),
+        (
+            "report.json",
+            (serde_json::to_string_pretty(&bundle)? + "\n").into_bytes(),
+        ),
+        (
+            "metrics.csv",
+            (svc_csv + &vertical_csv_rows(&config.name, &vertical_report.metrics)?).into_bytes(),
+        ),
         (
             "svc.json",
-            serde_json::to_string_pretty(&svc_detail)? + "\n",
+            (serde_json::to_string_pretty(&svc_detail)? + "\n").into_bytes(),
         ),
         (
             "knc-vertical.json",
-            serde_json::to_string_pretty(&vertical_detail)? + "\n",
+            (serde_json::to_string_pretty(&vertical_detail)? + "\n").into_bytes(),
         ),
     ];
     files.extend(
@@ -328,16 +341,16 @@ fn write_svc_reference(
         reports.report["inputs"]["run"] = provenance(run)?;
         reports.detail = serde_json::to_string_pretty(&reports.report)? + "\n";
     }
-    print_svc_header(reports.report["metrics"].as_array().unwrap().len());
-    print_svc_metrics(reports.report["metrics"].as_array().unwrap());
+    print_header("SVC", reports.report["metrics"].as_array().unwrap().len());
+    print_metrics(reports.report["metrics"].as_array().unwrap());
     print_warnings(&reports.warnings, args);
     if let Some(output) = &args.output {
         write_bundle(
             output,
             &[
-                ("report.json", reports.detail.clone()),
-                ("metrics.csv", reports.csv),
-                ("svc.json", reports.detail),
+                ("report.json", reports.detail.clone().into_bytes()),
+                ("metrics.csv", reports.csv.into_bytes()),
+                ("svc.json", reports.detail.into_bytes()),
             ],
             args.force,
             &[&args.config, &args.input, &reference.path],
@@ -421,8 +434,8 @@ fn write_svc_report(
     run: Option<&Path>,
     report: svc::Reports,
 ) -> Result<()> {
-    print_svc_header(report.metric_count);
-    print_svc_metrics(report.report["metrics"].as_array().unwrap());
+    print_header("SVC", report.metric_count);
+    print_metrics(report.report["metrics"].as_array().unwrap());
     print_warnings(&report.warnings, args);
     if let Some(output) = &args.output {
         let mut bundle = report.report;
@@ -433,9 +446,9 @@ fn write_svc_report(
         write_bundle(
             output,
             &[
-                ("report.json", detail.clone()),
-                ("metrics.csv", report.csv),
-                ("svc.json", detail),
+                ("report.json", detail.clone().into_bytes()),
+                ("metrics.csv", report.csv.into_bytes()),
+                ("svc.json", detail.into_bytes()),
             ],
             args.force,
             &[&args.config, &args.input, &config.simulation_json],
@@ -445,7 +458,7 @@ fn write_svc_report(
     Ok(())
 }
 
-fn print_svc_metrics(metrics: &[serde_json::Value]) {
+fn print_metrics(metrics: &[serde_json::Value]) {
     for metric in metrics {
         let value = if metric["value"].is_null() {
             if std::io::stdout().is_terminal() {
@@ -465,9 +478,9 @@ fn print_svc_metrics(metrics: &[serde_json::Value]) {
     }
 }
 
-fn print_svc_header(metric_count: usize) {
+fn print_header(title: &str, metric_count: usize) {
     println!();
-    println!("SVC");
+    println!("{title}");
     println!("running {metric_count} metrics");
 }
 
@@ -514,8 +527,16 @@ fn write_vertical(
     run: Option<&Path>,
 ) -> Result<()> {
     let footer = analysis_footer(&args.config, config, input, run)?;
-    let report =
-        vertical::analyze_input_with_footer(config, input, args.output.is_some(), Some(&footer))?;
+    let debug = debug_info(args.debug, &args.config, &[input])?;
+    let report = vertical::analyze_input_with_footer(
+        config,
+        input,
+        args.output.is_some(),
+        Some(&footer),
+        debug.as_deref(),
+    )?;
+    print_header("KnC Vertical", report.metrics.len());
+    print_metrics(&report.metrics);
     print_warnings(&report.warnings, args);
     let Some(output) = &args.output else {
         return Ok(());
@@ -525,7 +546,8 @@ fn write_vertical(
         "command": "analyze",
         "case": {"name": config.name, "loadcase": config.loadcase},
         "inputs": {"config": provenance(&args.config)?, "input": provenance(input)?},
-        "domains": [{"domain": "knc", "test": "vertical", "metric_count": 0, "curve_count": report.curve_count}],
+        "domains": [{"domain": "knc", "test": "vertical", "metric_count": report.metrics.len(), "curve_count": report.curve_count}],
+        "metrics": report.metrics,
         "warnings": report.warnings,
         "normalization": report.normalization,
     });
@@ -537,8 +559,17 @@ fn write_vertical(
     detail["inputs"] = bundle["inputs"].clone();
     let detail = serde_json::to_string_pretty(&detail)? + "\n";
     let mut files = vec![
-        ("report.json", serde_json::to_string_pretty(&bundle)? + "\n"),
-        ("knc-vertical.json", detail),
+        (
+            "report.json",
+            (serde_json::to_string_pretty(&bundle)? + "\n").into_bytes(),
+        ),
+        (
+            "metrics.csv",
+            ("run,domain,test,metric,unit,value\n".to_owned()
+                + &vertical_csv_rows(&config.name, &report.metrics)?)
+                .into_bytes(),
+        ),
+        ("knc-vertical.json", detail.into_bytes()),
     ];
     files.extend(
         report
@@ -554,6 +585,27 @@ fn write_vertical(
     write_bundle(output, &files, args.force, &inputs)?;
     println!("report: {}", output.display());
     Ok(())
+}
+
+/// Metric rows in shared analysis CSV layout, without header.
+fn vertical_csv_rows(run: &str, metrics: &[serde_json::Value]) -> Result<String> {
+    let mut csv = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(Vec::new());
+    for metric in metrics {
+        csv.write_record([
+            crate::compare::safe_cell(run),
+            "knc".into(),
+            "vertical".into(),
+            crate::compare::safe_cell(metric["metric"].as_str().unwrap_or_default()),
+            metric["unit"].as_str().unwrap_or_default().into(),
+            metric["value"]
+                .as_f64()
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+        ])?;
+    }
+    Ok(String::from_utf8(csv.into_inner()?)?)
 }
 
 fn add_vertical_inputs<'a>(inputs: &mut Vec<&'a Path>, config: &'a clab_core::config::CaseConfig) {
@@ -573,24 +625,60 @@ fn analysis_footer(
     input: &Path,
     run: Option<&Path>,
 ) -> Result<String> {
-    let mut lines = vec![
-        format!("Config: {}", absolute_path(config_path)?.display()),
-        format!("Case: {} | {}", config.name, config.loadcase),
-        format!("Input: {}", absolute_path(input)?.display()),
-    ];
+    let mut lines = Vec::new();
+    if let Some(vertical) = &config.vertical {
+        lines.push(format!("KnC setup: {}", vertical.setup.summary()));
+    }
+    lines.push(format!("Config: {}", absolute_path(config_path)?.display()));
+    lines.push(format!("Case: {} | {}", config.name, config.loadcase));
+    lines.push(format!("Input: {}", absolute_path(input)?.display()));
     if let Some(run) = run {
         lines.push(format!("Run: {}", absolute_path(run)?.display()));
     }
     lines.push(format!("Created by: {}", report_creator()));
+    lines.push(format!("clab version: {}", env!("CARGO_PKG_VERSION")));
     Ok(lines.join("\n"))
 }
 
-fn absolute_path(path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        Ok(path.into())
-    } else {
-        Ok(env::current_dir()?.join(path))
+/// JSON for the Python debug plots: config path, creator, clab version and one input path per series.
+pub(crate) fn debug_info(enabled: bool, config: &Path, inputs: &[&Path]) -> Result<Option<String>> {
+    if !enabled {
+        return Ok(None);
     }
+    let inputs = inputs
+        .iter()
+        .map(|path| absolute_path(path))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(
+        serde_json::json!({
+            "config": absolute_path(config)?,
+            "creator": report_creator(),
+            "version": env!("CARGO_PKG_VERSION"),
+            "inputs": inputs,
+        })
+        .to_string(),
+    ))
+}
+
+/// Absolute path without `.` components or `..` hops, without touching the
+/// file system (symlinks stay as written).
+pub(crate) fn absolute_path(path: &Path) -> Result<PathBuf> {
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other),
+        }
+    }
+    Ok(normalized)
 }
 
 fn report_creator() -> String {
@@ -618,7 +706,7 @@ fn provenance(path: &Path) -> Result<serde_json::Value> {
 
 pub(crate) fn write_bundle(
     output: &Path,
-    files: &[(&str, String)],
+    files: &[(&str, Vec<u8>)],
     force: bool,
     inputs: &[&Path],
 ) -> Result<()> {
@@ -685,7 +773,7 @@ pub(crate) fn write_bundle(
         let parent = path.parent().expect("relative report file has a parent");
         fs::create_dir_all(parent)?;
         let mut file = fs::File::create(&path)?;
-        file.write_all(contents.as_bytes())?;
+        file.write_all(contents)?;
         file.sync_all()?;
     }
     let staged = stage.keep();
@@ -703,4 +791,22 @@ pub(crate) fn write_bundle(
         fs::remove_dir_all(backup)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::absolute_path;
+    use std::path::Path;
+
+    #[test]
+    fn absolute_path_drops_current_directory_components() {
+        assert_eq!(
+            absolute_path(Path::new("/data/./run/../input/./a.toml")).unwrap(),
+            Path::new("/data/input/a.toml")
+        );
+        let relative = absolute_path(Path::new("./ford/./config.toml")).unwrap();
+        assert!(relative.is_absolute());
+        assert!(!relative.to_string_lossy().contains("/./"));
+        assert!(relative.ends_with("ford/config.toml"));
+    }
 }

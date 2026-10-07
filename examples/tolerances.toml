@@ -29,28 +29,51 @@ cg_x_from_front_axle_mm = 0.01
 total_mass_kg = 1.0
 wheelbase_mm = 0.5
 
-# KnC vertical tolerances
+# KnC vertical tolerances (example values)
+# Metric names are <metric>_<corner>_<unit>
 [knc.vertical.validation.tolerances.absolute]
-front_left_wheel_center_x_mm = 0.1
-front_left_wheel_center_y_mm = 0.1
-front_left_wheel_center_z_mm = 0.1
-front_right_wheel_center_x_mm = 0.1
-front_right_wheel_center_y_mm = 0.1
-front_right_wheel_center_z_mm = 0.1
-rear_left_wheel_center_x_mm = 0.1
-rear_left_wheel_center_y_mm = 0.1
-rear_left_wheel_center_z_mm = 0.1
-rear_right_wheel_center_x_mm = 0.1
-rear_right_wheel_center_y_mm = 0.1
-rear_right_wheel_center_z_mm = 0.1
+bump_steer_front_left_deg_per_mm = 0.005
+bump_steer_front_right_deg_per_mm = 0.005
+bump_steer_rear_left_deg_per_mm = 0.005
+bump_steer_rear_right_deg_per_mm = 0.005
+
+bump_camber_front_left_deg_per_mm = 0.005
+bump_camber_front_right_deg_per_mm = 0.005
+bump_camber_rear_left_deg_per_mm = 0.005
+bump_camber_rear_right_deg_per_mm = 0.005
+
+wheel_recession_angle_front_left_deg = 0.5
+wheel_recession_angle_front_right_deg = 0.5
+wheel_recession_angle_rear_left_deg = 0.5
+wheel_recession_angle_rear_right_deg = 0.5
+
+suspension_rate_front_left_n_per_mm = 1.0
+suspension_rate_front_right_n_per_mm = 1.0
+suspension_rate_rear_left_n_per_mm = 1.0
+suspension_rate_rear_right_n_per_mm = 1.0
+
+ride_rate_front_left_n_per_mm = 1.0
+ride_rate_front_right_n_per_mm = 1.0
+ride_rate_rear_left_n_per_mm = 1.0
+ride_rate_rear_right_n_per_mm = 1.0
+
+tire_rate_front_left_n_per_mm = 10.0
+tire_rate_front_right_n_per_mm = 10.0
+tire_rate_rear_left_n_per_mm = 10.0
+tire_rate_rear_right_n_per_mm = 10.0
 
 [knc.vertical.validation.tolerances.relative_percent]
-front_right_wheel_center_x_mm = 0.2
-front_right_wheel_center_y_mm = 0.2
-front_right_wheel_center_z_mm = 0.2
-rear_left_wheel_center_x_mm = 0.2
-rear_left_wheel_center_y_mm = 0.2
-rear_left_wheel_center_z_mm = 0.2
-rear_right_wheel_center_x_mm = 0.2
-rear_right_wheel_center_y_mm = 0.2
-rear_right_wheel_center_z_mm = 0.2
+suspension_rate_front_left_n_per_mm = 5.0
+suspension_rate_front_right_n_per_mm = 5.0
+suspension_rate_rear_left_n_per_mm = 5.0
+suspension_rate_rear_right_n_per_mm = 5.0
+
+ride_rate_front_left_n_per_mm = 5.0
+ride_rate_front_right_n_per_mm = 5.0
+ride_rate_rear_left_n_per_mm = 5.0
+ride_rate_rear_right_n_per_mm = 5.0
+
+tire_rate_front_left_n_per_mm = 5.0
+tire_rate_front_right_n_per_mm = 5.0
+tire_rate_rear_left_n_per_mm = 5.0
+tire_rate_rear_right_n_per_mm = 5.0

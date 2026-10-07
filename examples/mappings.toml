@@ -227,3 +227,25 @@ unit = "mm"
 entity = "rear_right"
 component = "z"
 unit = "mm"
+
+# Tire deflection (optional); enables ride rate and tire rate.
+
+[knc.vertical.signals.front_left_tire_deflection]
+entity = "front_left"
+component = "tire_deflection"
+unit = "mm"
+
+[knc.vertical.signals.front_right_tire_deflection]
+entity = "front_right"
+component = "tire_deflection"
+unit = "mm"
+
+[knc.vertical.signals.rear_left_tire_deflection]
+entity = "rear_left"
+component = "tire_deflection"
+unit = "mm"
+
+[knc.vertical.signals.rear_right_tire_deflection]
+entity = "rear_right"
+component = "tire_deflection"
+unit = "mm"

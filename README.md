@@ -101,7 +101,21 @@ clab inspect --mapping knc --test vertical --template
 Analyze one normalized input or a multi-domain run manifest. Configuration owns
 mappings, units, conventions, physics, and setup. Use `--report DIRECTORY` to
 write a report bundle: SVC analysis creates JSON and CSV; KnC vertical analysis
-creates JSON and SVG plots.
+creates JSON, CSV, and SVG plots.
+
+KnC vertical metrics use secants between `-g` and `+g` mm wheel-center travel.
+`g` is `gradient_points_mm` in `[setup.knc.metric]` (or `[setup.knc.vertical.metric]`
+for the vertical test only), default 10 mm, limited to the travel window. The
+same table selects the sweep (`direction`, `index`) the metrics use;
+`[setup.knc.window]` sets the plot range and `plot_branches`;
+`[setup.knc.meta]` describes the test setup and is printed in the report footer.
+See `examples/setup.toml`. Keys that are left out use their default, with one
+warning each (`--verbose` prints them).
+
+Per corner, analysis reports bump steer, bump camber, wheel recession angle,
+suspension rate, ride rate, and tire rate. Simulation
+input requires `[input.knc.static]` normalization. Metrics with missing signals
+or insufficient travel coverage are reported as missing, with a warning.
 
 ```bash
 mkdir -p reports/example
