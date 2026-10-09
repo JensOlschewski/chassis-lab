@@ -304,3 +304,23 @@ unit = "mm"
 entity = "tir_wheel_tire_rolling_states"
 component = "tire_deflection_rear"
 unit = "mm"
+
+[knc.vertical.signals.front_left_spin]
+entity = "hub_rotation_front_wrt_to_body"
+component = "left_y"
+unit = "rad"
+
+[knc.vertical.signals.front_right_spin]
+entity = "hub_rotation_front_wrt_to_body"
+component = "right_y"
+unit = "rad"
+
+[knc.vertical.signals.rear_left_spin]
+entity = "hub_rotation_rear_wrt_to_body"
+component = "left_y"
+unit = "rad"
+
+[knc.vertical.signals.rear_right_spin]
+entity = "hub_rotation_rear_wrt_to_body"
+component = "right_y"
+unit = "rad"

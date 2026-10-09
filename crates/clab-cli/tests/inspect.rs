@@ -69,7 +69,7 @@ fn inspects_measurement_hdf5_and_lists_channels() {
     assert!(stdout.contains("example-measurement-knc-vertical.acd"));
     assert!(stdout.contains("schema version: 2"));
     assert!(
-        stdout.contains("source kind: measurement\nsamples: 4096\nsignals: 37\ntest metadata: 5")
+        stdout.contains("source kind: measurement\nsamples: 4096\nsignals: 41\ntest metadata: 5")
     );
     assert!(stdout.contains("SIGNAL\tCOMPONENT\tUNIT\tSOURCE"));
     assert!(stdout.contains("lfwcx"));

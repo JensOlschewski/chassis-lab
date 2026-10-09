@@ -95,7 +95,7 @@ fn channel(signals: &Group, name: &str, values: &[f64], offset: f64) {
     string(&group, "description", name);
     let unit = if name.ends_with("slope") {
         ""
-    } else if name.ends_with("steer") || name.ends_with("cam") {
+    } else if name.ends_with("steer") || name.ends_with("cam") || name.ends_with("cas") {
         "deg"
     } else if name.ends_with("fz") {
         "N"
@@ -110,7 +110,7 @@ fn measurement(path: &std::path::Path) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 6_u64);
-    scalar(&file, "signal_count", 36_u64);
+    scalar(&file, "signal_count", 40_u64);
     string(&file, "source_kind", "measurement");
     string(&file, "domain", "knc");
     string(&file, "test", "vertical");
@@ -158,6 +158,12 @@ fn measurement(path: &std::path::Path) {
             &signals,
             &format!("{prefix}cam"),
             &[0.03, 0., -0.03, -0.03, 0., 0.03],
+            0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}cas"),
+            &[0.04, 0., -0.04, -0.04, 0., 0.04],
             0.,
         );
         channel(
@@ -342,7 +348,7 @@ fn assert_measurement_metrics(
         String::from_utf8_lossy(&result.stderr)
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.contains("KnC Vertical\nrunning 24 metrics"));
+    assert!(stdout.contains("KnC Vertical\nrunning 28 metrics"));
     let stderr = String::from_utf8_lossy(&result.stderr);
     if gradient.is_empty() {
         // Every other key is set, so only the gradient default is reported.
@@ -371,6 +377,8 @@ fn assert_measurement_metrics(
     close(value("bump_steer_front_left_deg_per_mm"), 0.02);
     close(value("bump_steer_front_right_deg_per_mm"), -0.02);
     close(value("bump_camber_front_left_deg_per_mm"), -0.03);
+    close(value("bump_spin_front_left_deg_per_mm"), -0.04);
+    close(value("bump_spin_rear_right_deg_per_mm"), -0.04);
     close(
         value("wheel_recession_angle_front_left_deg"),
         (-2.0_f64).atan().to_degrees(),
@@ -383,7 +391,7 @@ fn assert_measurement_metrics(
     assert!(csv.contains("fixture,knc,vertical,suspension_rate_rear_right_n_per_mm,N/mm,30"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["domains"][0]["metric_count"], 24);
+    assert_eq!(report["domains"][0]["metric_count"], 28);
 }
 
 #[test]
@@ -412,7 +420,7 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
     for (path, samples) in [(&simulation, 182), (&static_input, 106)] {
         let file = clab_core::canonical_hdf5::CanonicalFile::open(path).unwrap();
         assert_eq!(file.read_axis().unwrap().len(), samples);
-        assert_eq!(file.signals().len(), 32);
+        assert_eq!(file.signals().len(), 36);
     }
     let run = directory.path().join("simulation.toml");
     fs::write(
@@ -439,7 +447,7 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
         );
         let stdout = String::from_utf8_lossy(&result.stdout);
         assert!(
-            stdout.contains("KnC Vertical\nrunning 24 metrics"),
+            stdout.contains("KnC Vertical\nrunning 28 metrics"),
             "{stdout}"
         );
         assert!(!stdout.contains("= missing"), "{stdout}");
@@ -641,8 +649,9 @@ fn comparison_config(path: &std::path::Path, tolerance: &str) {
         .unwrap();
 }
 
-const EXPECTED_METRICS: [(&str, &str); 6] = [
+const EXPECTED_METRICS: [(&str, &str); 7] = [
     ("bump_camber", "deg_per_mm"),
+    ("bump_spin", "deg_per_mm"),
     ("bump_steer", "deg_per_mm"),
     ("ride_rate", "n_per_mm"),
     ("suspension_rate", "n_per_mm"),

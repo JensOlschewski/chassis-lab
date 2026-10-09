@@ -91,6 +91,6 @@ fn committed_vertical_measurement_example_imports() {
     let imported = CanonicalFile::open(output).unwrap();
 
     assert_eq!(imported.read_axis().unwrap().len(), 4096);
-    assert_eq!(imported.signals().len(), 37);
+    assert_eq!(imported.signals().len(), 41);
     assert_eq!(imported.test_info().len(), 5);
 }

@@ -40,6 +40,7 @@ class GradientMetric(NamedTuple):
 GRADIENT_METRICS = (
     GradientMetric("bump_steer", "deg_per_mm", "toe", "deg/mm", "gradient"),
     GradientMetric("bump_camber", "deg_per_mm", "camber", "deg/mm", "gradient"),
+    GradientMetric("bump_spin", "deg_per_mm", "spin", "deg/mm", "gradient"),
     GradientMetric(
         "wheel_recession_angle", "deg", "wheel_center_x", "deg", "angle"
     ),
@@ -74,6 +75,7 @@ PLOT_SIGNALS = {
     "wheel_load": SignalStyle("Wheel load", "newton"),
     "toe": SignalStyle("Toe", "deg"),
     "camber": SignalStyle("Camber", "deg"),
+    "spin": SignalStyle("Spin", "deg"),
     "suspension_rate": SignalStyle("Suspension rate", "newton/mm"),
     "ride_rate": SignalStyle("Ride rate", "newton/mm"),
     "tire_rate": SignalStyle("Tire rate", "newton/mm"),
@@ -188,6 +190,14 @@ PLOT_SPECS = (
         "camber",
         optional=True,
         gradient=GradientDisplay("bump camber", "deg/mm"),
+    ),
+    PlotSpec(
+        "knc_vertical_spin",
+        "Bounce - Vertical Wheel center Travel / Spin",
+        "wheel_center_z",
+        "spin",
+        optional=True,
+        gradient=GradientDisplay("bump spin", "deg/mm"),
     ),
 )
 

@@ -42,6 +42,11 @@ bump_camber_front_right_deg_per_mm = 0.005
 bump_camber_rear_left_deg_per_mm = 0.005
 bump_camber_rear_right_deg_per_mm = 0.005
 
+bump_spin_front_left_deg_per_mm = 0.005
+bump_spin_front_right_deg_per_mm = 0.005
+bump_spin_rear_left_deg_per_mm = 0.05
+bump_spin_rear_right_deg_per_mm = 0.05
+
 wheel_recession_angle_front_left_deg = 0.5
 wheel_recession_angle_front_right_deg = 0.5
 wheel_recession_angle_rear_left_deg = 0.5

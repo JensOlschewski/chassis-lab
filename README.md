@@ -123,8 +123,12 @@ same table selects the sweep (`direction`, `index`) the metrics use;
 See `examples/setup.toml`. Keys that are left out use their default, with one
 warning each (`--verbose` prints them).
 
-Per corner, analysis reports bump steer, bump camber, wheel recession angle,
-suspension rate, ride rate, and tire rate. Simulation
+Per corner, analysis reports bump steer, bump camber, bump spin, wheel recession angle,
+suspension rate, ride rate, and tire rate. Bump spin is the secant gradient of
+the hub rotation about the wheel Y axis (caster/Aufziehwinkel, deg/mm) over
+wheel-center travel, with the same sign on both sides: measurement channel
+`lfcas`/`rfcas`/`lrcas`/`rrcas`, Adams `hub_rotation_<axle>_wrt_to_body`
+`left_y`/`right_y`. Simulation
 input requires `[input.knc.static]` normalization. Metrics with missing signals
 or insufficient travel coverage are reported as missing, with a warning.
 
@@ -141,7 +145,7 @@ clab analyze examples/config.toml examples/run-simulation.toml
 clab analyze examples/config.toml examples/run-measurement.toml
 ```
 
-Both example runs calculate 24 KnC vertical metrics. Analyze the measurement
+Both example runs calculate 28 KnC vertical metrics. Analyze the measurement
 HDF5 directly if only the vertical domain is needed. For simulation, use the
 run manifest: it supplies the static baseline required to normalize travel.
 The SVC measurement JSON reference intentionally contains only a subset of
@@ -150,7 +154,7 @@ SVC metrics, so the measurement run also reports SVC missing-value warnings.
 The KnC measurement contains all 4096 samples of the Ford varb bounce test,
 trimmed to its relevant channels. The simulation fixtures contain independent
 Ford varb ADAMS results: all 182 vertical samples and all 106 static samples,
-trimmed to 32 mapped channels with original values and units preserved. They
+trimmed to 36 mapped channels with original values and units preserved. They
 are not smoothed copies of the measurement. `examples/mappings.toml` uses the
 Ford simulation's original entity/component names. Its toe/camber request
 omits unit metadata, so eight warnings report the mapped degree-unit fallback.

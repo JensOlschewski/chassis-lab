@@ -31,6 +31,7 @@ def _metric_curves(**overrides: list[float]) -> str:
         "wheel_center_y": [0.2 * value for value in z],
         "toe": [0.01 * value for value in z],
         "camber": [-0.02 * value for value in z],
+        "spin": [-0.03 * value for value in z],
         "wheel_load": [3000.0 + 25.0 * value for value in z],
         "tire_deflection": [0.1 * value for value in z],
     }
@@ -121,13 +122,16 @@ def test_metrics_use_secants_at_symmetric_travel_points() -> None:
         )
     )
     values = {item["metric"]: item for item in response["metrics"]}
-    assert len(values) == 24
+    assert len(values) == 28
     assert values["bump_steer_front_left_deg_per_mm"]["value"] == pytest.approx(
         0.01
     )
     assert values["bump_camber_front_left_deg_per_mm"][
         "value"
     ] == pytest.approx(-0.02)
+    assert values["bump_spin_rear_left_deg_per_mm"]["value"] == pytest.approx(
+        -0.03
+    )
     assert values["suspension_rate_rear_right_n_per_mm"][
         "value"
     ] == pytest.approx(25.0)
@@ -293,6 +297,7 @@ def test_plot_adds_optional_direct_vertical_curves_and_suspension_rate() -> (
             ("wheel_load", "newton"),
             ("toe", "deg"),
             ("camber", "deg"),
+            ("spin", "deg"),
             ("tire_deflection", "mm"),
         )
     ]
@@ -300,6 +305,7 @@ def test_plot_adds_optional_direct_vertical_curves_and_suspension_rate() -> (
     assert "plots/knc/vertical/knc_vertical_wheel_load.pdf" in reports
     assert "plots/knc/vertical/knc_vertical_suspension_rate.pdf" in reports
     assert "plots/knc/vertical/knc_vertical_toe.pdf" in reports
+    assert "plots/knc/vertical/knc_vertical_spin.pdf" in reports
     assert "plots/knc/vertical/knc_vertical_ride_rate.pdf" in reports
     assert "plots/knc/vertical/knc_vertical_tire_rate.pdf" in reports
 
@@ -368,6 +374,7 @@ def test_gradient_overlay_and_metric_table_only_on_selected_plots() -> None:
         "knc_vertical_wheel_load": "Left front suspension rate in N/mm:",
         "knc_vertical_camber": "Right front bump camber in deg/mm:",
         "knc_vertical_toe": "Left rear bump steer in deg/mm:",
+        "knc_vertical_spin": "Left rear bump spin in deg/mm:",
         "knc_vertical_wcz_vs_wcx": "Right rear wheel recession angle in deg:",
     }
     for path, report in reports.items():
