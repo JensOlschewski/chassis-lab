@@ -68,7 +68,9 @@ fn inspects_measurement_hdf5_and_lists_channels() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("example-measurement-knc-vertical.acd"));
     assert!(stdout.contains("schema version: 2"));
-    assert!(stdout.contains("source kind: measurement\nsamples: 6\nsignals: 17\ntest metadata: 5"));
+    assert!(
+        stdout.contains("source kind: measurement\nsamples: 4096\nsignals: 37\ntest metadata: 5")
+    );
     assert!(stdout.contains("SIGNAL\tCOMPONENT\tUNIT\tSOURCE"));
     assert!(stdout.contains("lfwcx"));
 

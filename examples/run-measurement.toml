@@ -2,7 +2,7 @@
 #
 
 # Convert committed raw results first:
-# for svc measurement define json manually
+# SVC measurement values are provided in the committed JSON reference.
 # clab convert input/example-measurement-knc-vertical.acd -d knc -t vertical -o input/generated-measurement-knc-vertical.h5
 
 [meta]

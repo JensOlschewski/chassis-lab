@@ -143,109 +143,164 @@ entity = "example.toe_camber"
 component = "rear_right_camber"
 unit = "deg"
 
-# KnC signal mappings.
+# KnC signal mappings from the real Ford varb simulation.
 
 [knc.signals.front_left_travel]
-entity = "front_left"
-component = "travel"
+entity = "wheel_travel"
+component = "vertical_left_front"
 unit = "mm"
 
 [knc.signals.front_right_travel]
-entity = "front_right"
-component = "travel"
+entity = "wheel_travel"
+component = "vertical_right_front"
 unit = "mm"
 
 [knc.signals.rear_left_travel]
-entity = "rear_left"
-component = "travel"
+entity = "wheel_travel"
+component = "vertical_left_rear"
 unit = "mm"
 
 [knc.signals.rear_right_travel]
-entity = "rear_right"
-component = "travel"
+entity = "wheel_travel"
+component = "vertical_right_rear"
 unit = "mm"
 
-# KnC vertical signal mappings.
-# This extends or explicitly overrides the KNC mappings defined above.
-
-[knc.signals.front_left_wheel_center_x]
-entity = "front_left"
-component = "x"
+[knc.vertical.signals.front_left_wheel_center_x]
+entity = "wheel_center_rise_front_wrt_body"
+component = "left_x"
 unit = "mm"
 
-[knc.signals.front_left_wheel_center_y]
-entity = "front_left"
-component = "y"
+[knc.vertical.signals.front_left_wheel_center_y]
+entity = "wheel_center_rise_front_wrt_body"
+component = "left_y"
 unit = "mm"
 
-[knc.signals.front_left_wheel_center_z]
-entity = "front_left"
-component = "z"
+[knc.vertical.signals.front_left_wheel_center_z]
+entity = "wheel_center_rise_front_wrt_body"
+component = "left_z"
 unit = "mm"
 
-[knc.signals.front_right_wheel_center_x]
-entity = "front_right"
-component = "x"
+[knc.vertical.signals.front_right_wheel_center_x]
+entity = "wheel_center_rise_front_wrt_body"
+component = "right_x"
 unit = "mm"
 
-[knc.signals.front_right_wheel_center_y]
-entity = "front_right"
-component = "y"
+[knc.vertical.signals.front_right_wheel_center_y]
+entity = "wheel_center_rise_front_wrt_body"
+component = "right_y"
 unit = "mm"
 
-[knc.signals.front_right_wheel_center_z]
-entity = "front_right"
-component = "z"
+[knc.vertical.signals.front_right_wheel_center_z]
+entity = "wheel_center_rise_front_wrt_body"
+component = "right_z"
 unit = "mm"
 
-[knc.signals.rear_left_wheel_center_x]
-entity = "rear_left"
-component = "x"
+[knc.vertical.signals.rear_left_wheel_center_x]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "left_x"
 unit = "mm"
 
-[knc.signals.rear_left_wheel_center_y]
-entity = "rear_left"
-component = "y"
+[knc.vertical.signals.rear_left_wheel_center_y]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "left_y"
 unit = "mm"
 
-[knc.signals.rear_left_wheel_center_z]
-entity = "rear_left"
-component = "z"
+[knc.vertical.signals.rear_left_wheel_center_z]
+entity = "wheel_center_rise_rear_wrt_body"
+component = "left_z"
 unit = "mm"
 
 [knc.vertical.signals.rear_right_wheel_center_x]
-entity = "rear_right"
-component = "x"
+entity = "wheel_center_rise_rear_wrt_body"
+component = "right_x"
 unit = "mm"
 
 [knc.vertical.signals.rear_right_wheel_center_y]
-entity = "rear_right"
-component = "y"
+entity = "wheel_center_rise_rear_wrt_body"
+component = "right_y"
 unit = "mm"
 
 [knc.vertical.signals.rear_right_wheel_center_z]
-entity = "rear_right"
-component = "z"
+entity = "wheel_center_rise_rear_wrt_body"
+component = "right_z"
 unit = "mm"
 
-# Tire deflection (optional); enables ride rate and tire rate.
+[knc.vertical.signals.front_left_wheel_load]
+entity = "til_wheel_tire_forces"
+component = "normal_front"
+unit = "newton"
+
+[knc.vertical.signals.front_right_wheel_load]
+entity = "tir_wheel_tire_forces"
+component = "normal_front"
+unit = "newton"
+
+[knc.vertical.signals.rear_left_wheel_load]
+entity = "til_wheel_tire_forces"
+component = "normal_rear"
+unit = "newton"
+
+[knc.vertical.signals.rear_right_wheel_load]
+entity = "tir_wheel_tire_forces"
+component = "normal_rear"
+unit = "newton"
+
+[knc.vertical.signals.front_left_toe]
+entity = "toe_camber_body"
+component = "left_toe_angle_front"
+unit = "deg"
+
+[knc.vertical.signals.front_right_toe]
+entity = "toe_camber_body"
+component = "right_toe_angle_front"
+unit = "deg"
+
+[knc.vertical.signals.rear_left_toe]
+entity = "toe_camber_body"
+component = "left_toe_angle_rear"
+unit = "deg"
+
+[knc.vertical.signals.rear_right_toe]
+entity = "toe_camber_body"
+component = "right_toe_angle_rear"
+unit = "deg"
+
+[knc.vertical.signals.front_left_camber]
+entity = "toe_camber_body"
+component = "left_camber_angle_front"
+unit = "deg"
+
+[knc.vertical.signals.front_right_camber]
+entity = "toe_camber_body"
+component = "right_camber_angle_front"
+unit = "deg"
+
+[knc.vertical.signals.rear_left_camber]
+entity = "toe_camber_body"
+component = "left_camber_angle_rear"
+unit = "deg"
+
+[knc.vertical.signals.rear_right_camber]
+entity = "toe_camber_body"
+component = "right_camber_angle_rear"
+unit = "deg"
 
 [knc.vertical.signals.front_left_tire_deflection]
-entity = "front_left"
-component = "tire_deflection"
+entity = "til_wheel_tire_rolling_states"
+component = "tire_deflection_front"
 unit = "mm"
 
 [knc.vertical.signals.front_right_tire_deflection]
-entity = "front_right"
-component = "tire_deflection"
+entity = "tir_wheel_tire_rolling_states"
+component = "tire_deflection_front"
 unit = "mm"
 
 [knc.vertical.signals.rear_left_tire_deflection]
-entity = "rear_left"
-component = "tire_deflection"
+entity = "til_wheel_tire_rolling_states"
+component = "tire_deflection_rear"
 unit = "mm"
 
 [knc.vertical.signals.rear_right_tire_deflection]
-entity = "rear_right"
-component = "tire_deflection"
+entity = "tir_wheel_tire_rolling_states"
+component = "tire_deflection_rear"
 unit = "mm"

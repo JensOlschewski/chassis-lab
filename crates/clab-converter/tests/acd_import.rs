@@ -90,7 +90,7 @@ fn committed_vertical_measurement_example_imports() {
     measurement_hdf5::import_acd(&source, &output, false, &vertical()).unwrap();
     let imported = CanonicalFile::open(output).unwrap();
 
-    assert_eq!(imported.read_axis().unwrap().len(), 6);
-    assert_eq!(imported.signals().len(), 17);
+    assert_eq!(imported.read_axis().unwrap().len(), 4096);
+    assert_eq!(imported.signals().len(), 37);
     assert_eq!(imported.test_info().len(), 5);
 }

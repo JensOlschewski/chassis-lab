@@ -558,7 +558,17 @@ fn load_function_role_files(
     path: &Path,
 ) -> Result<toml::map::Map<String, Value>, Box<dyn std::error::Error>> {
     let mut root = root.clone();
-    for section in ["input", "setup", "signals", "mappings", "validation"] {
+    if root.contains_key("compare") && root.contains_key("validation") {
+        return Err(ConfigError("[compare] cannot be combined with [validation]".into()).into());
+    }
+    for section in [
+        "input",
+        "setup",
+        "signals",
+        "mappings",
+        "validation",
+        "compare",
+    ] {
         let Some(raw) = root.get(section) else {
             continue;
         };
@@ -599,6 +609,9 @@ fn load_function_role_files(
             file.parent().unwrap_or_else(|| Path::new(".")),
         )?;
         root.insert(section.into(), external);
+    }
+    if let Some(compare) = root.remove("compare") {
+        root.insert("validation".into(), compare);
     }
     Ok(root)
 }
@@ -2479,9 +2492,13 @@ mod tests {
         )
         .unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p, "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input]\nfile='input.toml'\n[setup]\nfile='setup.toml'\n[signals]\nfile='signals.toml'\n[validation]\nfile='validation.toml'\n").unwrap();
+        fs::write(&p, "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input]\nfile='input.toml'\n[setup]\nfile='setup.toml'\n[signals]\nfile='signals.toml'\n[compare]\nfile='validation.toml'\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.signals["total"].unit, "kg");
+        assert_eq!(
+            config.validation.as_ref().unwrap().tolerances.absolute["total"],
+            1.0
+        );
         let vertical = config.vertical.unwrap();
         assert_eq!(vertical.signals["front_left_travel"].component, "travel");
         assert_eq!(vertical.signals["front_left_wheel_center_x"].component, "x");
@@ -2492,6 +2509,23 @@ mod tests {
         assert_eq!(
             vertical.tolerances.absolute["rear_left_wheel_center_x_mm"],
             0.2
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_compare_and_validation_roles() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[compare]\nfile='tolerances.toml'\n[validation]\nfile='other.toml'\n",
+        )
+        .unwrap();
+        assert!(
+            load_config_with_input(&p, d.path().join("input.h5"), true)
+                .unwrap_err()
+                .to_string()
+                .contains("[compare] cannot be combined with [validation]")
         );
     }
 
