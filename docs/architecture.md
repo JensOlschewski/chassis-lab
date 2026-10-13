@@ -93,7 +93,7 @@ capabilities:
 
 Vertical migration: `[vertical.inputs].measurement_hdf5` is required. Convert
 legacy ACD inputs with `clab convert`; validation never reads raw ACD.
-| `clab convert-res INPUT` | `clab convert INPUT` | Writes normalized HDF5 |
+| `clab convert-res INPUT` | `clab convert INPUT -d DOMAIN [-t TEST]` | Writes normalized HDF5 with `domain` and `test` |
 
 `clab inspect FILE` accepts normalized simulation or measurement HDF5 files
 (`.h5` or `.hdf5`) only. Convert raw `.res` or `.acd` inputs first with
@@ -129,7 +129,7 @@ Supported canonical schema version: `1`.
 
 ```text
 /
-├── attrs: schema_version, source_kind, sample_count, signal_count, source_file
+├── attrs: schema_version (2), source_kind, domain, test, sample_count, signal_count, source_file
 ├── axis/attrs: kind, unit
 ├── axis/values            uint64 [sample_index] or float64 [time]
 ├── signals/<safe-name>/values

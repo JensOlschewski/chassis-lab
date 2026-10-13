@@ -6,9 +6,17 @@ use anyhow::{Context, Result};
 use hdf5::types::VarLenUnicode;
 use hdf5::{File, Location};
 
+use clab_core::canonical_hdf5::SCHEMA_VERSION;
+
+use crate::identity::Identity;
 use crate::model::AdamsResult;
 
-pub fn write_file(path: &Path, source: &Path, result: &AdamsResult) -> Result<()> {
+pub fn write_file(
+    path: &Path,
+    source: &Path,
+    result: &AdamsResult,
+    identity: &Identity,
+) -> Result<()> {
     let file = File::create(path)
         .with_context(|| format!("failed to create HDF5 file '{}'", path.display()))?;
 
@@ -20,8 +28,12 @@ pub fn write_file(path: &Path, source: &Path, result: &AdamsResult) -> Result<()
         .write_scalar(&(result.signal_count() as u64))?;
     file.new_attr::<u32>()
         .create("schema_version")?
-        .write_scalar(&1u32)?;
+        .write_scalar(&SCHEMA_VERSION)?;
     write_string_attribute(&file, "source_kind", "simulation")?;
+    write_string_attribute(&file, "domain", &identity.domain)?;
+    if let Some(test) = &identity.test {
+        write_string_attribute(&file, "test", test)?;
+    }
     write_string_attribute(&file, "source_file", &source.display().to_string())?;
     let axis = file.create_group("axis")?;
     write_string_attribute(&axis, "kind", "sample_index")?;

@@ -104,6 +104,7 @@ jobs:
             examples/tolerances.toml \
             examples/input/example-simulation-svc.res \
             examples/input/example-simulation-knc-vertical.res \
+            examples/input/example-simulation-knc-static.res \
             examples/input/example-measurement-knc-vertical.acd
           test -s "$smoke_input"
           docker run --rm --pull=missing -i \
@@ -118,12 +119,14 @@ jobs:
               mkdir /tmp/smoke/input
               cp /tmp/input/examples/input/example-simulation-svc.res /tmp/smoke/
               cp /tmp/input/examples/input/example-simulation-knc-vertical.res /tmp/smoke/
+              cp /tmp/input/examples/input/example-simulation-knc-static.res /tmp/smoke/
               cp /tmp/input/examples/input/example-measurement-knc-vertical.acd /tmp/smoke/
               cd /tmp/smoke
               env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
-              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -o input/generated-simulation-svc.h5
-              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-vertical.res -o input/generated-simulation-knc-vertical.h5
-              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-knc-vertical.acd -o input/example-measurement-knc-vertical.h5
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -d svc -o input/generated-simulation-svc.h5
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-vertical.res -d knc -t vertical -o input/generated-simulation-knc-vertical.h5
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-static.res -d knc -t vertical -o input/generated-simulation-knc-static.h5
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-knc-vertical.acd -d knc -t vertical -o input/example-measurement-knc-vertical.h5
               env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze config.toml run-simulation.toml -r reports
               test -s reports/report.json
               test -s reports/metrics.csv

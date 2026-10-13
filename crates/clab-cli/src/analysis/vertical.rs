@@ -467,7 +467,7 @@ fn optional_simulation_curves(
     curves: &mut Vec<Curve>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
-    for suffix in ["wheel_load", "toe", "camber", "tire_deflection"] {
+    for suffix in ["wheel_load", "toe", "camber", "spin", "tire_deflection"] {
         let name = format!("{corner}_{suffix}");
         let Some(reference) = vertical.signals.get(&name) else {
             continue;
@@ -531,6 +531,7 @@ fn optional_measurement_curves(
         ("wheel_load", format!("{prefix}fz"), "N", false),
         ("toe", format!("{prefix}steer"), "deg", false),
         ("camber", format!("{prefix}cam"), "deg", false),
+        ("spin", format!("{prefix}cas"), "deg", false),
         ("wheel_pad_z", format!("{prefix}pz"), "mm", true),
         ("tire_deflection", format!("{prefix}tdef"), "mm", true),
     ] {

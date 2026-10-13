@@ -24,10 +24,12 @@ fn scalar<T: hdf5::H5Type>(location: &Location, name: &str, value: T) {
 }
 fn simulation(path: &std::path::Path) {
     let file = File::create(path).unwrap();
-    scalar(&file, "schema_version", 1_u32);
+    scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 5_u64);
     scalar(&file, "signal_count", 16_u64);
     string(&file, "source_kind", "simulation");
+    string(&file, "domain", "knc");
+    string(&file, "test", "vertical");
     string(&file, "source_file", "fixture.res");
     let axis = file.create_group("axis").unwrap();
     string(&axis, "kind", "sample_index");
@@ -93,7 +95,7 @@ fn channel(signals: &Group, name: &str, values: &[f64], offset: f64) {
     string(&group, "description", name);
     let unit = if name.ends_with("slope") {
         ""
-    } else if name.ends_with("steer") || name.ends_with("cam") {
+    } else if name.ends_with("steer") || name.ends_with("cam") || name.ends_with("cas") {
         "deg"
     } else if name.ends_with("fz") {
         "N"
@@ -106,10 +108,12 @@ fn channel(signals: &Group, name: &str, values: &[f64], offset: f64) {
 }
 fn measurement(path: &std::path::Path) {
     let file = File::create(path).unwrap();
-    scalar(&file, "schema_version", 1_u32);
+    scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 6_u64);
-    scalar(&file, "signal_count", 36_u64);
+    scalar(&file, "signal_count", 40_u64);
     string(&file, "source_kind", "measurement");
+    string(&file, "domain", "knc");
+    string(&file, "test", "vertical");
     string(&file, "source_file", "fixture.acd");
     let axis = file.create_group("axis").unwrap();
     string(&axis, "kind", "time");
@@ -154,6 +158,12 @@ fn measurement(path: &std::path::Path) {
             &signals,
             &format!("{prefix}cam"),
             &[0.03, 0., -0.03, -0.03, 0., 0.03],
+            0.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}cas"),
+            &[0.04, 0., -0.04, -0.04, 0., 0.04],
             0.,
         );
         channel(
@@ -338,7 +348,7 @@ fn assert_measurement_metrics(
         String::from_utf8_lossy(&result.stderr)
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.contains("KnC Vertical\nrunning 24 metrics"));
+    assert!(stdout.contains("KnC Vertical\nrunning 28 metrics"));
     let stderr = String::from_utf8_lossy(&result.stderr);
     if gradient.is_empty() {
         // Every other key is set, so only the gradient default is reported.
@@ -367,6 +377,8 @@ fn assert_measurement_metrics(
     close(value("bump_steer_front_left_deg_per_mm"), 0.02);
     close(value("bump_steer_front_right_deg_per_mm"), -0.02);
     close(value("bump_camber_front_left_deg_per_mm"), -0.03);
+    close(value("bump_spin_front_left_deg_per_mm"), -0.04);
+    close(value("bump_spin_rear_right_deg_per_mm"), -0.04);
     close(
         value("wheel_recession_angle_front_left_deg"),
         (-2.0_f64).atan().to_degrees(),
@@ -379,7 +391,101 @@ fn assert_measurement_metrics(
     assert!(csv.contains("fixture,knc,vertical,suspension_rate_rear_right_n_per_mm,N/mm,30"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["domains"][0]["metric_count"], 24);
+    assert_eq!(report["domains"][0]["metric_count"], 28);
+}
+
+#[test]
+fn committed_examples_convert_and_produce_vertical_metrics() {
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let directory = tempdir().unwrap();
+    let convert = |source: &str, output: &str| {
+        let destination = directory.path().join(output);
+        let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
+        command
+            .arg("convert")
+            .arg(examples.join("input").join(source))
+            .args(["-d", "knc", "-t", "vertical", "-o"])
+            .arg(&destination);
+        let result = command.output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        destination
+    };
+    let measurement = convert("example-measurement-knc-vertical.acd", "measurement.h5");
+    let simulation = convert("example-simulation-knc-vertical.res", "simulation.h5");
+    let static_input = convert("example-simulation-knc-static.res", "static.h5");
+    for (path, samples) in [(&simulation, 182), (&static_input, 106)] {
+        let file = clab_core::canonical_hdf5::CanonicalFile::open(path).unwrap();
+        assert_eq!(file.read_axis().unwrap().len(), samples);
+        assert_eq!(file.signals().len(), 36);
+    }
+    let run = directory.path().join("simulation.toml");
+    fs::write(
+        &run,
+        format!(
+            "[input.knc.static]\nfile = {:?}\n[input.knc.vertical]\nfile = {:?}\n",
+            static_input, simulation
+        ),
+    )
+    .unwrap();
+
+    for input in [&measurement, &run] {
+        let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+            .arg("analyze")
+            .arg(examples.join("config.toml"))
+            .arg(input)
+            .arg("--verbose")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        assert!(
+            stdout.contains("KnC Vertical\nrunning 28 metrics"),
+            "{stdout}"
+        );
+        assert!(!stdout.contains("= missing"), "{stdout}");
+        let rate = stdout
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("suspension_rate_front_left_n_per_mm = ")
+            })
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        let expected = if input == &measurement {
+            29.036215392156805
+        } else {
+            29.140347624770182
+        };
+        assert!((rate - expected).abs() < 1e-6, "{stdout}");
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        // The real ADAMS toe/camber request omits units: use its declared degree mapping.
+        let warnings: Vec<_> = stderr
+            .lines()
+            .filter(|line| line.starts_with("warning:"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            if input == &measurement { 0 } else { 8 },
+            "{stderr}"
+        );
+        assert!(
+            warnings.iter().all(|line| line.contains("toe_camber_body/")
+                && line.contains("using mapped unit 'deg'")),
+            "{stderr}"
+        );
+    }
 }
 
 #[test]
@@ -543,8 +649,9 @@ fn comparison_config(path: &std::path::Path, tolerance: &str) {
         .unwrap();
 }
 
-const EXPECTED_METRICS: [(&str, &str); 6] = [
+const EXPECTED_METRICS: [(&str, &str); 7] = [
     ("bump_camber", "deg_per_mm"),
+    ("bump_spin", "deg_per_mm"),
     ("bump_steer", "deg_per_mm"),
     ("ride_rate", "n_per_mm"),
     ("suspension_rate", "n_per_mm"),

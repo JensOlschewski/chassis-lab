@@ -26,7 +26,7 @@ const MINIMAL_ACD: &str = "FileInfo: ASCII3\nTime\tWheel\tstring\tDescription\n0
 
 fn convert(input: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
-    command.arg("convert").arg(input);
+    command.arg("convert").arg(input).args(["-d", "svc"]);
     command
 }
 
@@ -68,7 +68,7 @@ fn converts_svc_res_to_neutral_default_hdf5() {
             .unwrap()
             .read_scalar::<u32>()
             .unwrap(),
-        1
+        2
     );
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
@@ -111,6 +111,28 @@ fn existing_output_directory_uses_derived_filename() {
 
     assert!(result.status.success());
     assert!(output_dir.join("shared.h5").is_file());
+}
+
+#[test]
+fn trailing_slash_output_creates_missing_directory() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("shared.res");
+    fs::write(&input, MINIMAL_RES).unwrap();
+    let output = format!("{}/nested/converted/", directory.path().display());
+
+    let result = convert(&input).arg("-o").arg(&output).output().unwrap();
+
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        directory
+            .path()
+            .join("nested/converted/shared.h5")
+            .is_file()
+    );
 }
 
 #[test]
@@ -260,4 +282,73 @@ fn rejects_non_utf8_extension() {
             .unwrap()
             .contains("extension is not valid UTF-8")
     );
+}
+
+#[test]
+fn requires_domain_and_validates_test() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("shared.res");
+    fs::write(&input, MINIMAL_RES).unwrap();
+    let run = |args: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+            .arg("convert")
+            .arg(&input)
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            result.status.code(),
+            String::from_utf8_lossy(&result.stderr).into_owned(),
+        )
+    };
+
+    let (code, stderr) = run(&[]);
+    assert_eq!(code, Some(2));
+    assert!(stderr.contains("--domain"), "{stderr}");
+    for (args, message) in [
+        (&["-d", "driving"][..], "unknown domain 'driving'"),
+        (&["-d", "knc"][..], "--test <TEST>"),
+        (
+            &["-d", "knc", "-t", "lateral"][..],
+            "unknown test 'lateral'",
+        ),
+        (&["-d", "svc", "-t", "vertical"][..], "has no tests"),
+    ] {
+        let (code, stderr) = run(args);
+        assert_eq!(code, Some(2), "{args:?}");
+        assert!(stderr.contains(message), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
+fn stores_domain_and_test_and_warns_when_data_disagrees() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("shared.res");
+    fs::write(&input, MINIMAL_RES).unwrap();
+    let output = directory.path().join("out.h5");
+
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .arg("convert")
+        .arg(&input)
+        .args(["-d", "knc", "-t", "vertical", "-o"])
+        .arg(&output)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let file = hdf5::File::open(&output).unwrap();
+    let read = |name: &str| {
+        file.attr(name)
+            .unwrap()
+            .read_scalar::<hdf5::types::VarLenUnicode>()
+            .unwrap()
+            .as_str()
+            .to_owned()
+    };
+    assert_eq!(
+        (read("domain"), read("test")),
+        ("knc".into(), "vertical".into())
+    );
+    // MINIMAL_RES has no analysis_type variable, so nothing to disagree with.
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("warning"));
 }

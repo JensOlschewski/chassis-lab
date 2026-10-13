@@ -11,9 +11,9 @@ file = "setup.toml"
 
 [signals]
 # signal mappings
-# test-specific mappings extend or override them.
+# test-specific mappings can extend or override them.
 file = "mappings.toml"
 
-[validation]
-# validation definitions; `clab compare --tolerances` enables acceptance checks.
+[compare]
+# Tolerances used for acceptance checks by `clab compare --tolerances`.
 file = "tolerances.toml"

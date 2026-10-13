@@ -111,6 +111,9 @@ fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<
     let file = CanonicalFile::open(path)
         .with_context(|| format!("failed to inspect HDF5 '{}'", path.display()))?;
     let summary = file.summary();
+    if let Some(warning) = summary.legacy_warning() {
+        eprintln!("warning: {warning}");
+    }
     println!("source file: {}", summary.source_file);
     println!("schema version: {}", summary.schema_version);
     println!("source kind: {}", summary.source_kind.as_str());

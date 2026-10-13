@@ -60,7 +60,7 @@ comparison.
 | `config.toml`     | Main configuration file                                             |
 | `setup.toml`      | Test setup and KnC travel-window parameters.                        |
 | `mappings.toml`   | Maps source signals to canonical ChassisLab signals and units.      |
-| `tolerances.toml` | Optional absolute and relative comparison tolerances.               |
+| `tolerances.toml` | Optional absolute and relative comparison tolerances (`[compare]`). |
 | `run.toml`        | Run-specific input paths and provenance for `analyze` or `compare`. |
 
 ## Commands `>_`
@@ -68,13 +68,24 @@ comparison.
 ### clab convert
 
 Convert raw simulation or measurement data to HDF5. Default output is
-`INPUT.h5`. Use `--output` for explicit file definition or write in an existing
-directory. Use `--force` to replace an existing output.
+`INPUT.h5`. Use `--output` for an explicit file, or a directory (a trailing `/`
+creates it) that receives the derived filename. Use `--force` to replace an
+existing output.
+
+`--domain` (`-d`) is required and names the data: `svc` or `knc`. `--test`
+(`-t`) is required for `knc` (`vertical`) and not allowed for `svc`. Both are
+stored in the HDF5 file, and `analyze`, `compare` and run manifests use them to
+pick the analysis. Where the data identifies itself (`analysis_type` in `.res`,
+`testtype` in `.acd`), a contradicting flag gives a warning.
 
 ```bash
 clab convert examples/input/example-measurement-knc-vertical.acd \
-    --output input/converted-measurement-knc-vertical.h5
+    -d knc -t vertical --output input/converted-measurement-knc-vertical.h5
+clab convert examples/input/example-simulation-svc.res -d svc
 ```
+
+HDF5 files converted without `--domain` and `--test` still load. They are
+identified from the config and give a warning; convert them again to fix it.
 
 ### clab inspect
 
@@ -101,7 +112,7 @@ clab inspect --mapping knc --test vertical --template
 Analyze one normalized input or a multi-domain run manifest. Configuration owns
 mappings, units, conventions, physics, and setup. Use `--report DIRECTORY` to
 write a report bundle: SVC analysis creates JSON and CSV; KnC vertical analysis
-creates JSON, CSV, and SVG plots.
+creates JSON, CSV, and PDF plots.
 
 KnC vertical metrics use secants between `-g` and `+g` mm wheel-center travel.
 `g` is `gradient_points_mm` in `[setup.knc.metric]` (or `[setup.knc.vertical.metric]`
@@ -112,15 +123,48 @@ same table selects the sweep (`direction`, `index`) the metrics use;
 See `examples/setup.toml`. Keys that are left out use their default, with one
 warning each (`--verbose` prints them).
 
-Per corner, analysis reports bump steer, bump camber, wheel recession angle,
-suspension rate, ride rate, and tire rate. Simulation
+Per corner, analysis reports bump steer, bump camber, bump spin, wheel recession angle,
+suspension rate, ride rate, and tire rate. Bump spin is the secant gradient of
+the hub rotation about the wheel Y axis (caster/Aufziehwinkel, deg/mm) over
+wheel-center travel, with the same sign on both sides: measurement channel
+`lfcas`/`rfcas`/`lrcas`/`rrcas`, Adams `hub_rotation_<axle>_wrt_to_body`
+`left_y`/`right_y`. Simulation
 input requires `[input.knc.static]` normalization. Metrics with missing signals
 or insufficient travel coverage are reported as missing, with a warning.
 
+The example HDF5 files are generated locally from the committed raw fixtures.
+Run these commands from the repository root (add `--force` to `convert` when
+regenerating existing outputs):
+
 ```bash
-mkdir -p reports/example
-clab analyze examples/config.toml examples/run-simulation.toml --report reports/example
+clab convert examples/input/example-simulation-svc.res -d svc -o examples/input/generated-simulation-svc.h5
+clab convert examples/input/example-simulation-knc-vertical.res -d knc -t vertical -o examples/input/generated-simulation-knc-vertical.h5
+clab convert examples/input/example-simulation-knc-static.res -d knc -t vertical -o examples/input/generated-simulation-knc-static.h5
+clab convert examples/input/example-measurement-knc-vertical.acd -d knc -t vertical -o examples/input/generated-measurement-knc-vertical.h5
+clab analyze examples/config.toml examples/run-simulation.toml
+clab analyze examples/config.toml examples/run-measurement.toml
 ```
+
+Both example runs calculate 28 KnC vertical metrics. Analyze the measurement
+HDF5 directly if only the vertical domain is needed. For simulation, use the
+run manifest: it supplies the static baseline required to normalize travel.
+The SVC measurement JSON reference intentionally contains only a subset of
+SVC metrics, so the measurement run also reports SVC missing-value warnings.
+
+The KnC measurement contains all 4096 samples of the Ford varb bounce test,
+trimmed to its relevant channels. The simulation fixtures contain independent
+Ford varb ADAMS results: all 182 vertical samples and all 106 static samples,
+trimmed to 36 mapped channels with original values and units preserved. They
+are not smoothed copies of the measurement. `examples/mappings.toml` uses the
+Ford simulation's original entity/component names. Its toe/camber request
+omits unit metadata, so eight warnings report the mapped degree-unit fallback.
+The simulation selects rise sweep 2 to skip its initial settling motion.
+
+Real measurement and simulation can disagree and fail the example tolerances.
+`--debug` adds measurement rate-filter diagnostics; simulation skips these
+measurement-only diagnostics while still producing the normal report plots.
+Use separate report directories when inspecting both runs; `--force` replaces
+an existing report bundle.
 
 ### clab compare
 

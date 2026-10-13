@@ -313,16 +313,40 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             .map(|case| (case, true, false)),
         Some("h5" | "hdf5") => {
             let file = CanonicalFile::open(path)?;
-            let svc_case = clab_core::config::load_config_with_input(config, path, false).ok();
-            match svc_case {
-                Some(svc_case)
-                    if file.summary().source_kind == SourceKind::Simulation
-                        && svc::supports_hdf5(&svc_case, &file) =>
-                {
-                    Ok((svc_case, true, false))
+            match (
+                file.summary().domain.as_deref(),
+                file.summary().test.as_deref(),
+            ) {
+                (Some("svc"), _) => clab_core::config::load_config_with_input(config, path, false)
+                    .map(|case| (case, true, false)),
+                (Some("knc"), Some("vertical")) => {
+                    clab_core::config::load_config_with_input(config, path, true)
+                        .map(|case| (case, false, true))
                 }
-                _ => clab_core::config::load_config_with_input(config, path, true)
-                    .map(|case| (case, false, true)),
+                (Some(domain), test) => bail!(
+                    "unsupported domain '{domain}'{} in '{}'; supported: svc, knc vertical",
+                    test.map(|test| format!(" test '{test}'"))
+                        .unwrap_or_default(),
+                    path.display()
+                ),
+                (None, _) => {
+                    // Converted before domain and test were stored: infer from the config.
+                    if let Some(warning) = file.summary().legacy_warning() {
+                        eprintln!("warning: {warning}");
+                    }
+                    let svc_case =
+                        clab_core::config::load_config_with_input(config, path, false).ok();
+                    match svc_case {
+                        Some(svc_case)
+                            if file.summary().source_kind == SourceKind::Simulation
+                                && svc::supports_hdf5(&svc_case, &file) =>
+                        {
+                            Ok((svc_case, true, false))
+                        }
+                        _ => clab_core::config::load_config_with_input(config, path, true)
+                            .map(|case| (case, false, true)),
+                    }
+                }
             }
         }
         _ => bail!("compare accepts run TOML, SVC JSON, or normalized HDF5 input"),
@@ -343,6 +367,26 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             && let Some(static_input) = &vertical_config.static_simulation_hdf5
         {
             validate_comparison_input(static_input)?;
+        }
+    }
+    if matches!(extension.as_deref(), Some("toml")) {
+        let mut paths = Vec::new();
+        if include_svc && is_hdf5(&case.simulation_json) {
+            paths.push(case.simulation_json.as_path());
+        }
+        if include_vertical && let Some(vertical) = &case.vertical {
+            paths.push(match vertical.source_kind {
+                clab_core::config::SourceKind::Simulation => &vertical.simulation_hdf5,
+                clab_core::config::SourceKind::Measurement => &vertical.measurement_hdf5,
+            });
+            if let Some(static_input) = &vertical.static_simulation_hdf5 {
+                paths.push(static_input);
+            }
+        }
+        for path in paths {
+            if let Some(warning) = CanonicalFile::open(path)?.summary().legacy_warning() {
+                eprintln!("warning: {warning}");
+            }
         }
     }
     let mut domains = BTreeMap::new();

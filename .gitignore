@@ -3,6 +3,7 @@
 *.hdf5
 *.py[cod]
 *.res
+!examples/input/example-simulation-knc-static.res
 .coverage
 .pytest_cache/
 .ruff_cache/

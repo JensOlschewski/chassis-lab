@@ -4,24 +4,40 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use hdf5::{File, Location};
 
+use clab_core::canonical_hdf5::SCHEMA_VERSION;
+
 use crate::acd::{self, AcdMeasurement};
 use crate::hdf5_writer::{safe_name, unique_name, write_string_attribute};
+use crate::identity::{self, Identity};
 
 /// Imports an ACD measurement into canonical HDF5. The exact `time` channel is sample axis.
+///
+/// Returns warnings for a declared `identity` the data contradicts.
 pub fn import_acd(
     source: impl AsRef<Path>,
     output: impl AsRef<Path>,
     overwrite: bool,
-) -> Result<()> {
+    identity: &Identity,
+) -> Result<Vec<String>> {
     let source = source.as_ref();
     let measurement = acd::parse_file(source)
         .with_context(|| format!("failed to parse ACD file '{}'", source.display()))?;
     crate::write_atomically(output.as_ref(), overwrite, |temporary| {
-        write_file(temporary, source, &measurement)
-    })
+        write_file(temporary, source, &measurement, identity)
+    })?;
+    Ok(identity::acd_warnings(
+        &measurement,
+        identity,
+        &source.display().to_string(),
+    ))
 }
 
-pub fn write_file(path: &Path, source: &Path, measurement: &AcdMeasurement) -> Result<()> {
+pub fn write_file(
+    path: &Path,
+    source: &Path,
+    measurement: &AcdMeasurement,
+    identity: &Identity,
+) -> Result<()> {
     let time = measurement
         .channels
         .iter()
@@ -42,10 +58,14 @@ pub fn write_file(path: &Path, source: &Path, measurement: &AcdMeasurement) -> R
 
     let file = File::create(path)
         .with_context(|| format!("failed to create HDF5 file '{}'", path.display()))?;
-    scalar(&file, "schema_version", 1_u32)?;
+    scalar(&file, "schema_version", SCHEMA_VERSION)?;
     scalar(&file, "sample_count", sample_count as u64)?;
     scalar(&file, "signal_count", measurement.channels.len() as u64)?;
     write_string_attribute(&file, "source_kind", "measurement")?;
+    write_string_attribute(&file, "domain", &identity.domain)?;
+    if let Some(test) = &identity.test {
+        write_string_attribute(&file, "test", test)?;
+    }
     write_string_attribute(&file, "source_file", &source.display().to_string())?;
     write_string_attribute(&file, "encoding", &measurement.encoding)?;
     write_string_attribute(&file, "dialect", &measurement.dialect)?;

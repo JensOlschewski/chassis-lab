@@ -445,6 +445,8 @@ pub fn vertical_conventions() -> BTreeMap<String, SignalConvention> {
                 },
             ),
             ("camber", Unit::Degree, 1),
+            // Hub rotation about Y relative to the body; same sign on both sides.
+            ("spin", Unit::Degree, 1),
         ] {
             conventions.insert(
                 format!("{}_{}", corner.as_str(), suffix),
@@ -557,7 +559,8 @@ mod tests {
         assert_eq!(SVC_METRICS.len(), 29);
         assert_eq!(SVC_METRICS[0], ("front_left_mass_kg", "kg"));
         assert_eq!(SVC_METRICS[28], ("inertia_zz_kg_mm2", "kg*mm^2"));
-        assert_eq!(vertical_conventions().len(), 32);
+        assert_eq!(vertical_conventions().len(), 36);
         assert_eq!(vertical_conventions()["front_right_toe"].sign, -1);
+        assert_eq!(vertical_conventions()["front_right_spin"].sign, 1);
     }
 }

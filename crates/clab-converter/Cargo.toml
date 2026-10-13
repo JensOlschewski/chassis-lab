@@ -11,6 +11,8 @@ hdf5 = { package = "hdf5-metno", version = "0.13", features = ["static"] }
 thiserror = "2.0"
 tempfile = "3.20"
 
+[dependencies.clab-core]
+path = "../clab-core"
+
 [dev-dependencies]
 pyo3 = { version = "0.26", default-features = false }
-clab-core = { path = "../clab-core" }

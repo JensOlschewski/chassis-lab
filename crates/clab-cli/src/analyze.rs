@@ -87,6 +87,21 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
             clab_core::config::SourceKind::Simulation => &vertical.simulation_hdf5,
             clab_core::config::SourceKind::Measurement => &vertical.measurement_hdf5,
         });
+    let mut sources = Vec::new();
+    if has_svc && is_hdf5(&config.simulation_json) {
+        sources.push(config.simulation_json.as_path());
+    }
+    if let Some(vertical) = &config.vertical {
+        sources.push(vertical_path.expect("vertical path"));
+        if let Some(static_input) = &vertical.static_simulation_hdf5 {
+            sources.push(static_input);
+        }
+    }
+    for path in sources {
+        if let Some(warning) = CanonicalFile::open(path)?.summary().legacy_warning() {
+            eprintln!("warning: {warning}");
+        }
+    }
     match (has_svc, vertical_path) {
         (true, Some(vertical_path)) => write_combined_run(&config, vertical_path, args),
         (true, None) if is_hdf5(&config.simulation_json) => {
@@ -310,24 +325,60 @@ fn analyze_svc(args: &AnalyzeArgs) -> Result<()> {
 fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
     let input = CanonicalFile::open(&args.input)
         .with_context(|| format!("failed to read HDF5 '{}'", args.input.display()))?;
-    if input.summary().source_kind == SourceKind::Measurement
-        && let Ok(config) =
-            clab_core::config::load_config_with_input(&args.config, &args.input, false)
-        && config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement)
-    {
-        bail!(
+    let summary = input.summary();
+    let svc_measurement_error = || {
+        anyhow::anyhow!(
             "SVC analysis does not support measurement HDF5 input '{}'; provide an SVC measurement JSON reference or a simulation HDF5 input",
             args.input.display()
-        );
+        )
+    };
+    match (summary.domain.as_deref(), summary.test.as_deref()) {
+        (Some("knc"), Some("vertical")) => analyze_vertical(args),
+        (Some("knc"), test) => bail!(
+            "unsupported knc test {} in '{}'; supported: vertical",
+            test.map_or("(none)".into(), |test| format!("'{test}'")),
+            args.input.display()
+        ),
+        (Some("svc"), _) => {
+            if summary.source_kind == SourceKind::Measurement {
+                return Err(svc_measurement_error());
+            }
+            let config =
+                clab_core::config::load_config_with_input(&args.config, &args.input, false)
+                    .map_err(|error| {
+                        anyhow::anyhow!(
+                            "failed to load analysis config '{}': {error}",
+                            args.config.display()
+                        )
+                    })?;
+            write_svc_hdf5(&config, args)
+        }
+        (Some(domain), _) => bail!(
+            "unsupported domain '{domain}' in '{}'; supported: svc, knc",
+            args.input.display()
+        ),
+        (None, _) => {
+            // Converted before domain and test were stored: infer from the config.
+            if let Some(warning) = summary.legacy_warning() {
+                eprintln!("warning: {warning}");
+            }
+            if summary.source_kind == SourceKind::Measurement
+                && let Ok(config) =
+                    clab_core::config::load_config_with_input(&args.config, &args.input, false)
+                && config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement)
+            {
+                return Err(svc_measurement_error());
+            }
+            if summary.source_kind == SourceKind::Simulation
+                && let Ok(config) =
+                    clab_core::config::load_config_with_input(&args.config, &args.input, false)
+                && svc::supports_hdf5(&config, &input)
+            {
+                return write_svc_hdf5(&config, args);
+            }
+            analyze_vertical(args)
+        }
     }
-    if input.summary().source_kind == SourceKind::Simulation
-        && let Ok(config) =
-            clab_core::config::load_config_with_input(&args.config, &args.input, false)
-        && svc::supports_hdf5(&config, &input)
-    {
-        return write_svc_hdf5(&config, args);
-    }
-    analyze_vertical(args)
 }
 
 fn write_svc_reference(

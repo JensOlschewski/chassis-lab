@@ -24,7 +24,7 @@ The parser follows the structure used by the MATLAB `ResImportTool_20160629.m` r
 ```text
 /
 ├── attributes
-│   ├── schema_version = 1
+│   ├── schema_version = 2
 │   ├── source_kind = simulation | measurement
 │   ├── sample_count
 │   ├── signal_count
@@ -78,21 +78,22 @@ simulation HDF5; every `.acd` file becomes measurement HDF5.
 Convert a file next to the source file:
 
 ```bash
-target/release/clab convert BeFlex2upLoa_svc.res
+target/release/clab convert BeFlex2upLoa_svc.res --domain svc
 ```
 
-This creates `BeFlex2upLoa_svc.h5`.
+This creates `BeFlex2upLoa_svc.h5`. `--domain` (`svc` or `knc`) is required; `knc`
+also needs `--test vertical`. Both are stored as HDF5 attributes.
 
 Choose another output path:
 
 ```bash
-target/release/clab convert BeFlex2upLoa_svc.res --output results/BeFlex2upLoa_svc.h5
+target/release/clab convert BeFlex2upLoa_svc.res --domain svc --output results/BeFlex2upLoa_svc.h5
 ```
 
 Replace an existing output file:
 
 ```bash
-target/release/clab convert BeFlex2upLoa_svc.res --force
+target/release/clab convert BeFlex2upLoa_svc.res --domain svc --force
 ```
 
 Inspect converted signals:
