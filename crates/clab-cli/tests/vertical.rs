@@ -23,13 +23,19 @@ fn scalar<T: hdf5::H5Type>(location: &Location, name: &str, value: T) {
         .unwrap();
 }
 fn simulation(path: &std::path::Path) {
+    simulation_with_test(path, "vertical");
+}
+fn static_simulation(path: &std::path::Path) {
+    simulation_with_test(path, "static");
+}
+fn simulation_with_test(path: &std::path::Path, test: &str) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 5_u64);
     scalar(&file, "signal_count", 16_u64);
     string(&file, "source_kind", "simulation");
     string(&file, "domain", "knc");
-    string(&file, "test", "vertical");
+    string(&file, "test", test);
     string(&file, "source_file", "fixture.res");
     let axis = file.create_group("axis").unwrap();
     string(&axis, "kind", "sample_index");
@@ -398,13 +404,13 @@ fn assert_measurement_metrics(
 fn committed_examples_convert_and_produce_vertical_metrics() {
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let directory = tempdir().unwrap();
-    let convert = |source: &str, output: &str| {
+    let convert = |source: &str, output: &str, test: &str| {
         let destination = directory.path().join(output);
         let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
         command
             .arg("convert")
             .arg(examples.join("input").join(source))
-            .args(["-d", "knc", "-t", "vertical", "-o"])
+            .args(["-d", "knc", "-t", test, "-o"])
             .arg(&destination);
         let result = command.output().unwrap();
         assert!(
@@ -414,9 +420,17 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
         );
         destination
     };
-    let measurement = convert("example-measurement-knc-vertical.acd", "measurement.h5");
-    let simulation = convert("example-simulation-knc-vertical.res", "simulation.h5");
-    let static_input = convert("example-simulation-knc-static.res", "static.h5");
+    let measurement = convert(
+        "example-measurement-knc-vertical.acd",
+        "measurement.h5",
+        "vertical",
+    );
+    let simulation = convert(
+        "example-simulation-knc-vertical.res",
+        "simulation.h5",
+        "vertical",
+    );
+    let static_input = convert("example-simulation-knc-static.res", "static.h5", "static");
     for (path, samples) in [(&simulation, 182), (&static_input, 106)] {
         let file = clab_core::canonical_hdf5::CanonicalFile::open(path).unwrap();
         assert_eq!(file.read_axis().unwrap().len(), samples);
@@ -587,7 +601,7 @@ fn run_simulation_static_normalizes_and_reports_available_metrics() {
     let simulation_path = directory.path().join("simulation.h5");
     let static_path = directory.path().join("static.h5");
     closed_fixture(&simulation_path, simulation);
-    closed_fixture(&static_path, simulation);
+    closed_fixture(&static_path, static_simulation);
     let config_path = directory.path().join("case.toml");
     config(&config_path, false);
     let run = directory.path().join("run.toml");

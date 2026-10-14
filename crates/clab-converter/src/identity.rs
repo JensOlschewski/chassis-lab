@@ -9,7 +9,7 @@ use crate::acd::AcdMeasurement;
 use crate::model::AdamsResult;
 
 /// Known domains and their tests. Add new domains and tests here.
-pub const DOMAINS: &[(&str, &[&str])] = &[("svc", &[]), ("knc", &["vertical"])];
+pub const DOMAINS: &[(&str, &[&str])] = &[("svc", &[]), ("knc", &["vertical", "static"])];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
@@ -132,6 +132,7 @@ mod tests {
     fn validates_domain_and_test_pairs() {
         assert!(Identity::new("svc", None).is_ok());
         assert!(Identity::new("knc", Some("vertical")).is_ok());
+        assert!(Identity::new("knc", Some("static")).is_ok());
         for (domain, test, message) in [
             ("driving", None, "unknown domain 'driving'"),
             ("knc", None, "requires --test"),
