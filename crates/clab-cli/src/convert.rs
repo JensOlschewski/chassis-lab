@@ -7,7 +7,7 @@ use clap::Args;
 #[derive(Debug, Args)]
 #[command(
     override_usage = "clab convert --domain <DOMAIN> [--test <TEST>] [OPTIONS] <INPUT>",
-    after_help = "Domains and tests:\n  svc            no test\n  knc            --test vertical\n\nExample:\n  clab convert run.res -d knc -t vertical -o converted/"
+    after_help = "Domains and tests:\n  svc            no test\n  knc            --test vertical|static\n\nExample:\n  clab convert run.res -d knc -t vertical -o converted/"
 )]
 pub(crate) struct ConvertArgs {
     /// Adams RES simulation or Lommel ACD measurement input.
@@ -22,7 +22,7 @@ pub(crate) struct ConvertArgs {
     /// Domain the data belongs to: svc or knc (required). Stored in the HDF5 file.
     #[arg(short, long, value_name = "DOMAIN")]
     domain: String,
-    /// Test within the domain: required for knc (vertical), not allowed for svc.
+    /// Test within the domain: required for knc (vertical or static), not allowed for svc.
     #[arg(short, long, value_name = "TEST", required_if_eq("domain", "knc"))]
     test: Option<String>,
 }

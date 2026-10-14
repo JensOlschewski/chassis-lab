@@ -710,7 +710,7 @@ fn function_svc(
             );
         }
         let source = resolve(file, path, "[input.svc].file")?;
-        let kind = source_kind(&source, Domain::Svc)?;
+        let kind = source_kind(&source, Domain::Svc, None)?;
         (source, kind)
     } else {
         let simulation = function_input(svc, "simulation", "[input.svc]")?
@@ -798,7 +798,7 @@ fn function_vertical(
         })
         .transpose()?;
     if let Some(static_baseline) = &static_baseline
-        && source_kind(static_baseline, Domain::Knc)? != SourceKind::Simulation
+        && source_kind(static_baseline, Domain::Knc, Some("static"))? != SourceKind::Simulation
     {
         return Err(ConfigError(format!(
             "[input.knc.static] '{}' source_kind must be simulation",
@@ -820,7 +820,7 @@ fn function_vertical(
             .into());
         }
         let source = resolve(file, path, "[input.knc.vertical].file")?;
-        let input_kind = source_kind(&source, Domain::Knc)?;
+        let input_kind = source_kind(&source, Domain::Knc, Some("vertical"))?;
         let static_file = test
             .get("static_file")
             .map(|file| resolve(file, path, "[input.knc.vertical].static_file"))
@@ -841,7 +841,7 @@ fn function_vertical(
         }
         let static_file = static_baseline.or(static_file).or(static_simulation);
         if let Some(static_file) = &static_file
-            && source_kind(static_file, Domain::Knc)? != SourceKind::Simulation
+            && source_kind(static_file, Domain::Knc, Some("static"))? != SourceKind::Simulation
         {
             return Err(ConfigError(format!(
                 "vertical static_file '{}' source_kind must be simulation",
@@ -879,7 +879,7 @@ fn function_vertical(
                 .into());
             }
         };
-        validate_vertical_hdf5_source(&source, source_kind, "vertical input")?;
+        validate_vertical_hdf5_source(&source, source_kind, "vertical input", Some("vertical"))?;
         if static_simulation.is_some() && static_baseline.is_some() {
             return Err(ConfigError(
                 "[input.knc.vertical.static_simulation] cannot be combined with [input.knc.static]"
@@ -900,6 +900,7 @@ fn function_vertical(
             static_simulation,
             SourceKind::Simulation,
             "vertical static_simulation input",
+            Some("static"),
         )?;
     }
     let mappings = merged_mapping(root, "knc", Some("vertical"), path)?;
@@ -1060,6 +1061,7 @@ fn validate_vertical_hdf5_source(
     path: &Path,
     expected: SourceKind,
     role: &str,
+    expected_test: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Config templates may name future conversion outputs. Validate metadata once present.
     if !path.exists() {
@@ -1117,16 +1119,20 @@ fn validate_vertical_hdf5_source(
         ))
         .into());
     }
-    check_hdf5_identity(path, Domain::Knc)
+    check_hdf5_identity(path, Domain::Knc, expected_test)
 }
 
-fn source_kind(path: &Path, domain: Domain) -> Result<SourceKind, Box<dyn std::error::Error>> {
+fn source_kind(
+    path: &Path,
+    domain: Domain,
+    expected_test: Option<&str>,
+) -> Result<SourceKind, Box<dyn std::error::Error>> {
     match path.extension().and_then(|extension| extension.to_str()) {
         // Config templates may name a normalized simulation output before conversion.
         Some("h5" | "hdf5") if !path.exists() => Ok(SourceKind::Simulation),
         Some("h5" | "hdf5") => {
             let kind = hdf5_source_kind(path, "input")?;
-            check_hdf5_identity(path, domain)?;
+            check_hdf5_identity(path, domain, expected_test)?;
             Ok(kind)
         }
         Some("json") if domain == Domain::Svc => {
@@ -1165,7 +1171,11 @@ fn source_kind(path: &Path, domain: Domain) -> Result<SourceKind, Box<dyn std::e
 /// Reject an HDF5 file whose declared domain or test differs from the one the
 /// config expects. Files converted before `domain` and `test` were stored carry
 /// neither and are accepted.
-fn check_hdf5_identity(path: &Path, domain: Domain) -> Result<(), Box<dyn std::error::Error>> {
+fn check_hdf5_identity(
+    path: &Path,
+    domain: Domain,
+    expected_test: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let file = hdf5::File::open(path).map_err(|error| {
         ConfigError(format!(
             "failed to open input '{}': {error}",
@@ -1184,9 +1194,9 @@ fn check_hdf5_identity(path: &Path, domain: Domain) -> Result<(), Box<dyn std::e
         Ok(Some(value.as_str().to_owned()))
     };
     let (found_domain, found_test) = (optional("domain")?, optional("test")?);
-    let (expected_domain, expected_test) = match domain {
-        Domain::Svc => ("svc", None),
-        Domain::Knc => ("knc", Some("vertical")),
+    let expected_domain = match domain {
+        Domain::Svc => "svc",
+        Domain::Knc => "knc",
     };
     if let Some(found) = found_domain.as_deref()
         && found != expected_domain
