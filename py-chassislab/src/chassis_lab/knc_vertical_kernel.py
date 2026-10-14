@@ -1,7 +1,7 @@
 """Path-free numerical kernel for Rust-owned KnC vertical analysis."""
 
 import json
-from math import atan, degrees, sqrt
+from math import atan, degrees, pi, sqrt
 from typing import Any, NamedTuple, cast
 
 import numpy as np
@@ -64,6 +64,17 @@ GRADIENT_METRICS = (
         axis="wheel_pad_z",
         denominator="tire_deflection",
     ),
+    # Stuetzwinkel: atan(-d(contact_patch_x)/d(wheel_pad_z)), same "angle" math
+    # as wheel_recession_angle but measured at the contact patch instead of
+    # the wheel center.
+    GradientMetric(
+        "brake_support_angle",
+        "deg",
+        "contact_patch_x",
+        "deg",
+        "angle",
+        axis="wheel_pad_z",
+    ),
 )
 
 PLOT_SIGNALS = {
@@ -80,6 +91,9 @@ PLOT_SIGNALS = {
     "ride_rate": SignalStyle("Ride rate", "newton/mm"),
     "tire_rate": SignalStyle("Tire rate", "newton/mm"),
     "wheel_recession_angle": SignalStyle("Wheel recession angle", "deg"),
+    "contact_patch_x": SignalStyle("Contact patch X", "mm"),
+    "contact_patch_y": SignalStyle("Contact patch Y", "mm"),
+    "brake_support_angle": SignalStyle("Brake support angle", "deg"),
 }
 
 
@@ -199,6 +213,31 @@ PLOT_SPECS = (
         optional=True,
         gradient=GradientDisplay("bump spin", "deg/mm"),
     ),
+    PlotSpec(
+        "knc_vertical_wpz_vs_cpx",
+        "Bounce - Vertical Wheel pad Travel / Longitudinal Disp. of Patch",
+        "wheel_pad_z",
+        "contact_patch_x",
+        optional=True,
+    ),
+    PlotSpec(
+        "knc_vertical_wpz_vs_cpy",
+        "Bounce - Vertical Wheel pad Travel / Lateral Disp. of Contact Patch",
+        "wheel_pad_z",
+        "contact_patch_y",
+        optional=True,
+    ),
+    PlotSpec(
+        "knc_vertical_brake_support_angle",
+        "Bounce - Vertical Wheel pad Travel / Brake support angle",
+        "wheel_pad_z",
+        "contact_patch_x",
+        "brake_support_angle",
+        branch={"edge_width": 100, "edge_percentile": 0.95},
+        transform=_wheel_recession_angle,
+        from_gradient=_recession_angle,
+        optional=True,
+    ),
 )
 
 
@@ -254,8 +293,65 @@ def metrics(request: dict[str, object]) -> str:
                     "angle": degrees(atan(-delta / (2.0 * gradient))),
                 }[metric.kind]
             results.append(result)
+    results.extend(_ride_frequency_metrics(results, request))
     results.sort(key=lambda item: str(item["metric"]))
     return json.dumps({"metrics": results})
+
+
+def _ride_frequency_metrics(
+    results: list[dict[str, object]], request: dict[str, object]
+) -> list[dict[str, object]]:
+    """f_ride = 1/(2*pi) * sqrt(1000 * K_w / m), K_w = suspension_rate, m per
+    corner.
+
+    Reverse-engineered from a real Lommel bounce-rig ACD measurement: its
+    `*rfreq` channel matches this formula exactly, against the wheel rate
+    (`suspension_rate`, not the tire-combined `ride_rate`) and a per-corner
+    mass identical to SVC's `<corner>_mass_kg` for the same vehicle. `m` is
+    resolved in Rust (`gradient_metrics` in `vertical.rs`): the run's own SVC
+    output if present, else the `sprung_mass_<corner>_kg` config fallback.
+    """
+    suspension_rate = {
+        result["corner"]: result["value"]
+        for result in results
+        if str(result["metric"]).startswith("suspension_rate_")
+        and str(result["metric"]).endswith("_n_per_mm")
+    }
+    corner_mass_kg = json.loads(str(request.get("corner_mass_kg") or "{}"))
+    corner_mass_source = json.loads(
+        str(request.get("corner_mass_source") or "{}")
+    )
+    ride_frequency_results = []
+    for corner in CORNERS:
+        rate = suspension_rate.get(corner)
+        mass = corner_mass_kg.get(corner)
+        result = {
+            "corner": corner,
+            "metric": f"ride_frequency_{corner}_hz",
+            "unit": "Hz",
+            "value": None,
+            "lower": None,
+            "upper": None,
+            "reason": None,
+            "suspension_rate_n_per_mm": rate,
+            "corner_mass_kg": mass,
+            "corner_mass_source": corner_mass_source.get(corner),
+        }
+        if rate is None:
+            result["reason"] = "suspension_rate unavailable"
+        elif mass is None:
+            result["reason"] = (
+                f"corner mass unavailable (no SVC {corner}_mass_kg in this "
+                f"run, no sprung_mass_{corner}_kg configured)"
+            )
+        elif rate <= 0.0 or mass <= 0.0:
+            result["reason"] = (
+                "suspension_rate and corner mass must be positive"
+            )
+        else:
+            result["value"] = (1.0 / (2.0 * pi)) * sqrt(1000.0 * rate / mass)
+        ride_frequency_results.append(result)
+    return ride_frequency_results
 
 
 def _span(points: tuple[float, float]) -> float:

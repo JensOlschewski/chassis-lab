@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env, fs,
     io::{IsTerminal, Write},
     path::{Path, PathBuf},
@@ -190,7 +191,13 @@ fn write_combined_run(
     };
     let footer = analysis_footer(&args.config, config, vertical_path, Some(&args.input))?;
     let debug = debug_info(args.debug, &args.config, &[vertical_path])?;
-    let vertical_report = vertical::analyze_input(config, vertical_path, debug.as_deref())?;
+    let svc_corner_mass_kg = svc_corner_mass_kg(&svc_report);
+    let vertical_report = vertical::analyze_input(
+        config,
+        vertical_path,
+        Some(&svc_corner_mass_kg),
+        debug.as_deref(),
+    )?;
     print_header("SVC", svc_metrics);
     let mut warnings = svc_warnings;
     warnings.extend(vertical_report.warnings.iter().cloned());
@@ -271,6 +278,27 @@ fn write_combined_run(
     write_bundle(output, &files, args.force, &inputs)?;
     println!("report: {}", output.display());
     Ok(())
+}
+
+/// SVC's `<corner>_mass_kg` metrics, keyed by corner — the `ride_frequency`
+/// vertical metric's default mass source when both domains run together.
+fn svc_corner_mass_kg(svc_report: &serde_json::Value) -> BTreeMap<String, f64> {
+    const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
+    svc_report["metrics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|metric| {
+            let name = metric["metric"].as_str()?;
+            let corner = name.strip_suffix("_mass_kg")?;
+            if !CORNERS.contains(&corner) {
+                return None;
+            }
+            metric["value"]
+                .as_f64()
+                .map(|value| (corner.to_string(), value))
+        })
+        .collect()
 }
 
 fn is_hdf5(path: &Path) -> bool {
@@ -580,7 +608,7 @@ fn write_vertical(
 ) -> Result<()> {
     let footer = analysis_footer(&args.config, config, input, run)?;
     let debug = debug_info(args.debug, &args.config, &[input])?;
-    let report = vertical::analyze_input(config, input, debug.as_deref())?;
+    let report = vertical::analyze_input(config, input, None, debug.as_deref())?;
     print_header("KnC Vertical", report.metrics.len());
     print_metrics(&report.metrics);
     print_warnings(&report.warnings, args);

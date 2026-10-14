@@ -198,7 +198,11 @@ inside it when set), `direction` (`rise`, `fall`, `any`) and `index` (default 2)
 per source kind; `[window.measurement]` and `[window.simulation]` do the same for
 `plot_branches`. Setting flags directly under `[setup.knc]`, the `[branch]` table
 and `metric_gradient_points_mm` in the window remain accepted. Optional keys that
-are left out use their default and produce one analysis warning each. Signal maps contain
+are left out use their default and produce one analysis warning each.
+`sprung_mass_front_left_kg`/`..._front_right_kg`/`..._rear_left_kg`/`..._rear_right_kg`
+in `[metric]` are the `ride_frequency` metric's per-corner mass fallback: this run's
+own SVC `<corner>_mass_kg` is used automatically when SVC and KnC vertical run
+together, and a configured value overrides it. Signal maps contain
 canonical names, entities, components, and units. Mapping precedence is shared <
 domain < test; child values override, child-only values add, missing values inherit,
 and nested tables deep-merge. External mapping files use same merge rules. Legacy

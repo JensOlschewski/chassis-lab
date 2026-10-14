@@ -401,6 +401,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
     }
     let mut domains = BTreeMap::new();
     let mut sources = Vec::new();
+    let mut svc_corner_mass_kg: Option<BTreeMap<String, f64>> = None;
     if include_svc && case.svc_source_kind.is_some() {
         let values = match case.svc_source_kind {
             Some(clab_core::config::SourceKind::Simulation) if is_hdf5(&case.simulation_json) => {
@@ -414,6 +415,16 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             }
             None => unreachable!(),
         };
+        svc_corner_mass_kg = Some(
+            ["front_left", "front_right", "rear_left", "rear_right"]
+                .into_iter()
+                .filter_map(|corner| {
+                    values
+                        .get(&format!("{corner}_mass_kg"))
+                        .map(|mass| (corner.to_string(), *mass))
+                })
+                .collect(),
+        );
         sources.push(case.simulation_json.clone());
         domains.insert("svc", ComparedDomain::Svc(svc::canonical_metrics(&values)));
     }
@@ -422,7 +433,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             clab_core::config::SourceKind::Simulation => &vertical_config.simulation_hdf5,
             clab_core::config::SourceKind::Measurement => &vertical_config.measurement_hdf5,
         };
-        let report = vertical::analyze_input(&case, source, None)?;
+        let report = vertical::analyze_input(&case, source, svc_corner_mass_kg.as_ref(), None)?;
         let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
         sources.push(source.clone());
         if let Some(static_input) = &vertical_config.static_simulation_hdf5 {
