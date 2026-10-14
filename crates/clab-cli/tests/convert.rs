@@ -24,6 +24,23 @@ const MINIMAL_RES: &str = r#"<Result>
 
 const MINIMAL_ACD: &str = "FileInfo: ASCII3\nTime\tWheel\tstring\tDescription\n0\t10\tfloat\tOffset\ntime\ttravel\tstring\tName\ns\tmm\tstring\tUnits\nNaN\tNaN\tstring\tKPoly\n0\t1\n";
 
+/// `analysis_type` Q=0.0 declares this data as KnC, contradicting `--domain svc`.
+const RES_DECLARING_KNC: &str = r#"<Result>
+  <Entity type="request" name="analysis_type" entity="model.analysis_type" objectId="1">
+    <Component name="Q" unitsValue="none" id="1" />
+  </Entity>
+  <Entity type="request" name="svc_output">
+    <Component name="Wheelbase" unitsValue="mm" id="2" />
+  </Entity>
+  <Step type="input">
+    0.0 2490.0
+  </Step>
+  <Step type="input">
+    0.0 2490.0
+  </Step>
+</Result>
+"#;
+
 fn convert(input: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
     command.arg("convert").arg(input).args(["-d", "svc"]);
@@ -321,7 +338,7 @@ fn requires_domain_and_validates_test() {
 }
 
 #[test]
-fn stores_domain_and_test_and_warns_when_data_disagrees() {
+fn stores_domain_and_test_when_data_has_no_identity_to_disagree_with() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("shared.res");
     fs::write(&input, MINIMAL_RES).unwrap();
@@ -351,4 +368,26 @@ fn stores_domain_and_test_and_warns_when_data_disagrees() {
     );
     // MINIMAL_RES has no analysis_type variable, so nothing to disagree with.
     assert!(!String::from_utf8_lossy(&result.stderr).contains("warning"));
+}
+
+#[test]
+fn rejects_declared_domain_the_data_contradicts_and_writes_nothing() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("shared.res");
+    fs::write(&input, RES_DECLARING_KNC).unwrap();
+    let output = directory.path().join("out.h5");
+
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .arg("convert")
+        .arg(&input)
+        .args(["-d", "svc", "-o"])
+        .arg(&output)
+        .output()
+        .unwrap();
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("--domain svc"), "{stderr}");
+    assert!(stderr.contains("indicates knc"), "{stderr}");
+    assert!(!output.exists());
 }

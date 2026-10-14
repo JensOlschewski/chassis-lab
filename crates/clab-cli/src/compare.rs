@@ -239,6 +239,16 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 .chain(vertical_candidates.iter().map(|candidate| candidate.4))
                 .collect::<Vec<_>>(),
         )?;
+        if debug.is_some()
+            && (!base_branch.measurement
+                || vertical_candidates
+                    .iter()
+                    .any(|(_, _, branch, _, _)| !branch.measurement))
+        {
+            eprintln!(
+                "warning: knc::vertical: debug rate plots require measurement input; skipped for simulation data"
+            );
+        }
         let candidates = vertical_candidates
             .into_iter()
             .map(|(label, curves, branch, _, _)| (label, curves, branch))
@@ -412,7 +422,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             clab_core::config::SourceKind::Simulation => &vertical_config.simulation_hdf5,
             clab_core::config::SourceKind::Measurement => &vertical_config.measurement_hdf5,
         };
-        let report = vertical::analyze_input(&case, source, false)?;
+        let report = vertical::analyze_input(&case, source, None)?;
         let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
         sources.push(source.clone());
         if let Some(static_input) = &vertical_config.static_simulation_hdf5 {

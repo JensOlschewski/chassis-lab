@@ -651,6 +651,36 @@ fn run_simulation_static_normalizes_and_reports_available_metrics() {
     );
 }
 
+#[test]
+fn analyze_debug_warns_and_skips_rate_plots_for_simulation_input() {
+    let directory = tempdir().unwrap();
+    let simulation_path = directory.path().join("simulation.h5");
+    closed_fixture(&simulation_path, simulation);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    let output = directory.path().join("reports");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "analyze",
+            config_path.to_str().unwrap(),
+            simulation_path.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+            "--debug",
+            "--verbose",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stderr).contains(
+        "warning: knc::vertical: debug rate plots require measurement input; skipped for simulation data"
+    ));
+}
+
 /// Measurement config with the first sweep selected, so every metric exists.
 fn comparison_config(path: &std::path::Path, tolerance: &str) {
     config(path, false);
@@ -759,6 +789,38 @@ fn compares_direct_vertical_inputs_without_output() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert!(!directory.path().join("plots").exists());
+}
+
+#[test]
+fn compare_debug_warns_and_skips_rate_plots_for_simulation_input() {
+    let directory = tempdir().unwrap();
+    let baseline_path = directory.path().join("baseline.h5");
+    let candidate_path = directory.path().join("candidate.h5");
+    closed_fixture(&baseline_path, simulation);
+    closed_fixture(&candidate_path, simulation);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    let output = directory.path().join("comparison");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "compare",
+            config_path.to_str().unwrap(),
+            baseline_path.to_str().unwrap(),
+            candidate_path.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+            "--debug",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stderr).contains(
+        "warning: knc::vertical: debug rate plots require measurement input; skipped for simulation data"
+    ));
 }
 
 #[test]

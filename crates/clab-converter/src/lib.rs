@@ -12,23 +12,19 @@ pub mod parser;
 
 /// Converts an Adams RES result to simulation HDF5 without leaving a partial output on failure.
 ///
-/// Returns warnings for a declared `identity` the data contradicts.
+/// Rejects a declared `identity` the data contradicts before writing anything.
 pub fn convert_res(
     source: &Path,
     output: &Path,
     overwrite: bool,
     identity: &identity::Identity,
-) -> Result<Vec<String>> {
+) -> Result<()> {
     let result = parser::parse_file(source)
         .with_context(|| format!("failed to parse RES file '{}'", source.display()))?;
+    identity::check_res_identity(&result, identity, &source.display().to_string())?;
     write_atomically(output, overwrite, |temporary| {
         hdf5_writer::write_file(temporary, source, &result, identity)
-    })?;
-    Ok(identity::res_warnings(
-        &result,
-        identity,
-        &source.display().to_string(),
-    ))
+    })
 }
 
 /// Publish completed output atomically from a temporary file near destination.
