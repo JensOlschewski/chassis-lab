@@ -18,6 +18,8 @@ use pyo3::{
 };
 use serde::{Deserialize, Serialize};
 
+use super::display::{missing_unit_warning, tag_warnings};
+
 const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
 const AXES: [&str; 3] = ["x", "y", "z"];
 const DEFAULT_GRADIENT_POINTS_MM: f64 = 10.0;
@@ -80,8 +82,7 @@ pub(crate) fn analyze_input_with_footer(
                     "Simulation",
                     {
                         warnings.push(
-                            "KnC simulation has no static_simulation; curves are not normalized"
-                                .into(),
+                            "simulation has no static_simulation; curves are not normalized".into(),
                         );
                         warnings
                     },
@@ -102,6 +103,7 @@ pub(crate) fn analyze_input_with_footer(
     let metrics = gradient_metrics(config, &curves, relative_travel, measurement, &mut warnings)?;
     warnings.sort();
     warnings.dedup();
+    let warnings = tag_warnings("knc", Some("vertical"), warnings);
     let detail = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
@@ -149,7 +151,7 @@ fn default_warnings(config: &CaseConfig, measurement: bool) -> Vec<String> {
     let mut warnings = Vec::new();
     let mut warn = |key: &str, table: &str, default: String| {
         warnings.push(format!(
-            "KnC vertical config key '{key}' missing in [{table}]; using default {default}"
+            "config key '{key}' missing in [{table}]; using default {default}"
         ));
     };
     if vertical.window.gradient_points_mm.is_none() {
@@ -208,16 +210,13 @@ fn gradient_metrics(
     let gradient = effective_gradient_points(window);
     if gradient <= 0.0 {
         warnings.push(format!(
-            "KnC vertical travel window {}..{} mm does not contain 0 mm; vertical metrics skipped",
+            "travel window {}..{} mm does not contain 0 mm; metrics skipped",
             window.minimum_mm, window.maximum_mm
         ));
         return Ok(Vec::new());
     }
     if !relative_travel {
-        warnings.push(
-            "KnC vertical metrics require static_simulation normalization; vertical metrics skipped"
-                .into(),
-        );
+        warnings.push("metrics require static_simulation normalization; metrics skipped".into());
         return Ok(Vec::new());
     }
     let curves = serde_json::to_string(curves)?;
@@ -240,7 +239,7 @@ fn gradient_metrics(
         .map(|metric| {
             if let Some(reason) = metric["reason"].as_str() {
                 warnings.push(format!(
-                    "KnC vertical metric '{}' unavailable: {reason}",
+                    "metric '{}' unavailable: {reason}",
                     metric["metric"].as_str().unwrap_or_default()
                 ));
             }
@@ -513,12 +512,6 @@ fn drop_initial_sample(values: Vec<f64>) -> Vec<f64> {
     } else {
         values
     }
-}
-
-fn missing_unit_warning(entity: &str, component: &str, declared_unit: &str) -> String {
-    format!(
-        "simulation signal '{entity}/{component}' has no HDF5 unit metadata; using mapped unit '{declared_unit}'"
-    )
 }
 
 fn optional_measurement_curves(

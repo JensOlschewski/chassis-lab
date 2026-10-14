@@ -360,7 +360,7 @@ fn assert_measurement_metrics(
         // Every other key is set, so only the gradient default is reported.
         assert_eq!(stderr.matches("warning:").count(), 1, "{stderr}");
         assert!(stderr.contains(
-            "warning: KnC vertical config key 'gradient_points_mm' missing in [setup.knc.metric]; \
+            "warning: knc::vertical: config key 'gradient_points_mm' missing in [setup.knc.metric]; \
              using default 10 mm (limited to travel window: 1 mm)"
         ));
         return;
@@ -464,12 +464,12 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
             stdout.contains("KnC Vertical\nrunning 28 metrics"),
             "{stdout}"
         );
-        assert!(!stdout.contains("= missing"), "{stdout}");
+        assert!(!stdout.contains("... missing"), "{stdout}");
         let rate = stdout
             .lines()
             .find_map(|line| {
                 line.trim()
-                    .strip_prefix("suspension_rate_front_left_n_per_mm = ")
+                    .strip_prefix("knc::vertical::suspension_rate_front_left_n_per_mm ... ")
             })
             .unwrap()
             .split_whitespace()
@@ -526,7 +526,7 @@ fn skips_vertical_metrics_without_static_normalization() {
     assert!(String::from_utf8_lossy(&result.stdout).contains("KnC Vertical\nrunning 0 metrics"));
     assert!(
         String::from_utf8_lossy(&result.stderr)
-            .contains("vertical metrics require static_simulation normalization")
+            .contains("knc::vertical: metrics require static_simulation normalization")
     );
 }
 
@@ -592,7 +592,9 @@ fn analyzes_simulation_with_missing_units_and_warns() {
         .output()
         .unwrap();
     assert!(verbose.status.success());
-    assert!(String::from_utf8_lossy(&verbose.stderr).contains("no HDF5 unit metadata"));
+    let verbose_stderr = String::from_utf8_lossy(&verbose.stderr);
+    assert!(verbose_stderr.contains("no HDF5 unit metadata"));
+    assert!(verbose_stderr.contains("warning: knc::vertical: simulation signal"));
 }
 
 #[test]
