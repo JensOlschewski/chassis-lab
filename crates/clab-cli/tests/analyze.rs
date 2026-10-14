@@ -781,15 +781,37 @@ fn analyze_routes_hdf5_by_declared_domain() {
     assert!(String::from_utf8_lossy(&result.stdout).contains("KnC Vertical"));
     assert!(!String::from_utf8_lossy(&result.stderr).contains("schema version"));
 
-    // Same data declared as svc: measurement HDF5 is not an SVC input.
+    // The same data declared as svc now fails at convert time: the testtype
+    // contradicts the declared domain, so nothing is written.
     let wrong = directory.path().join("wrong.h5");
     let converted = clab()
         .args(["convert", source.to_str().unwrap(), "-d", "svc", "-o"])
         .arg(&wrong)
         .output()
         .unwrap();
-    assert!(converted.status.success());
+    assert!(!converted.status.success());
     assert!(String::from_utf8_lossy(&converted.stderr).contains("indicates knc"));
+    assert!(!wrong.exists());
+
+    // Data with no testtype metadata declares nothing to contradict, so
+    // convert allows `-d svc` through; analyze must still reject the
+    // result, since measurement HDF5 is never a valid SVC input.
+    let no_testtype = directory.path().join("no-testtype.acd");
+    fs::write(
+        &no_testtype,
+        "FileInfo: ASCII3\nTime\tWheel\tstring\tDescription\n0\t10\tfloat\tOffset\ntime\ttravel\tstring\tName\ns\tmm\tstring\tUnits\nNaN\tNaN\tstring\tKPoly\n0\t1\n",
+    )
+    .unwrap();
+    let converted = clab()
+        .args(["convert", no_testtype.to_str().unwrap(), "-d", "svc", "-o"])
+        .arg(&wrong)
+        .output()
+        .unwrap();
+    assert!(
+        converted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&converted.stderr)
+    );
     let result = clab()
         .args(["analyze", config.to_str().unwrap(), wrong.to_str().unwrap()])
         .output()

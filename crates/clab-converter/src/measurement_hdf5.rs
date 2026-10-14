@@ -12,24 +12,20 @@ use crate::identity::{self, Identity};
 
 /// Imports an ACD measurement into canonical HDF5. The exact `time` channel is sample axis.
 ///
-/// Returns warnings for a declared `identity` the data contradicts.
+/// Rejects a declared `identity` the data contradicts before writing anything.
 pub fn import_acd(
     source: impl AsRef<Path>,
     output: impl AsRef<Path>,
     overwrite: bool,
     identity: &Identity,
-) -> Result<Vec<String>> {
+) -> Result<()> {
     let source = source.as_ref();
     let measurement = acd::parse_file(source)
         .with_context(|| format!("failed to parse ACD file '{}'", source.display()))?;
+    identity::check_acd_identity(&measurement, identity, &source.display().to_string())?;
     crate::write_atomically(output.as_ref(), overwrite, |temporary| {
         write_file(temporary, source, &measurement, identity)
-    })?;
-    Ok(identity::acd_warnings(
-        &measurement,
-        identity,
-        &source.display().to_string(),
-    ))
+    })
 }
 
 pub fn write_file(

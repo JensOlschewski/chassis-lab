@@ -80,7 +80,7 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     }
     validate_output(&args.input, &output, args.force)?;
 
-    let warnings = match kind {
+    match kind {
         InputKind::Res => clab_converter::convert_res(&args.input, &output, args.force, &identity),
         InputKind::Acd => clab_converter::measurement_hdf5::import_acd(
             &args.input,
@@ -90,9 +90,6 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
         ),
     }
     .with_context(|| format!("failed to generate '{}'", output.display()))?;
-    for warning in warnings {
-        eprintln!("warning: {warning}");
-    }
 
     println!("generated {} ({})", output.display(), kind.output_type());
     Ok(())

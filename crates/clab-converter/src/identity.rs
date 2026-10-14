@@ -1,7 +1,9 @@
 //! Domain and test a converted file belongs to.
 //!
-//! The caller declares both. The data is only used to cross-check the
-//! declaration, which produces warnings and never changes what is written.
+//! The caller declares both. The data cross-checks the declaration before
+//! anything is written: a declared domain or test the data contradicts is
+//! a hard error, not a warning, so a canonical HDF5 file is never written
+//! under the wrong identity.
 
 use anyhow::{Result, bail};
 
@@ -73,15 +75,17 @@ pub fn res_domain(result: &AdamsResult) -> Option<&'static str> {
     }
 }
 
-/// Warnings for a declared identity the RES data contradicts.
-pub fn res_warnings(result: &AdamsResult, identity: &Identity, source: &str) -> Vec<String> {
-    match res_domain(result) {
-        Some(found) if found != identity.domain => vec![format!(
+/// Reject a declared identity the RES data contradicts.
+pub fn check_res_identity(result: &AdamsResult, identity: &Identity, source: &str) -> Result<()> {
+    if let Some(found) = res_domain(result)
+        && found != identity.domain
+    {
+        bail!(
             "--domain {} but analysis_type in '{source}' indicates {found}",
             identity.domain
-        )],
-        _ => Vec::new(),
+        );
     }
+    Ok(())
 }
 
 /// Test an ACD `testtype` value names, if known.
@@ -92,41 +96,44 @@ fn acd_test(testtype: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
-/// Warnings for a declared identity the ACD `testtype` contradicts.
-pub fn acd_warnings(
+/// Reject a declared identity the ACD `testtype` contradicts.
+pub fn check_acd_identity(
     measurement: &AcdMeasurement,
     identity: &Identity,
     source: &str,
-) -> Vec<String> {
+) -> Result<()> {
     let Some(info) = measurement
         .test_info
         .iter()
         .find(|info| info.name == "testtype")
     else {
-        return Vec::new();
+        return Ok(());
     };
     let Some((domain, test)) = acd_test(&info.value) else {
-        return Vec::new();
+        return Ok(());
     };
-    let mut warnings = Vec::new();
     if domain != identity.domain {
-        warnings.push(format!(
+        bail!(
             "--domain {} but testtype '{}' in '{source}' indicates {domain}",
-            identity.domain, info.value
-        ));
-    } else if identity.test.as_deref() != Some(test) {
-        warnings.push(format!(
+            identity.domain,
+            info.value
+        );
+    }
+    if identity.test.as_deref() != Some(test) {
+        bail!(
             "--test {} but testtype '{}' in '{source}' indicates {test}",
             identity.test.as_deref().unwrap_or("(none)"),
             info.value
-        ));
+        );
     }
-    warnings
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Identity;
+    use super::{Identity, check_acd_identity, check_res_identity};
+    use crate::acd::{AcdMeasurement, AcdTestInfo};
+    use crate::model::{AdamsResult, Component, Entity};
 
     #[test]
     fn validates_domain_and_test_pairs() {
@@ -142,5 +149,80 @@ mod tests {
             let error = Identity::new(domain, test).unwrap_err().to_string();
             assert!(error.contains(message), "{error}");
         }
+    }
+
+    fn res_with_analysis_type(value: f64) -> AdamsResult {
+        AdamsResult {
+            entities: vec![Entity {
+                name: "analysis_type".into(),
+                source_path: None,
+                object_id: None,
+                components: vec![Component {
+                    name: "Q".into(),
+                    adams_id: 1,
+                    units: None,
+                    values: vec![value],
+                }],
+            }],
+            sample_count: 1,
+            values_per_sample: 1,
+        }
+    }
+
+    #[test]
+    fn res_identity_passes_when_analysis_type_agrees() {
+        let identity = Identity::new("knc", Some("vertical")).unwrap();
+        check_res_identity(&res_with_analysis_type(0.0), &identity, "source.res").unwrap();
+    }
+
+    #[test]
+    fn res_identity_rejects_domain_the_analysis_type_contradicts() {
+        let identity = Identity::new("svc", None).unwrap();
+        let error = check_res_identity(&res_with_analysis_type(0.0), &identity, "source.res")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("--domain svc"), "{error}");
+        assert!(error.contains("indicates knc"), "{error}");
+    }
+
+    fn acd_with_testtype(value: &str) -> AcdMeasurement {
+        AcdMeasurement {
+            encoding: "ASCII3".into(),
+            dialect: "ASCII3".into(),
+            channels: Vec::new(),
+            test_info: vec![AcdTestInfo {
+                name: "testtype".into(),
+                description: String::new(),
+                data_type: "string".into(),
+                unit: String::new(),
+                value: value.into(),
+            }],
+        }
+    }
+
+    #[test]
+    fn acd_identity_passes_when_testtype_agrees() {
+        let identity = Identity::new("knc", Some("vertical")).unwrap();
+        check_acd_identity(&acd_with_testtype("vert"), &identity, "source.acd").unwrap();
+    }
+
+    #[test]
+    fn acd_identity_rejects_domain_the_testtype_contradicts() {
+        let identity = Identity::new("svc", None).unwrap();
+        let error = check_acd_identity(&acd_with_testtype("vert"), &identity, "source.acd")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("--domain svc"), "{error}");
+        assert!(error.contains("indicates knc"), "{error}");
+    }
+
+    #[test]
+    fn acd_identity_rejects_test_the_testtype_contradicts() {
+        let identity = Identity::new("knc", Some("static")).unwrap();
+        let error = check_acd_identity(&acd_with_testtype("vert"), &identity, "source.acd")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("--test static"), "{error}");
+        assert!(error.contains("indicates vertical"), "{error}");
     }
 }
