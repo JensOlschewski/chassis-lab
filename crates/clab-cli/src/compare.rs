@@ -635,10 +635,7 @@ fn print_metrics(
         }
         println!("running {} metrics", grouped.len());
         for (test, metric_name, values) in grouped {
-            let name = match test {
-                Some(test) => format!("{domain}::{test}::{metric_name}"),
-                None => format!("{domain}::{metric_name}"),
-            };
+            let name = crate::analysis::display::qualified_metric_name(domain, test, metric_name);
             let baseline_value = values[0].1.baseline_value;
             let unit = &values[0].1.unit;
             let mut fields = vec![format!("baseline {}", display_number(baseline_value))];

@@ -13,6 +13,8 @@ use clab_core::{
 };
 use sha2::{Digest, Sha256};
 
+use super::display::{missing_unit_warning, tag_warnings};
+
 const WHEEL_LOADS: [&str; 4] = [
     "front_left_wheel_load",
     "front_right_wheel_load",
@@ -231,6 +233,7 @@ fn reports(
     values: BTreeMap<String, f64>,
     warnings: Vec<String>,
 ) -> Result<Reports> {
+    let warnings = tag_warnings("svc", None, warnings);
     let metrics = canonical_metrics(&values)
         .into_iter()
         .map(|metric| {
@@ -281,12 +284,6 @@ fn reports(
             .filter_map(|value| value.as_str().map(str::to_owned))
             .collect(),
     })
-}
-
-fn missing_unit_warning(entity: &str, component: &str, declared_unit: &str) -> String {
-    format!(
-        "simulation signal '{entity}/{component}' has no HDF5 unit metadata; using mapped unit '{declared_unit}'"
-    )
 }
 
 fn safe_cell(value: &str) -> String {

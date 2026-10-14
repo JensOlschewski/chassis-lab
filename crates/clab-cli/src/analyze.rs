@@ -423,7 +423,7 @@ fn svc_reference_reports(
             let value = metric.value;
             if value.is_none() {
                 warnings.push(format!(
-                    "SVC metric '{}' is missing from measurement reference",
+                    "metric '{}' is missing from measurement reference",
                     metric.name
                 ));
             }
@@ -432,6 +432,7 @@ fn svc_reference_reports(
             })
         })
         .collect::<Vec<_>>();
+    let warnings = crate::analysis::display::tag_warnings("svc", None, warnings);
     let report = serde_json::json!({
         "schema_version": 1, "command": "analyze", "case": {"name": case.name, "loadcase": case.loadcase}, "inputs": {"config": provenance(config)?, "reference": provenance(&reference.path)?}, "metrics": metrics, "warnings": warnings,
     });
@@ -520,12 +521,12 @@ fn print_metrics(metrics: &[serde_json::Value]) {
         } else {
             metric["value"].to_string()
         };
-        println!(
-            "  {} = {} {}",
+        let name = crate::analysis::display::qualified_metric_name(
+            metric["domain"].as_str().unwrap_or_default(),
+            metric["test"].as_str(),
             metric["metric"].as_str().unwrap(),
-            value,
-            metric["unit"].as_str().unwrap()
         );
+        println!("  {name} ... {value} {}", metric["unit"].as_str().unwrap());
     }
 }
 

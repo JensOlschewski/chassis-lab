@@ -166,8 +166,8 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     let stdout = String::from_utf8_lossy(&result.stdout);
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stdout.starts_with("\nSVC\nrunning 29 metrics\n"));
-    assert!(stdout.contains("  front_left_mass_kg = 420.0 kg"));
-    assert!(stdout.contains("  cg_height_mm = missing mm"));
+    assert!(stdout.contains("  svc::front_left_mass_kg ... 420.0 kg"));
+    assert!(stdout.contains("  svc::cg_height_mm ... missing mm"));
     assert!(stderr.contains("16 analysis warnings; details in"));
     let expected = [
         "front_left_mass_kg",
@@ -202,7 +202,7 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     ];
     let positions = expected
         .iter()
-        .map(|metric| stdout.find(&format!("  {metric} =")).unwrap())
+        .map(|metric| stdout.find(&format!("  svc::{metric} ...")).unwrap())
         .collect::<Vec<_>>();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     let report: Value =
@@ -248,7 +248,7 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     assert!(verbose.status.success());
     assert!(
         String::from_utf8_lossy(&verbose.stderr)
-            .contains("SVC metric 'cg_height_mm' is missing from measurement reference")
+            .contains("svc: metric 'cg_height_mm' is missing from measurement reference")
     );
 }
 
@@ -577,7 +577,9 @@ fn analyzes_svc_hdf5_with_missing_units_and_warns() {
         .output()
         .unwrap();
     assert!(verbose.status.success());
-    assert!(String::from_utf8_lossy(&verbose.stderr).contains("no HDF5 unit metadata"));
+    let verbose_stderr = String::from_utf8_lossy(&verbose.stderr);
+    assert!(verbose_stderr.contains("no HDF5 unit metadata"));
+    assert!(verbose_stderr.contains("warning: svc: simulation signal"));
 }
 
 #[test]
@@ -627,7 +629,8 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     let config = examples.join("config.toml");
     let svc = examples.join("input/example-simulation-svc.res");
     let vertical = examples.join("input/example-simulation-knc-vertical.res");
-    if !config.is_file() || !svc.is_file() || !vertical.is_file() {
+    let static_input = examples.join("input/example-simulation-knc-static.res");
+    if !config.is_file() || !svc.is_file() || !vertical.is_file() || !static_input.is_file() {
         return;
     }
     let directory = tempdir().unwrap();
@@ -642,6 +645,25 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
             "vertical",
             "-o",
             vertical_simulation.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let static_simulation = directory.path().join("static.h5");
+    let result = clab()
+        .args([
+            "convert",
+            static_input.to_str().unwrap(),
+            "-d",
+            "knc",
+            "-t",
+            "static",
+            "-o",
+            static_simulation.to_str().unwrap(),
         ])
         .output()
         .unwrap();
@@ -671,8 +693,8 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     fs::write(
         &run,
         format!(
-            "[meta]\nname = 'two-up run'\nloadcase = 'two-up'\n\n[input.svc]\nfile = {:?}\n\n[input.knc.vertical]\nfile = {:?}\n",
-            svc_simulation, vertical_simulation
+            "[meta]\nname = 'two-up run'\nloadcase = 'two-up'\n\n[input.svc]\nfile = {:?}\n\n[input.knc.vertical]\nfile = {:?}\n\n[input.knc.static]\nfile = {:?}\n",
+            svc_simulation, vertical_simulation, static_simulation
         ),
     )
     .unwrap();
@@ -692,7 +714,11 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert!(String::from_utf8_lossy(&result.stdout).contains("\nSVC\nrunning 29 metrics\n"));
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(stdout.contains("\nSVC\nrunning 29 metrics\n"));
+    // Both domains render through the same `domain[::test]::metric ... value unit` row shape.
+    assert!(stdout.contains("  svc::total_mass_kg ... "));
+    assert!(stdout.contains("  knc::vertical::suspension_rate_front_left_n_per_mm ... "));
     for name in [
         "report.json",
         "metrics.csv",
