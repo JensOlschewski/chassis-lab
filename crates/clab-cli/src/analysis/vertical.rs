@@ -36,28 +36,26 @@ struct Curve {
 
 pub(crate) struct Reports {
     pub detail: String,
-    pub plots: BTreeMap<String, Vec<u8>>,
     pub curve_count: usize,
     pub metrics: Vec<serde_json::Value>,
     pub warnings: Vec<String>,
     pub normalization: serde_json::Value,
     pub branch: VerticalBranch,
+    pub measurement: bool,
 }
 
-pub(crate) fn analyze_input(config: &CaseConfig, path: &Path, plots: bool) -> Result<Reports> {
-    analyze_input_with_footer(config, path, plots, None, None)
-}
-
-pub(crate) fn analyze_input_with_footer(
+/// Calculate KnC vertical curves, metrics, and warnings. Does not render
+/// plots: call `curve_plots` separately once the caller is ready for them
+/// (e.g. after printing the console metrics table), so slow PDF rendering
+/// never delays display.
+pub(crate) fn analyze_input(
     config: &CaseConfig,
     path: &Path,
-    plots: bool,
-    footer: Option<&str>,
     debug: Option<&str>,
 ) -> Result<Reports> {
     let file = CanonicalFile::open(path)
         .with_context(|| format!("failed to read HDF5 '{}'", path.display()))?;
-    let (curves, source, mut warnings, normalization) = match file.summary().source_kind {
+    let (curves, mut warnings, normalization) = match file.summary().source_kind {
         SourceKind::Simulation => {
             let (mut curves, mut warnings) = simulation_curves(config, &file)?;
             if let Some(static_path) = config
@@ -72,14 +70,12 @@ pub(crate) fn analyze_input_with_footer(
                 )?);
                 (
                     curves,
-                    "Simulation",
                     warnings,
                     serde_json::json!({"static_simulation": static_path, "method": "drop_initial_sample_and_subtract_final_sample"}),
                 )
             } else {
                 (
                     curves,
-                    "Simulation",
                     {
                         warnings.push(
                             "simulation has no static_simulation; curves are not normalized".into(),
@@ -92,12 +88,15 @@ pub(crate) fn analyze_input_with_footer(
         }
         SourceKind::Measurement => (
             measurement_curves(&file)?,
-            "Measurement",
             Vec::new(),
             serde_json::json!({"method": "measurement_native"}),
         ),
     };
     let measurement = file.summary().source_kind == SourceKind::Measurement;
+    if debug.is_some() && !measurement {
+        warnings
+            .push("debug rate plots require measurement input; skipped for simulation data".into());
+    }
     warnings.extend(default_warnings(config, measurement));
     let relative_travel = normalization["method"] != "none";
     let metrics = gradient_metrics(config, &curves, relative_travel, measurement, &mut warnings)?;
@@ -117,18 +116,6 @@ pub(crate) fn analyze_input_with_footer(
     let curve_count = detail["curves"].as_array().unwrap().len();
     Ok(Reports {
         detail: serde_json::to_string_pretty(&detail)? + "\n",
-        plots: if plots {
-            curve_plots(
-                config,
-                &detail["curves"],
-                source,
-                footer.unwrap_or(""),
-                measurement,
-                debug,
-            )?
-        } else {
-            BTreeMap::new()
-        },
         curve_count,
         metrics: detail["metrics"].as_array().unwrap().clone(),
         warnings: detail["warnings"]
@@ -139,7 +126,17 @@ pub(crate) fn analyze_input_with_footer(
             .collect(),
         normalization: detail["normalization"].clone(),
         branch: branch_options(config, measurement).clone(),
+        measurement,
     })
+}
+
+/// Display source label for plot titles: the counterpart to `Reports::measurement`.
+pub(crate) fn source_label(measurement: bool) -> &'static str {
+    if measurement {
+        "Measurement"
+    } else {
+        "Simulation"
+    }
 }
 
 /// Warn about every optional vertical setting the configuration leaves unset.
@@ -581,14 +578,16 @@ fn convention(
         .ok_or_else(|| anyhow::anyhow!("vertical signal convention missing: {name}"))
 }
 
-fn curve_plots(
+/// Render KnC vertical PDF plots. Separate from `analyze_input` so slow
+/// rendering happens only after the caller has already displayed metrics.
+pub(crate) fn curve_plots(
     config: &CaseConfig,
     curves: &serde_json::Value,
-    source_label: &str,
     footer: &str,
     measurement: bool,
     debug: Option<&str>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
+    let source_label = source_label(measurement);
     let curves = serde_json::to_string(curves)?;
     let gradient = config
         .vertical

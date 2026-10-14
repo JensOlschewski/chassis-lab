@@ -190,13 +190,7 @@ fn write_combined_run(
     };
     let footer = analysis_footer(&args.config, config, vertical_path, Some(&args.input))?;
     let debug = debug_info(args.debug, &args.config, &[vertical_path])?;
-    let vertical_report = vertical::analyze_input_with_footer(
-        config,
-        vertical_path,
-        args.output.is_some(),
-        Some(&footer),
-        debug.as_deref(),
-    )?;
+    let vertical_report = vertical::analyze_input(config, vertical_path, debug.as_deref())?;
     print_header("SVC", svc_metrics);
     let mut warnings = svc_warnings;
     warnings.extend(vertical_report.warnings.iter().cloned());
@@ -226,6 +220,13 @@ fn write_combined_run(
     svc_detail["case"] = bundle["case"].clone();
     svc_detail["inputs"]["run"] = bundle["inputs"]["run"].clone();
     let mut vertical_detail: serde_json::Value = serde_json::from_str(&vertical_report.detail)?;
+    let plots = vertical::curve_plots(
+        config,
+        &vertical_detail["curves"],
+        &footer,
+        vertical_report.measurement,
+        debug.as_deref(),
+    )?;
     vertical_detail["case"] = bundle["case"].clone();
     let mut vertical_inputs = bundle["inputs"].clone();
     vertical_inputs["input"] = provenance(vertical_path)?;
@@ -256,8 +257,7 @@ fn write_combined_run(
         ),
     ];
     files.extend(
-        vertical_report
-            .plots
+        plots
             .iter()
             .map(|(name, contents)| (name.as_str(), contents.clone())),
     );
@@ -580,13 +580,7 @@ fn write_vertical(
 ) -> Result<()> {
     let footer = analysis_footer(&args.config, config, input, run)?;
     let debug = debug_info(args.debug, &args.config, &[input])?;
-    let report = vertical::analyze_input_with_footer(
-        config,
-        input,
-        args.output.is_some(),
-        Some(&footer),
-        debug.as_deref(),
-    )?;
+    let report = vertical::analyze_input(config, input, debug.as_deref())?;
     print_header("KnC Vertical", report.metrics.len());
     print_metrics(&report.metrics);
     print_warnings(&report.warnings, args);
@@ -607,6 +601,13 @@ fn write_vertical(
         bundle["inputs"]["run"] = provenance(run)?;
     }
     let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
+    let plots = vertical::curve_plots(
+        config,
+        &detail["curves"],
+        &footer,
+        report.measurement,
+        debug.as_deref(),
+    )?;
     detail["case"] = bundle["case"].clone();
     detail["inputs"] = bundle["inputs"].clone();
     let detail = serde_json::to_string_pretty(&detail)? + "\n";
@@ -624,8 +625,7 @@ fn write_vertical(
         ("knc-vertical.json", detail.into_bytes()),
     ];
     files.extend(
-        report
-            .plots
+        plots
             .iter()
             .map(|(name, contents)| (name.as_str(), contents.clone())),
     );
