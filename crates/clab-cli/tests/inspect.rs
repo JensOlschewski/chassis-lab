@@ -69,7 +69,7 @@ fn inspects_measurement_hdf5_and_lists_channels() {
     assert!(stdout.contains("example-measurement-knc-vertical.acd"));
     assert!(stdout.contains("schema version: 2"));
     assert!(
-        stdout.contains("source kind: measurement\nsamples: 4096\nsignals: 41\ntest metadata: 5")
+        stdout.contains("source kind: measurement\nsamples: 4096\nsignals: 49\ntest metadata: 5")
     );
     assert!(stdout.contains("SIGNAL\tCOMPONENT\tUNIT\tSOURCE"));
     assert!(stdout.contains("lfwcx"));
@@ -188,6 +188,10 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     file.delete_attr("domain").unwrap();
     file.close().unwrap();
     let result = inspect(&broken);
-    assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("missing HDF5 attribute: domain"));
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(!result.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("missing HDF5 attribute: domain"),
+        "{stderr}"
+    );
 }

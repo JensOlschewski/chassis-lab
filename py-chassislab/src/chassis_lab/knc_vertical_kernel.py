@@ -1,7 +1,7 @@
 """Path-free numerical kernel for Rust-owned KnC vertical analysis."""
 
 import json
-from math import atan, degrees, sqrt
+from math import atan, degrees, pi, sqrt
 from typing import Any, NamedTuple, cast
 
 import numpy as np
@@ -64,6 +64,17 @@ GRADIENT_METRICS = (
         axis="wheel_pad_z",
         denominator="tire_deflection",
     ),
+    # Stuetzwinkel: atan(-d(contact_patch_x)/d(wheel_pad_z)), same "angle" math
+    # as wheel_recession_angle but measured at the contact patch instead of
+    # the wheel center.
+    GradientMetric(
+        "brake_support_angle",
+        "deg",
+        "contact_patch_x",
+        "deg",
+        "angle",
+        axis="wheel_pad_z",
+    ),
 )
 
 PLOT_SIGNALS = {
@@ -80,6 +91,10 @@ PLOT_SIGNALS = {
     "ride_rate": SignalStyle("Ride rate", "newton/mm"),
     "tire_rate": SignalStyle("Tire rate", "newton/mm"),
     "wheel_recession_angle": SignalStyle("Wheel recession angle", "deg"),
+    "contact_patch_x": SignalStyle("Contact patch X", "mm"),
+    "contact_patch_y": SignalStyle("Contact patch Y", "mm"),
+    "brake_support_angle": SignalStyle("Brake support angle", "deg"),
+    "ride_frequency": SignalStyle("Ride frequency", "Hz"),
 }
 
 
@@ -199,6 +214,39 @@ PLOT_SPECS = (
         optional=True,
         gradient=GradientDisplay("bump spin", "deg/mm"),
     ),
+    PlotSpec(
+        "knc_vertical_wpz_vs_cpx",
+        "Bounce - Vertical Wheel pad Travel / Longitudinal Disp. of Patch",
+        "wheel_pad_z",
+        "contact_patch_x",
+        optional=True,
+    ),
+    PlotSpec(
+        "knc_vertical_wpz_vs_cpy",
+        "Bounce - Vertical Wheel pad Travel / Lateral Disp. of Contact Patch",
+        "wheel_pad_z",
+        "contact_patch_y",
+        optional=True,
+    ),
+    PlotSpec(
+        "knc_vertical_brake_support_angle",
+        "Bounce - Vertical Wheel pad Travel / Brake support angle",
+        "wheel_pad_z",
+        "contact_patch_x",
+        "brake_support_angle",
+        branch={"edge_width": 100, "edge_percentile": 0.95},
+        transform=_wheel_recession_angle,
+        from_gradient=_recession_angle,
+        optional=True,
+    ),
+    PlotSpec(
+        "knc_vertical_ride_frequency",
+        "Bounce - Vertical Wheel center Travel / Ride frequency",
+        "wheel_center_z",
+        "ride_frequency",
+        optional=True,
+        y_limits=(0, 2),
+    ),
 )
 
 
@@ -254,8 +302,65 @@ def metrics(request: dict[str, object]) -> str:
                     "angle": degrees(atan(-delta / (2.0 * gradient))),
                 }[metric.kind]
             results.append(result)
+    results.extend(_ride_frequency_metrics(results, request))
     results.sort(key=lambda item: str(item["metric"]))
     return json.dumps({"metrics": results})
+
+
+def _ride_frequency_metrics(
+    results: list[dict[str, object]], request: dict[str, object]
+) -> list[dict[str, object]]:
+    """f_ride = 1/(2*pi) * sqrt(1000 * K_w / m), K_w = suspension_rate, m per
+    corner.
+
+    Reverse-engineered from a real Lommel bounce-rig ACD measurement: its
+    `*rfreq` channel matches this formula exactly, against the wheel rate
+    (`suspension_rate`, not the tire-combined `ride_rate`) and a per-corner
+    mass identical to SVC's `<corner>_mass_kg` for the same vehicle. `m` is
+    resolved in Rust (`gradient_metrics` in `vertical.rs`): the run's own SVC
+    output if present, else the `sprung_mass_<corner>_kg` config fallback.
+    """
+    suspension_rate = {
+        result["corner"]: result["value"]
+        for result in results
+        if str(result["metric"]).startswith("suspension_rate_")
+        and str(result["metric"]).endswith("_n_per_mm")
+    }
+    corner_mass_kg = json.loads(str(request.get("corner_mass_kg") or "{}"))
+    corner_mass_source = json.loads(
+        str(request.get("corner_mass_source") or "{}")
+    )
+    ride_frequency_results = []
+    for corner in CORNERS:
+        rate = suspension_rate.get(corner)
+        mass = corner_mass_kg.get(corner)
+        result = {
+            "corner": corner,
+            "metric": f"ride_frequency_{corner}_hz",
+            "unit": "Hz",
+            "value": None,
+            "lower": None,
+            "upper": None,
+            "reason": None,
+            "suspension_rate_n_per_mm": rate,
+            "corner_mass_kg": mass,
+            "corner_mass_source": corner_mass_source.get(corner),
+        }
+        if rate is None:
+            result["reason"] = "suspension_rate unavailable"
+        elif mass is None:
+            result["reason"] = (
+                f"corner mass unavailable (no SVC {corner}_mass_kg in this "
+                f"run, no sprung_mass_{corner}_kg configured)"
+            )
+        elif rate <= 0.0 or mass <= 0.0:
+            result["reason"] = (
+                "suspension_rate and corner mass must be positive"
+            )
+        else:
+            result["value"] = (1.0 / (2.0 * pi)) * sqrt(1000.0 * rate / mass)
+        ride_frequency_results.append(result)
+    return ride_frequency_results
 
 
 def _span(points: tuple[float, float]) -> float:
@@ -288,6 +393,77 @@ def _with_pad_travel(
             }
         )
     return [*curves, *derived]
+
+
+def _with_ride_frequency(
+    curves: list[dict[str, object]],
+    corner_mass_kg: dict[str, float],
+    options: BranchOptions,
+) -> list[dict[str, object]]:
+    """Add a per-sample ride_frequency curve where wheel_load and mass allow.
+
+    f_ride(z) = 1/(2*pi) * sqrt(1000 * local wheel rate / mass), using the
+    *local* d(wheel_load)/d(wheel_center_z) at every sample -- unlike the
+    `ride_frequency` metric, which uses the configured secant
+    `suspension_rate`. Same split as `suspension_rate` itself: the metric is
+    a secant scalar, the plot is the full local-gradient curve.
+
+    The gradient is taken per sweep -- same branch detection the
+    `suspension_rate` plot uses (`options.plot_sweeps`) -- not across the
+    full hysteretic travel array, otherwise the derivative blows up at
+    sweep reversals where travel briefly reverses direction.
+    """
+    indexed = {(item["corner"], item["signal"]): item for item in curves}
+    derived = []
+    for corner in CORNERS:
+        mass = corner_mass_kg.get(corner)
+        travel = indexed.get((corner, "wheel_center_z"))
+        load = indexed.get((corner, "wheel_load"))
+        if mass is None or not (travel and load):
+            continue
+        travel_values = np.asarray(travel["values"], dtype=np.float64)
+        load_values = np.asarray(load["values"], dtype=np.float64)
+        rate = np.full_like(travel_values, np.nan)
+        for sweep in options.plot_sweeps(travel_values):
+            axis, values = travel_values[sweep], load_values[sweep]
+            finite = np.isfinite(axis) & np.isfinite(values)
+            if finite.sum() < 2:
+                continue
+            with np.errstate(divide="ignore", invalid="ignore"):
+                sweep_rate = np.gradient(values[finite], axis[finite])
+            local = np.full(finite.shape, np.nan)
+            local[finite] = sweep_rate
+            rate[sweep] = local
+        with np.errstate(divide="ignore", invalid="ignore"):
+            frequency = np.where(
+                rate > 0.0,
+                (1.0 / (2.0 * pi)) * np.sqrt(1000.0 * rate / mass),
+                np.nan,
+            )
+        derived.append(
+            {
+                "corner": corner,
+                "signal": "ride_frequency",
+                "values": frequency.tolist(),
+                "unit": "Hz",
+            }
+        )
+    return [*curves, *derived]
+
+
+def _derive_curves(
+    curves: list[dict[str, object]],
+    corner_mass_kg: dict[str, float],
+    options: BranchOptions,
+) -> list[dict[str, object]]:
+    """All curves synthesized before the generic plot catalog runs.
+
+    One series' worth of derivation -- `plot()` (one source) and
+    `plot_compare()` (baseline plus each candidate, one call per series)
+    both route through this instead of repeating the sequence.
+    """
+    curves = _with_pad_travel(curves)
+    return _with_ride_frequency(curves, corner_mass_kg, options)
 
 
 def _secant_points(
@@ -438,10 +614,15 @@ def plot(
     gradient_points_mm: float | None = None,
     branch: str | None = None,
     debug: str | None = None,
+    corner_mass_kg: str | None = None,
 ) -> dict[str, bytes]:
     """Render vertical report catalog through generic KnC plot kernel."""
-    curves = _with_pad_travel(json.loads(curves_json))
     options = BranchOptions.from_json(branch)
+    curves = _derive_curves(
+        json.loads(curves_json),
+        json.loads(corner_mass_kg) if corner_mass_kg else {},
+        options,
+    )
     reports = render_reports(
         curves,
         PLOT_SPECS,
@@ -478,18 +659,30 @@ def plot_compare(
     gradient_points_mm: float | None = None,
     branches_json: str | None = None,
     debug: str | None = None,
+    corner_mass_kg: str | None = None,
 ) -> dict[str, bytes]:
-    """Render vertical overlays; `branches_json` has one entry per series."""
-    baseline = _with_pad_travel(json.loads(baseline_json))
-    candidates = [
-        {**item, "curves": _with_pad_travel(item["curves"])}
-        for item in json.loads(candidates_json)
-    ]
+    """Render vertical overlays.
+
+    `branches_json` and `corner_mass_kg` each have one entry per series,
+    baseline first then every candidate in order -- the same ordering
+    `vertical::compare_plots` (Rust) builds both lists in.
+    """
+    candidates_raw = json.loads(candidates_json)
     branches = (
         [BranchOptions.from_json(item) for item in json.loads(branches_json)]
         if branches_json
-        else [BranchOptions()] * (len(candidates) + 1)
+        else [BranchOptions()] * (len(candidates_raw) + 1)
     )
+    masses = (
+        json.loads(corner_mass_kg) if corner_mass_kg else [{}] * len(branches)
+    )
+    baseline = _derive_curves(json.loads(baseline_json), masses[0], branches[0])
+    candidates = [
+        {**item, "curves": _derive_curves(item["curves"], mass, options)}
+        for item, mass, options in zip(
+            candidates_raw, masses[1:], branches[1:], strict=True
+        )
+    ]
     reports = render_comparison_reports(
         baseline,
         candidates,

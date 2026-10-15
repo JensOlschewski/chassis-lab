@@ -61,6 +61,10 @@ pub struct VerticalWindow {
     /// Symmetric wheel-center travel offset for secant gradient metrics;
     /// `None` when the configuration does not set it.
     pub gradient_points_mm: Option<f64>,
+    /// Per-corner fallback mass for `ride_frequency`, keyed by corner name
+    /// (`"front_left"` etc.). Only used when SVC's `<corner>_mass_kg` is not
+    /// available in the same run; a configured value always overrides it.
+    pub sprung_mass_kg: BTreeMap<String, f64>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalConfig {
@@ -1678,9 +1682,22 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             "index",
             "measurement",
             "simulation",
+            "sprung_mass_front_left_kg",
+            "sprung_mass_front_right_kg",
+            "sprung_mass_rear_left_kg",
+            "sprung_mass_rear_right_kg",
         ],
         "[vertical.metric]",
     )?;
+    let mut sprung_mass_kg = BTreeMap::new();
+    for corner in ["front_left", "front_right", "rear_left", "rear_right"] {
+        if let Some(value) = metric.get(&format!("sprung_mass_{corner}_kg")) {
+            sprung_mass_kg.insert(
+                corner.to_owned(),
+                positive(value, &format!("sprung_mass_{corner}_kg"))?,
+            );
+        }
+    }
     let mut window_extra = Map::new();
     if let Some(branch) = v.get("branch") {
         fold_legacy_branch(branch, &mut metric, &mut window_extra)?;
@@ -1801,6 +1818,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             maximum_mm: max,
             step_mm: step,
             gradient_points_mm: gradient,
+            sprung_mass_kg,
         },
         branch,
         signals: source.1,
@@ -2416,6 +2434,22 @@ mod tests {
             let message = load_config(&p).unwrap_err().to_string();
             assert!(message.contains(error), "{message}");
         }
+    }
+
+    #[test]
+    fn parses_sprung_mass_fallback_per_corner() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.metric]\nsprung_mass_front_left_kg=449.0\nsprung_mass_rear_right_kg=383.0\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n",
+        )
+        .unwrap();
+        let window = load_config(&p).unwrap().vertical.unwrap().window;
+        assert_eq!(window.sprung_mass_kg.get("front_left"), Some(&449.0));
+        assert_eq!(window.sprung_mass_kg.get("rear_right"), Some(&383.0));
+        assert_eq!(window.sprung_mass_kg.get("front_right"), None);
+        assert_eq!(window.sprung_mass_kg.len(), 2);
     }
 
     #[test]

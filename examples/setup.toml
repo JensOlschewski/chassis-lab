@@ -25,6 +25,22 @@ plot_branches = "all"     # all | selected (only the sweep used by the metrics)
 # Metric computation
 # secants between -gradient_points_mm and +gradient_points_mm
 # gradient_points_mm: default 10 and limited to the travel window.
+#
+# ride_frequency = 1/(2*pi) * sqrt(1000 * suspension_rate / mass_kg).
+# mass_kg comes from this run's own SVC `<corner>_mass_kg` output when SVC
+# and KnC vertical run together (the normal case) -- no config needed. Set
+# sprung_mass_<corner>_kg below only for a KnC-vertical-only run, or to
+# override the SVC value; a configured value always wins.
+# sprung_mass_front_left_kg = 449.0
+# sprung_mass_front_right_kg = 427.0
+# sprung_mass_rear_left_kg = 384.0
+# sprung_mass_rear_right_kg = 383.0
+#
+# brake_support_angle = atan(-d(contact_patch_x)/d(wheel_pad_z)) at the
+# gradient points, same math as wheel_recession_angle but at the contact
+# patch instead of the wheel center (Stuetzwinkel, per Heissing/Matschinsky).
+# Needs front_left_contact_patch_x etc. mapped under [signals]; unavailable
+# otherwise, same as any other metric missing its canonical signal.
 [knc.metric]
 gradient_points_mm = 10
 direction = "rise"        # rise | fall | any

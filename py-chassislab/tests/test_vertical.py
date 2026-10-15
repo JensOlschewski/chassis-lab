@@ -2,7 +2,7 @@ import json
 import subprocess
 import sys
 from io import BytesIO
-from math import atan, degrees
+from math import atan, degrees, pi, sqrt
 from pathlib import Path
 
 import numpy as np
@@ -122,7 +122,7 @@ def test_metrics_use_secants_at_symmetric_travel_points() -> None:
         )
     )
     values = {item["metric"]: item for item in response["metrics"]}
-    assert len(values) == 28
+    assert len(values) == 36
     assert values["bump_steer_front_left_deg_per_mm"]["value"] == pytest.approx(
         0.01
     )
@@ -174,6 +174,73 @@ def test_metrics_report_unavailable_reasons() -> None:
     camber = values["bump_camber_front_left_deg_per_mm"]
     assert camber["value"] is None
     assert "does not cover wheel_center_z travel -20..20 mm" in camber["reason"]
+
+
+def test_brake_support_angle_uses_contact_patch_and_wheel_pad_travel() -> None:
+    z = [-10.0, -5.0, 0.0, 5.0, 10.0, 10.0, 5.0, 0.0, -5.0, -10.0]
+    # wheel_pad_z = wheel_center_z + tire_deflection = 1.1 * z (default
+    # curves), so contact_patch_x = -0.1 * wheel_pad_z gives a clean
+    # atan(0.1), same shape as the existing wheel_recession_angle check but
+    # on the pad axis instead of wheel-center, per the Stuetzwinkel
+    # definition (contact-patch x/z, not wheel-center x/z).
+    response = json.loads(
+        metrics(
+            {
+                "gradient_mm": 5.0,
+                "curves": _metric_curves(
+                    contact_patch_x=[-0.11 * value for value in z]
+                ),
+                "branch": {"index": 1},
+            }
+        )
+    )
+    values = {item["metric"]: item for item in response["metrics"]}
+    assert values["brake_support_angle_front_left_deg"][
+        "value"
+    ] == pytest.approx(degrees(atan(0.1)))
+
+
+def test_ride_frequency_uses_suspension_rate_and_corner_mass() -> None:
+    response = json.loads(
+        metrics(
+            {
+                "gradient_mm": 5.0,
+                "curves": _metric_curves(),
+                "branch": {"index": 1},
+                "corner_mass_kg": json.dumps({"front_left": 180.0}),
+                "corner_mass_source": json.dumps({"front_left": "config"}),
+            }
+        )
+    )
+    values = {item["metric"]: item for item in response["metrics"]}
+    rate = values["suspension_rate_front_left_n_per_mm"]["value"]
+    assert rate == pytest.approx(25.0)
+    ride_frequency = values["ride_frequency_front_left_hz"]
+    assert ride_frequency["value"] == pytest.approx(
+        (1.0 / (2.0 * pi)) * sqrt(1000.0 * rate / 180.0)
+    )
+    assert ride_frequency["suspension_rate_n_per_mm"] == pytest.approx(rate)
+    assert ride_frequency["corner_mass_kg"] == pytest.approx(180.0)
+    assert ride_frequency["corner_mass_source"] == "config"
+    # No mass supplied for front_right: unavailable, not zero/substituted.
+    missing = values["ride_frequency_front_right_hz"]
+    assert missing["value"] is None
+    assert "corner mass unavailable" in missing["reason"]
+
+
+def test_ride_frequency_formula_matches_real_lommel_rig_channel() -> None:
+    """Pin the formula to real rig data, not just its own round-trip.
+
+    From `ford-b479-data/measures/varb/knc/bounce b1e0f1 front and rear.acd`,
+    front-left, sample 0: wheel rate (`lfwr_deriv`) 72.0628 N/mm, ride
+    frequency (`lfrfreq`) 2.0163 Hz, reverse-engineered mass 449.0 kg
+    (constant across the whole sweep for that corner).
+    """
+    rate_n_per_mm = 72.0628
+    mass_kg = 449.0
+    expected_hz = 2.0163
+    computed_hz = (1.0 / (2.0 * pi)) * sqrt(1000.0 * rate_n_per_mm / mass_kg)
+    assert computed_hz == pytest.approx(expected_hz, abs=1e-3)
 
 
 def test_numeric_kernel_import_does_not_require_matplotlib() -> None:
@@ -308,6 +375,98 @@ def test_plot_adds_optional_direct_vertical_curves_and_suspension_rate() -> (
     assert "plots/knc/vertical/knc_vertical_spin.pdf" in reports
     assert "plots/knc/vertical/knc_vertical_ride_rate.pdf" in reports
     assert "plots/knc/vertical/knc_vertical_tire_rate.pdf" in reports
+    # No corner_mass_kg supplied: the ride_frequency plot is skipped, same as
+    # any other optional plot missing its signal -- not an error.
+    assert "plots/knc/vertical/knc_vertical_ride_frequency.pdf" not in reports
+
+    reports_with_mass = plot(
+        json.dumps(curves),
+        gradient_points_mm=0.5,
+        corner_mass_kg=json.dumps(
+            {
+                "front_left": 449.0,
+                "front_right": 427.0,
+                "rear_left": 384.0,
+                "rear_right": 383.0,
+            }
+        ),
+    )
+    assert (
+        "plots/knc/vertical/knc_vertical_ride_frequency.pdf"
+        in reports_with_mass
+    )
+    assert reports_with_mass[
+        "plots/knc/vertical/knc_vertical_ride_frequency.pdf"
+    ].startswith(b"%PDF")
+
+
+def test_plot_compare_renders_ride_frequency_with_per_series_mass() -> None:
+    curves = [
+        {
+            "corner": corner,
+            "signal": signal,
+            "values": [-1.0, 0.0, 1.0],
+            "unit": unit,
+        }
+        for corner in (
+            "front_left",
+            "front_right",
+            "rear_left",
+            "rear_right",
+        )
+        for signal, unit in (
+            ("wheel_center_x", "mm"),
+            ("wheel_center_y", "mm"),
+            ("wheel_center_z", "mm"),
+            ("wheel_load", "newton"),
+            ("toe", "deg"),
+            ("camber", "deg"),
+            ("spin", "deg"),
+            ("tire_deflection", "mm"),
+        )
+    ]
+    mass = {
+        "front_left": 449.0,
+        "front_right": 427.0,
+        "rear_left": 384.0,
+        "rear_right": 383.0,
+    }
+    reports = plot_compare(
+        json.dumps(curves),
+        json.dumps([{"label": "Curve 1", "curves": curves}]),
+        "Baseline",
+        "",
+        None,
+        0.5,
+        corner_mass_kg=json.dumps([mass, mass]),
+    )
+    assert reports["knc_vertical_ride_frequency.pdf"].startswith(b"%PDF")
+
+    # One series missing mass (empty map): no crash. Same as any other
+    # signal unavailable on one series only, the overlay plot needs it on
+    # every series, so it is skipped entirely rather than drawn one-sided.
+    reports_partial = plot_compare(
+        json.dumps(curves),
+        json.dumps([{"label": "Curve 1", "curves": curves}]),
+        "Baseline",
+        "",
+        None,
+        0.5,
+        corner_mass_kg=json.dumps([mass, {}]),
+    )
+    assert "knc_vertical_ride_frequency.pdf" not in reports_partial
+
+    # No corner_mass_kg at all: same as analyze's `plot()` -- the optional
+    # plot is simply absent, not an error.
+    reports_without_mass = plot_compare(
+        json.dumps(curves),
+        json.dumps([{"label": "Curve 1", "curves": curves}]),
+        "Baseline",
+        "",
+        None,
+        0.5,
+    )
+    assert "knc_vertical_ride_frequency.pdf" not in reports_without_mass
 
 
 def test_comparison_plot_uses_ordered_curve_colors_and_footer() -> None:

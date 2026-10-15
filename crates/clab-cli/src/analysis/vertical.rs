@@ -42,6 +42,11 @@ pub(crate) struct Reports {
     pub normalization: serde_json::Value,
     pub branch: VerticalBranch,
     pub measurement: bool,
+    /// Per-corner mass backing `ride_frequency`: config override, else this
+    /// run's SVC `<corner>_mass_kg`, else absent. Computed once here and
+    /// reused by both the metric calculation and the `ride_frequency` plot
+    /// (`curve_plots`/`compare_plots`), so callers never recompute it.
+    pub corner_mass_kg: BTreeMap<String, f64>,
 }
 
 /// Calculate KnC vertical curves, metrics, and warnings. Does not render
@@ -51,6 +56,7 @@ pub(crate) struct Reports {
 pub(crate) fn analyze_input(
     config: &CaseConfig,
     path: &Path,
+    svc_corner_mass_kg: Option<&BTreeMap<String, f64>>,
     debug: Option<&str>,
 ) -> Result<Reports> {
     let file = CanonicalFile::open(path)
@@ -99,7 +105,20 @@ pub(crate) fn analyze_input(
     }
     warnings.extend(default_warnings(config, measurement));
     let relative_travel = normalization["method"] != "none";
-    let metrics = gradient_metrics(config, &curves, relative_travel, measurement, &mut warnings)?;
+    let (corner_mass_kg, corner_mass_source) = config
+        .vertical
+        .as_ref()
+        .map(|vertical| corner_mass(&vertical.window, svc_corner_mass_kg))
+        .unwrap_or_default();
+    let metrics = gradient_metrics(
+        config,
+        &curves,
+        relative_travel,
+        measurement,
+        &corner_mass_kg,
+        &corner_mass_source,
+        &mut warnings,
+    )?;
     warnings.sort();
     warnings.dedup();
     let warnings = tag_warnings("knc", Some("vertical"), warnings);
@@ -127,6 +146,7 @@ pub(crate) fn analyze_input(
         normalization: detail["normalization"].clone(),
         branch: branch_options(config, measurement).clone(),
         measurement,
+        corner_mass_kg,
     })
 }
 
@@ -199,6 +219,8 @@ fn gradient_metrics(
     curves: &[Curve],
     relative_travel: bool,
     measurement: bool,
+    corner_mass_kg: &BTreeMap<String, f64>,
+    corner_mass_source: &BTreeMap<String, &'static str>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<serde_json::Value>> {
     let Some(window) = config.vertical.as_ref().map(|vertical| &vertical.window) else {
@@ -216,6 +238,8 @@ fn gradient_metrics(
         warnings.push("metrics require static_simulation normalization; metrics skipped".into());
         return Ok(Vec::new());
     }
+    let corner_mass_kg = serde_json::to_string(corner_mass_kg)?;
+    let corner_mass_source = serde_json::to_string(corner_mass_source)?;
     let curves = serde_json::to_string(curves)?;
     let branch = serde_json::to_string(branch_options(config, measurement))?;
     let response: String = with_kernel(|py, module| {
@@ -223,6 +247,8 @@ fn gradient_metrics(
         request.set_item("gradient_mm", gradient)?;
         request.set_item("curves", &curves)?;
         request.set_item("branch", &branch)?;
+        request.set_item("corner_mass_kg", &corner_mass_kg)?;
+        request.set_item("corner_mass_source", &corner_mass_source)?;
         module.getattr("metrics")?.call1((request,))?.extract()
     })
     .context("failed to calculate vertical metrics with embedded Python")?;
@@ -231,6 +257,9 @@ fn gradient_metrics(
     let metrics = response["metrics"]
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("embedded Python returned incomplete vertical metrics"))?;
+    const KNOWN_FIELDS: [&str; 7] = [
+        "corner", "metric", "unit", "value", "lower", "upper", "reason",
+    ];
     Ok(metrics
         .iter()
         .map(|metric| {
@@ -240,7 +269,7 @@ fn gradient_metrics(
                     metric["metric"].as_str().unwrap_or_default()
                 ));
             }
-            serde_json::json!({
+            let mut row = serde_json::json!({
                 "domain": "knc",
                 "test": "vertical",
                 "metric": metric["metric"],
@@ -249,9 +278,41 @@ fn gradient_metrics(
                 "interval_mm": [-gradient, gradient],
                 "lower": metric["lower"],
                 "upper": metric["upper"],
-            })
+            });
+            // Forward derived metrics' extra calc-input fields (e.g. ride_frequency's
+            // suspension_rate_n_per_mm/corner_mass_kg/corner_mass_source) generically,
+            // without the base row shape knowing every metric's own provenance fields.
+            if let Some(object) = metric.as_object() {
+                for (key, value) in object {
+                    if !KNOWN_FIELDS.contains(&key.as_str()) {
+                        row[key] = value.clone();
+                    }
+                }
+            }
+            row
         })
         .collect())
+}
+
+/// Per-corner mass for `ride_frequency`: a configured `sprung_mass_<corner>_kg`
+/// overrides the same run's SVC `<corner>_mass_kg`; otherwise SVC fills the gap.
+/// Missing both leaves that corner absent from the maps.
+fn corner_mass(
+    window: &clab_core::config::VerticalWindow,
+    svc_corner_mass_kg: Option<&BTreeMap<String, f64>>,
+) -> (BTreeMap<String, f64>, BTreeMap<String, &'static str>) {
+    let mut mass = BTreeMap::new();
+    let mut source = BTreeMap::new();
+    for corner in CORNERS {
+        if let Some(value) = window.sprung_mass_kg.get(corner) {
+            mass.insert(corner.to_string(), *value);
+            source.insert(corner.to_string(), "config");
+        } else if let Some(value) = svc_corner_mass_kg.and_then(|map| map.get(corner)) {
+            mass.insert(corner.to_string(), *value);
+            source.insert(corner.to_string(), "svc");
+        }
+    }
+    (mass, source)
 }
 
 fn effective_gradient_points(window: &clab_core::config::VerticalWindow) -> f64 {
@@ -263,32 +324,52 @@ fn effective_gradient_points(window: &clab_core::config::VerticalWindow) -> f64 
 }
 
 /// Render same canonical curves together. Rust owns input selection; Python only draws arrays.
+///
+/// `corner_mass_kg` carries one map per series, baseline first then each
+/// candidate in order (same ordering as `branch`), each series' own mass
+/// since baseline and candidate can each resolve mass from their own SVC
+/// run. It renders the `ride_frequency` curve plot for series that have it,
+/// same as `curve_plots` does for a single-source `analyze` report.
 pub(crate) fn compare_plots(
     config: &CaseConfig,
-    (baseline, baseline_branch): (&serde_json::Value, &VerticalBranch),
-    candidates: &[(String, serde_json::Value, VerticalBranch)],
+    (baseline, baseline_branch, baseline_mass): (
+        &serde_json::Value,
+        &VerticalBranch,
+        &BTreeMap<String, f64>,
+    ),
+    candidates: &[(
+        String,
+        serde_json::Value,
+        VerticalBranch,
+        BTreeMap<String, f64>,
+    )],
     baseline_label: &str,
     footer: &str,
     prefix: &str,
     debug: Option<&str>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
-    let baseline = serde_json::to_string(baseline)?;
+    let baseline_json = serde_json::to_string(baseline)?;
     let candidates_json = serde_json::to_string(
         &candidates
             .iter()
-            .map(|(label, curves, _)| serde_json::json!({"label": label, "curves": curves}))
+            .map(|(label, curves, ..)| serde_json::json!({"label": label, "curves": curves}))
             .collect::<Vec<_>>(),
     )?;
     let branch = serde_json::to_string(
         &std::iter::once(baseline_branch)
-            .chain(candidates.iter().map(|(_, _, branch)| branch))
+            .chain(candidates.iter().map(|(_, _, branch, _)| branch))
+            .collect::<Vec<_>>(),
+    )?;
+    let corner_mass_kg = serde_json::to_string(
+        &std::iter::once(baseline_mass)
+            .chain(candidates.iter().map(|(_, _, _, mass)| mass))
             .collect::<Vec<_>>(),
     )?;
     let reports: BTreeMap<String, Vec<u8>> = with_kernel(|py, module| {
         module
             .getattr("plot_compare")?
             .call1((
-                &baseline,
+                &baseline_json,
                 &candidates_json,
                 baseline_label,
                 footer,
@@ -299,6 +380,7 @@ pub(crate) fn compare_plots(
                     .map(|vertical| effective_gradient_points(&vertical.window)),
                 &branch,
                 debug,
+                &corner_mass_kg,
             ))?
             .extract()
     })
@@ -463,7 +545,15 @@ fn optional_simulation_curves(
     curves: &mut Vec<Curve>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
-    for suffix in ["wheel_load", "toe", "camber", "spin", "tire_deflection"] {
+    for suffix in [
+        "wheel_load",
+        "toe",
+        "camber",
+        "spin",
+        "tire_deflection",
+        "contact_patch_x",
+        "contact_patch_y",
+    ] {
         let name = format!("{corner}_{suffix}");
         let Some(reference) = vertical.signals.get(&name) else {
             continue;
@@ -524,6 +614,8 @@ fn optional_measurement_curves(
         ("spin", format!("{prefix}cas"), "deg", false),
         ("wheel_pad_z", format!("{prefix}pz"), "mm", true),
         ("tire_deflection", format!("{prefix}tdef"), "mm", true),
+        ("contact_patch_x", format!("{prefix}cpx"), "mm", true),
+        ("contact_patch_y", format!("{prefix}cpy"), "mm", true),
     ] {
         if !measurement
             .signals()
@@ -580,11 +672,17 @@ fn convention(
 
 /// Render KnC vertical PDF plots. Separate from `analyze_input` so slow
 /// rendering happens only after the caller has already displayed metrics.
+///
+/// `corner_mass_kg` renders the `ride_frequency` curve plot (same per-corner
+/// mass the metric uses: config override, else this run's SVC
+/// `<corner>_mass_kg` -- see `corner_mass`). Empty when neither is available;
+/// the plot is then skipped like any other optional signal.
 pub(crate) fn curve_plots(
     config: &CaseConfig,
     curves: &serde_json::Value,
     footer: &str,
     measurement: bool,
+    corner_mass_kg: &BTreeMap<String, f64>,
     debug: Option<&str>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let source_label = source_label(measurement);
@@ -594,10 +692,20 @@ pub(crate) fn curve_plots(
         .as_ref()
         .map(|vertical| effective_gradient_points(&vertical.window));
     let branch = serde_json::to_string(branch_options(config, measurement))?;
+    let corner_mass_kg = serde_json::to_string(corner_mass_kg)?;
     with_kernel(|py, module| {
         module
             .getattr("plot")?
-            .call1((curves, source_label, footer, logo(py), gradient, &branch, debug))?
+            .call1((
+                curves,
+                source_label,
+                footer,
+                logo(py),
+                gradient,
+                &branch,
+                debug,
+                &corner_mass_kg,
+            ))?
             .extract()
     })
     .context("failed to generate vertical PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'")

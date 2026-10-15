@@ -32,7 +32,7 @@ fn simulation_with_test(path: &std::path::Path, test: &str) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 5_u64);
-    scalar(&file, "signal_count", 16_u64);
+    scalar(&file, "signal_count", 24_u64);
     string(&file, "source_kind", "simulation");
     string(&file, "domain", "knc");
     string(&file, "test", test);
@@ -51,6 +51,8 @@ fn simulation_with_test(path: &std::path::Path, test: &str) {
             ("x", [100., 98., 100., 102., 102.], 2),
             ("y", [200., 197., 200., 203., 203.], 3),
             ("z", [300., 299., 300., 301., 301.], 4),
+            ("cpx", [50., 48., 50., 52., 52.], 5),
+            ("cpy", [60., 58., 60., 62., 62.], 6),
         ] {
             let group = signals
                 .create_group(&format!("{corner}_{component}"))
@@ -116,7 +118,7 @@ fn measurement(path: &std::path::Path) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 6_u64);
-    scalar(&file, "signal_count", 40_u64);
+    scalar(&file, "signal_count", 48_u64);
     string(&file, "source_kind", "measurement");
     string(&file, "domain", "knc");
     string(&file, "test", "vertical");
@@ -190,6 +192,18 @@ fn measurement(path: &std::path::Path) {
             &[16.9, 17., 17.1, 17.1, 17., 16.9],
             17.,
         );
+        channel(
+            &signals,
+            &format!("{prefix}cpx"),
+            &[48., 50., 52., 52., 50., 48.],
+            50.,
+        );
+        channel(
+            &signals,
+            &format!("{prefix}cpy"),
+            &[58., 60., 62., 62., 60., 58.],
+            60.,
+        );
     }
     let metadata = file.create_group("measurement").unwrap();
     let info = metadata.create_group("test_info").unwrap();
@@ -226,6 +240,8 @@ fn config(path: &std::path::Path, omit: bool) {
             ("wheel_center_x", "x"),
             ("wheel_center_y", "y"),
             ("wheel_center_z", "z"),
+            ("contact_patch_x", "cpx"),
+            ("contact_patch_y", "cpy"),
         ] {
             if omit && corner == "front_left" && name == "wheel_center_x" {
                 continue;
@@ -235,6 +251,10 @@ fn config(path: &std::path::Path, omit: bool) {
     }
     fs::write(path,format!("[meta]\nname=\"fixture\"\nloadcase=\"L\"\n[physics]\ngravity=9.80665\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
 }
+
+/// Real reverse-engineered VARB corner masses; ride_frequency's fallback when
+/// no SVC domain runs alongside KnC vertical in the same analyze/compare.
+const SPRUNG_MASS_KG: &str = "sprung_mass_front_left_kg=449.0\nsprung_mass_front_right_kg=427.0\nsprung_mass_rear_left_kg=384.0\nsprung_mass_rear_right_kg=383.0\n";
 
 #[test]
 fn analyzes_normalized_hdf5_as_curve_bundle() {
@@ -332,7 +352,9 @@ fn assert_measurement_metrics(
         .replace("step_mm=1\n", "step_mm=1\nplot_branches='all'\n");
     fs::write(
         &config_path,
-        format!("{text}\n[setup.knc.vertical.metric]\n{gradient}direction='any'\nindex=1\n"),
+        format!(
+            "{text}\n[setup.knc.vertical.metric]\n{gradient}direction='any'\nindex=1\n{SPRUNG_MASS_KG}"
+        ),
     )
     .unwrap();
     let output = directory.join("reports");
@@ -354,7 +376,10 @@ fn assert_measurement_metrics(
         String::from_utf8_lossy(&result.stderr)
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.contains("KnC Vertical\nrunning 28 metrics"));
+    assert!(
+        stdout.contains("KnC Vertical\nrunning 36 metrics"),
+        "{stdout}"
+    );
     let stderr = String::from_utf8_lossy(&result.stderr);
     if gradient.is_empty() {
         // Every other key is set, so only the gradient default is reported.
@@ -397,7 +422,7 @@ fn assert_measurement_metrics(
     assert!(csv.contains("fixture,knc,vertical,suspension_rate_rear_right_n_per_mm,N/mm,30"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["domains"][0]["metric_count"], 28);
+    assert_eq!(report["domains"][0]["metric_count"], 36);
 }
 
 #[test]
@@ -434,7 +459,7 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
     for (path, samples) in [(&simulation, 182), (&static_input, 106)] {
         let file = clab_core::canonical_hdf5::CanonicalFile::open(path).unwrap();
         assert_eq!(file.read_axis().unwrap().len(), samples);
-        assert_eq!(file.signals().len(), 36);
+        assert_eq!(file.signals().len(), 44);
     }
     let run = directory.path().join("simulation.toml");
     fs::write(
@@ -461,10 +486,27 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
         );
         let stdout = String::from_utf8_lossy(&result.stdout);
         assert!(
-            stdout.contains("KnC Vertical\nrunning 28 metrics"),
+            stdout.contains("KnC Vertical\nrunning 36 metrics"),
             "{stdout}"
         );
-        assert!(!stdout.contains("... missing"), "{stdout}");
+        // Neither input has SVC/sprung-mass data, so ride_frequency (4 rows)
+        // is always unavailable. Both fixtures now carry real-derived
+        // contact-patch data (the simulation `run` via
+        // examples/mappings.toml entity mappings, the measurement fixture
+        // via its own lfcpx/lfcpy-style channels), so brake_support_angle
+        // computes for both. Every other metric must compute for both.
+        let expected_missing = 4;
+        assert_eq!(
+            stdout.matches("... missing").count(),
+            expected_missing,
+            "{stdout}"
+        );
+        assert!(
+            !stdout.lines().any(|line| line.contains("... missing")
+                && !line.contains("brake_support_angle")
+                && !line.contains("ride_frequency")),
+            "{stdout}"
+        );
         let rate = stdout
             .lines()
             .find_map(|line| {
@@ -489,13 +531,19 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
             .lines()
             .filter(|line| line.starts_with("warning:"))
             .collect();
+        // Same split as the stdout check above, on top of whatever
+        // legacy-unit warnings this input has.
+        let (unavailable, other): (Vec<&&str>, Vec<&&str>) = warnings
+            .iter()
+            .partition(|line| line.contains(" unavailable: "));
+        assert_eq!(unavailable.len(), expected_missing, "{stderr}");
         assert_eq!(
-            warnings.len(),
+            other.len(),
             if input == &measurement { 0 } else { 8 },
             "{stderr}"
         );
         assert!(
-            warnings.iter().all(|line| line.contains("toe_camber_body/")
+            other.iter().all(|line| line.contains("toe_camber_body/")
                 && line.contains("using mapped unit 'deg'")),
             "{stderr}"
         );
@@ -689,16 +737,21 @@ fn comparison_config(path: &std::path::Path, tolerance: &str) {
         .open(path)
         .unwrap()
         .write_all(
-            format!("\n[setup.knc.vertical.branch]\ndirection='any'\nindex=1\n{tolerance}")
-                .as_bytes(),
+            format!(
+                "\n[setup.knc.vertical.metric]\n{SPRUNG_MASS_KG}\n\
+                 [setup.knc.vertical.branch]\ndirection='any'\nindex=1\n{tolerance}"
+            )
+            .as_bytes(),
         )
         .unwrap();
 }
 
-const EXPECTED_METRICS: [(&str, &str); 7] = [
+const EXPECTED_METRICS: [(&str, &str); 9] = [
+    ("brake_support_angle", "deg"),
     ("bump_camber", "deg_per_mm"),
     ("bump_spin", "deg_per_mm"),
     ("bump_steer", "deg_per_mm"),
+    ("ride_frequency", "hz"),
     ("ride_rate", "n_per_mm"),
     ("suspension_rate", "n_per_mm"),
     ("tire_rate", "n_per_mm"),
@@ -762,6 +815,11 @@ fn compares_only_gradient_metrics_with_overlays() {
     assert!(!stdout.contains("wheel_center_x_mm"));
     let svg = output.join("plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcy.pdf");
     assert!(fs::read(svg).unwrap().starts_with(b"%PDF"));
+    // comparison_config sets sprung_mass_*_kg, so ride_frequency's overlay
+    // plot renders for both baseline and candidate series.
+    let ride_frequency =
+        output.join("plots/knc/vertical/comparison/knc_vertical_ride_frequency.pdf");
+    assert!(fs::read(ride_frequency).unwrap().starts_with(b"%PDF"));
     assert!(output.join("metrics.csv").is_file());
 }
 
