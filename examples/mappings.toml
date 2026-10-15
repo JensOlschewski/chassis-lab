@@ -324,3 +324,43 @@ unit = "rad"
 entity = "hub_rotation_rear_wrt_to_body"
 component = "right_y"
 unit = "rad"
+
+[knc.vertical.signals.front_left_contact_patch_x]
+entity = "til_wheel_contact_patch"
+component = "x_front"
+unit = "mm"
+
+[knc.vertical.signals.front_right_contact_patch_x]
+entity = "tir_wheel_contact_patch"
+component = "x_front"
+unit = "mm"
+
+[knc.vertical.signals.rear_left_contact_patch_x]
+entity = "til_wheel_contact_patch"
+component = "x_rear"
+unit = "mm"
+
+[knc.vertical.signals.rear_right_contact_patch_x]
+entity = "tir_wheel_contact_patch"
+component = "x_rear"
+unit = "mm"
+
+[knc.vertical.signals.front_left_contact_patch_y]
+entity = "til_wheel_contact_patch"
+component = "y_front"
+unit = "mm"
+
+[knc.vertical.signals.front_right_contact_patch_y]
+entity = "tir_wheel_contact_patch"
+component = "y_front"
+unit = "mm"
+
+[knc.vertical.signals.rear_left_contact_patch_y]
+entity = "til_wheel_contact_patch"
+component = "y_rear"
+unit = "mm"
+
+[knc.vertical.signals.rear_right_contact_patch_y]
+entity = "tir_wheel_contact_patch"
+component = "y_rear"
+unit = "mm"

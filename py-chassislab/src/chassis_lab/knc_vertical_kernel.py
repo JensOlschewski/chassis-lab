@@ -245,6 +245,7 @@ PLOT_SPECS = (
         "wheel_center_z",
         "ride_frequency",
         optional=True,
+        y_limits=(0, 2),
     ),
 )
 

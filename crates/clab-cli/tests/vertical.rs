@@ -459,7 +459,7 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
     for (path, samples) in [(&simulation, 182), (&static_input, 106)] {
         let file = clab_core::canonical_hdf5::CanonicalFile::open(path).unwrap();
         assert_eq!(file.read_axis().unwrap().len(), samples);
-        assert_eq!(file.signals().len(), 36);
+        assert_eq!(file.signals().len(), 44);
     }
     let run = directory.path().join("simulation.toml");
     fs::write(
@@ -489,11 +489,19 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
             stdout.contains("KnC Vertical\nrunning 36 metrics"),
             "{stdout}"
         );
-        // The committed example fixtures have no contact-patch channels and no
-        // SVC/sprung-mass data, so brake_support_angle and ride_frequency (8
-        // rows: 2 metrics x 4 corners) are the only metrics legitimately
-        // unavailable here; every other metric must still compute.
-        assert_eq!(stdout.matches("... missing").count(), 8, "{stdout}");
+        // Neither input has SVC/sprung-mass data, so ride_frequency (4 rows)
+        // is always unavailable. The measurement fixture also has no
+        // contact-patch channels, so brake_support_angle (4 more rows) is
+        // unavailable there too; the simulation `run` has real
+        // contact-patch-derived data mapped (see examples/mappings.toml),
+        // so brake_support_angle computes for it. Every other metric must
+        // compute for both.
+        let expected_missing = if input == &measurement { 8 } else { 4 };
+        assert_eq!(
+            stdout.matches("... missing").count(),
+            expected_missing,
+            "{stdout}"
+        );
         assert!(
             !stdout.lines().any(|line| line.contains("... missing")
                 && !line.contains("brake_support_angle")
@@ -524,14 +532,12 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
             .lines()
             .filter(|line| line.starts_with("warning:"))
             .collect();
-        // brake_support_angle and ride_frequency unavailable for all 4
-        // corners each (committed example fixtures have no contact-patch
-        // channels and no SVC/sprung-mass data) - 8 warnings, present for
-        // both inputs, on top of whatever legacy-unit warnings this input has.
+        // Same split as the stdout check above, on top of whatever
+        // legacy-unit warnings this input has.
         let (unavailable, other): (Vec<&&str>, Vec<&&str>) = warnings
             .iter()
             .partition(|line| line.contains(" unavailable: "));
-        assert_eq!(unavailable.len(), 8, "{stderr}");
+        assert_eq!(unavailable.len(), expected_missing, "{stderr}");
         assert_eq!(
             other.len(),
             if input == &measurement { 0 } else { 8 },
