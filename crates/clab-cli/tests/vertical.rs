@@ -490,13 +490,12 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
             "{stdout}"
         );
         // Neither input has SVC/sprung-mass data, so ride_frequency (4 rows)
-        // is always unavailable. The measurement fixture also has no
-        // contact-patch channels, so brake_support_angle (4 more rows) is
-        // unavailable there too; the simulation `run` has real
-        // contact-patch-derived data mapped (see examples/mappings.toml),
-        // so brake_support_angle computes for it. Every other metric must
-        // compute for both.
-        let expected_missing = if input == &measurement { 8 } else { 4 };
+        // is always unavailable. Both fixtures now carry real-derived
+        // contact-patch data (the simulation `run` via
+        // examples/mappings.toml entity mappings, the measurement fixture
+        // via its own lfcpx/lfcpy-style channels), so brake_support_angle
+        // computes for both. Every other metric must compute for both.
+        let expected_missing = 4;
         assert_eq!(
             stdout.matches("... missing").count(),
             expected_missing,
