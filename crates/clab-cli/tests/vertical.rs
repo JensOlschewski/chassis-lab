@@ -815,6 +815,11 @@ fn compares_only_gradient_metrics_with_overlays() {
     assert!(!stdout.contains("wheel_center_x_mm"));
     let svg = output.join("plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcy.pdf");
     assert!(fs::read(svg).unwrap().starts_with(b"%PDF"));
+    // comparison_config sets sprung_mass_*_kg, so ride_frequency's overlay
+    // plot renders for both baseline and candidate series.
+    let ride_frequency =
+        output.join("plots/knc/vertical/comparison/knc_vertical_ride_frequency.pdf");
+    assert!(fs::read(ride_frequency).unwrap().starts_with(b"%PDF"));
     assert!(output.join("metrics.csv").is_file());
 }
 

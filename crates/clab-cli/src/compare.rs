@@ -70,6 +70,11 @@ enum ComparedDomain {
         curves: serde_json::Value,
         metrics: Vec<serde_json::Value>,
         branch: clab_core::config::VerticalBranch,
+        /// This series' own `ride_frequency` mass map (same source as
+        /// `vertical::Reports::corner_mass_kg`): baseline and candidate
+        /// resolve it from their own SVC run, so it travels per series,
+        /// not shared.
+        corner_mass_kg: BTreeMap<String, f64>,
     },
 }
 
@@ -144,6 +149,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                         curves: candidate_curves,
                         metrics: candidate_metrics,
                         branch: candidate_branch,
+                        corner_mass_kg: candidate_mass,
                     },
                 ) => {
                     let compared = compare_vertical_gradient_metrics(
@@ -158,6 +164,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                         format!("Curve {}", index + 1),
                         candidate_curves.clone(),
                         candidate_branch.clone(),
+                        candidate_mass.clone(),
                         format!(
                             "Curve {}: {} | {} | {}",
                             index + 1,
@@ -203,6 +210,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         && let Some(ComparedDomain::Vertical {
             curves: base,
             branch: base_branch,
+            corner_mass_kg: base_mass,
             ..
         }) = baseline.domains.get("knc")
     {
@@ -224,7 +232,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             .chain(
                 vertical_candidates
                     .iter()
-                    .map(|(_, _, _, metadata, _)| metadata.clone()),
+                    .map(|(_, _, _, _, metadata, _)| metadata.clone()),
             )
             .chain([
                 format!("Created by: {}", report_creator()),
@@ -236,14 +244,14 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             args.debug,
             &args.config,
             &std::iter::once(args.baseline.as_path())
-                .chain(vertical_candidates.iter().map(|candidate| candidate.4))
+                .chain(vertical_candidates.iter().map(|candidate| candidate.5))
                 .collect::<Vec<_>>(),
         )?;
         if debug.is_some()
             && (!base_branch.measurement
                 || vertical_candidates
                     .iter()
-                    .any(|(_, _, branch, _, _)| !branch.measurement))
+                    .any(|(_, _, branch, _, _, _)| !branch.measurement))
         {
             eprintln!(
                 "warning: knc::vertical: debug rate plots require measurement input; skipped for simulation data"
@@ -251,11 +259,11 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         }
         let candidates = vertical_candidates
             .into_iter()
-            .map(|(label, curves, branch, _, _)| (label, curves, branch))
+            .map(|(label, curves, branch, mass, _, _)| (label, curves, branch, mass))
             .collect::<Vec<_>>();
         plots.extend(vertical::compare_plots(
             &baseline.config,
-            (base, base_branch),
+            (base, base_branch, base_mass),
             &candidates,
             "Baseline",
             &footer,
@@ -445,6 +453,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
                 curves: detail["curves"].clone(),
                 metrics: report.metrics,
                 branch: report.branch,
+                corner_mass_kg: report.corner_mass_kg,
             },
         );
     }

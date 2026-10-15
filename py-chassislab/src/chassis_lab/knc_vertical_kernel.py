@@ -451,6 +451,21 @@ def _with_ride_frequency(
     return [*curves, *derived]
 
 
+def _derive_curves(
+    curves: list[dict[str, object]],
+    corner_mass_kg: dict[str, float],
+    options: BranchOptions,
+) -> list[dict[str, object]]:
+    """All curves synthesized before the generic plot catalog runs.
+
+    One series' worth of derivation -- `plot()` (one source) and
+    `plot_compare()` (baseline plus each candidate, one call per series)
+    both route through this instead of repeating the sequence.
+    """
+    curves = _with_pad_travel(curves)
+    return _with_ride_frequency(curves, corner_mass_kg, options)
+
+
 def _secant_points(
     indexed: dict[tuple[str, str], dict[str, object]],
     corner: str,
@@ -602,10 +617,11 @@ def plot(
     corner_mass_kg: str | None = None,
 ) -> dict[str, bytes]:
     """Render vertical report catalog through generic KnC plot kernel."""
-    curves = _with_pad_travel(json.loads(curves_json))
     options = BranchOptions.from_json(branch)
-    curves = _with_ride_frequency(
-        curves, json.loads(corner_mass_kg) if corner_mass_kg else {}, options
+    curves = _derive_curves(
+        json.loads(curves_json),
+        json.loads(corner_mass_kg) if corner_mass_kg else {},
+        options,
     )
     reports = render_reports(
         curves,
@@ -643,18 +659,30 @@ def plot_compare(
     gradient_points_mm: float | None = None,
     branches_json: str | None = None,
     debug: str | None = None,
+    corner_mass_kg: str | None = None,
 ) -> dict[str, bytes]:
-    """Render vertical overlays; `branches_json` has one entry per series."""
-    baseline = _with_pad_travel(json.loads(baseline_json))
-    candidates = [
-        {**item, "curves": _with_pad_travel(item["curves"])}
-        for item in json.loads(candidates_json)
-    ]
+    """Render vertical overlays.
+
+    `branches_json` and `corner_mass_kg` each have one entry per series,
+    baseline first then every candidate in order -- the same ordering
+    `vertical::compare_plots` (Rust) builds both lists in.
+    """
+    candidates_raw = json.loads(candidates_json)
     branches = (
         [BranchOptions.from_json(item) for item in json.loads(branches_json)]
         if branches_json
-        else [BranchOptions()] * (len(candidates) + 1)
+        else [BranchOptions()] * (len(candidates_raw) + 1)
     )
+    masses = (
+        json.loads(corner_mass_kg) if corner_mass_kg else [{}] * len(branches)
+    )
+    baseline = _derive_curves(json.loads(baseline_json), masses[0], branches[0])
+    candidates = [
+        {**item, "curves": _derive_curves(item["curves"], mass, options)}
+        for item, mass, options in zip(
+            candidates_raw, masses[1:], branches[1:], strict=True
+        )
+    ]
     reports = render_comparison_reports(
         baseline,
         candidates,

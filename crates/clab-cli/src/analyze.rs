@@ -227,16 +227,12 @@ fn write_combined_run(
     svc_detail["case"] = bundle["case"].clone();
     svc_detail["inputs"]["run"] = bundle["inputs"]["run"].clone();
     let mut vertical_detail: serde_json::Value = serde_json::from_str(&vertical_report.detail)?;
-    let (corner_mass_kg, _) = vertical::corner_mass(
-        &config.vertical.as_ref().expect("vertical config").window,
-        Some(&svc_corner_mass_kg),
-    );
     let plots = vertical::curve_plots(
         config,
         &vertical_detail["curves"],
         &footer,
         vertical_report.measurement,
-        &corner_mass_kg,
+        &vertical_report.corner_mass_kg,
         debug.as_deref(),
     )?;
     vertical_detail["case"] = bundle["case"].clone();
@@ -634,16 +630,12 @@ fn write_vertical(
         bundle["inputs"]["run"] = provenance(run)?;
     }
     let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
-    let (corner_mass_kg, _) = vertical::corner_mass(
-        &config.vertical.as_ref().expect("vertical config").window,
-        None,
-    );
     let plots = vertical::curve_plots(
         config,
         &detail["curves"],
         &footer,
         report.measurement,
-        &corner_mass_kg,
+        &report.corner_mass_kg,
         debug.as_deref(),
     )?;
     detail["case"] = bundle["case"].clone();

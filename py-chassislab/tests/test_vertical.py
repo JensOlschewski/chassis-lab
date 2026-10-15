@@ -400,6 +400,75 @@ def test_plot_adds_optional_direct_vertical_curves_and_suspension_rate() -> (
     ].startswith(b"%PDF")
 
 
+def test_plot_compare_renders_ride_frequency_with_per_series_mass() -> None:
+    curves = [
+        {
+            "corner": corner,
+            "signal": signal,
+            "values": [-1.0, 0.0, 1.0],
+            "unit": unit,
+        }
+        for corner in (
+            "front_left",
+            "front_right",
+            "rear_left",
+            "rear_right",
+        )
+        for signal, unit in (
+            ("wheel_center_x", "mm"),
+            ("wheel_center_y", "mm"),
+            ("wheel_center_z", "mm"),
+            ("wheel_load", "newton"),
+            ("toe", "deg"),
+            ("camber", "deg"),
+            ("spin", "deg"),
+            ("tire_deflection", "mm"),
+        )
+    ]
+    mass = {
+        "front_left": 449.0,
+        "front_right": 427.0,
+        "rear_left": 384.0,
+        "rear_right": 383.0,
+    }
+    reports = plot_compare(
+        json.dumps(curves),
+        json.dumps([{"label": "Curve 1", "curves": curves}]),
+        "Baseline",
+        "",
+        None,
+        0.5,
+        corner_mass_kg=json.dumps([mass, mass]),
+    )
+    assert reports["knc_vertical_ride_frequency.pdf"].startswith(b"%PDF")
+
+    # One series missing mass (empty map): no crash. Same as any other
+    # signal unavailable on one series only, the overlay plot needs it on
+    # every series, so it is skipped entirely rather than drawn one-sided.
+    reports_partial = plot_compare(
+        json.dumps(curves),
+        json.dumps([{"label": "Curve 1", "curves": curves}]),
+        "Baseline",
+        "",
+        None,
+        0.5,
+        corner_mass_kg=json.dumps([mass, {}]),
+    )
+    assert "knc_vertical_ride_frequency.pdf" not in reports_partial
+
+    # No corner_mass_kg at all: same as analyze's `plot()` -- the optional
+    # plot is simply absent, not an error.
+    reports_without_mass = plot_compare(
+        json.dumps(curves),
+        json.dumps([{"label": "Curve 1", "curves": curves}]),
+        "Baseline",
+        "",
+        None,
+        0.5,
+    )
+    assert "knc_vertical_ride_frequency.pdf" not in reports_without_mass
+
+
 def test_comparison_plot_uses_ordered_curve_colors_and_footer() -> None:
     curves = [
         {
