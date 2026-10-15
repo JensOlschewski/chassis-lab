@@ -396,7 +396,9 @@ def _with_pad_travel(
 
 
 def _with_ride_frequency(
-    curves: list[dict[str, object]], corner_mass_kg: dict[str, float]
+    curves: list[dict[str, object]],
+    corner_mass_kg: dict[str, float],
+    options: BranchOptions,
 ) -> list[dict[str, object]]:
     """Add a per-sample ride_frequency curve where wheel_load and mass allow.
 
@@ -405,6 +407,11 @@ def _with_ride_frequency(
     `ride_frequency` metric, which uses the configured secant
     `suspension_rate`. Same split as `suspension_rate` itself: the metric is
     a secant scalar, the plot is the full local-gradient curve.
+
+    The gradient is taken per sweep -- same branch detection the
+    `suspension_rate` plot uses (`options.plot_sweeps`) -- not across the
+    full hysteretic travel array, otherwise the derivative blows up at
+    sweep reversals where travel briefly reverses direction.
     """
     indexed = {(item["corner"], item["signal"]): item for item in curves}
     derived = []
@@ -416,8 +423,18 @@ def _with_ride_frequency(
             continue
         travel_values = np.asarray(travel["values"], dtype=np.float64)
         load_values = np.asarray(load["values"], dtype=np.float64)
+        rate = np.full_like(travel_values, np.nan)
+        for sweep in options.plot_sweeps(travel_values):
+            axis, values = travel_values[sweep], load_values[sweep]
+            finite = np.isfinite(axis) & np.isfinite(values)
+            if finite.sum() < 2:
+                continue
+            with np.errstate(divide="ignore", invalid="ignore"):
+                sweep_rate = np.gradient(values[finite], axis[finite])
+            local = np.full(finite.shape, np.nan)
+            local[finite] = sweep_rate
+            rate[sweep] = local
         with np.errstate(divide="ignore", invalid="ignore"):
-            rate = np.gradient(load_values, travel_values)
             frequency = np.where(
                 rate > 0.0,
                 (1.0 / (2.0 * pi)) * np.sqrt(1000.0 * rate / mass),
@@ -586,10 +603,10 @@ def plot(
 ) -> dict[str, bytes]:
     """Render vertical report catalog through generic KnC plot kernel."""
     curves = _with_pad_travel(json.loads(curves_json))
-    curves = _with_ride_frequency(
-        curves, json.loads(corner_mass_kg) if corner_mass_kg else {}
-    )
     options = BranchOptions.from_json(branch)
+    curves = _with_ride_frequency(
+        curves, json.loads(corner_mass_kg) if corner_mass_kg else {}, options
+    )
     reports = render_reports(
         curves,
         PLOT_SPECS,
