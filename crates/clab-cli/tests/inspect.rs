@@ -188,6 +188,10 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     file.delete_attr("domain").unwrap();
     file.close().unwrap();
     let result = inspect(&broken);
-    assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("missing HDF5 attribute: domain"));
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(!result.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("missing HDF5 attribute: domain"),
+        "{stderr}"
+    );
 }
