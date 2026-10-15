@@ -94,6 +94,7 @@ PLOT_SIGNALS = {
     "contact_patch_x": SignalStyle("Contact patch X", "mm"),
     "contact_patch_y": SignalStyle("Contact patch Y", "mm"),
     "brake_support_angle": SignalStyle("Brake support angle", "deg"),
+    "ride_frequency": SignalStyle("Ride frequency", "Hz"),
 }
 
 
@@ -236,6 +237,13 @@ PLOT_SPECS = (
         branch={"edge_width": 100, "edge_percentile": 0.95},
         transform=_wheel_recession_angle,
         from_gradient=_recession_angle,
+        optional=True,
+    ),
+    PlotSpec(
+        "knc_vertical_ride_frequency",
+        "Bounce - Vertical Wheel center Travel / Ride frequency",
+        "wheel_center_z",
+        "ride_frequency",
         optional=True,
     ),
 )
@@ -381,6 +389,45 @@ def _with_pad_travel(
                 "signal": "wheel_pad_z",
                 "values": values.tolist(),
                 "unit": "mm",
+            }
+        )
+    return [*curves, *derived]
+
+
+def _with_ride_frequency(
+    curves: list[dict[str, object]], corner_mass_kg: dict[str, float]
+) -> list[dict[str, object]]:
+    """Add a per-sample ride_frequency curve where wheel_load and mass allow.
+
+    f_ride(z) = 1/(2*pi) * sqrt(1000 * local wheel rate / mass), using the
+    *local* d(wheel_load)/d(wheel_center_z) at every sample -- unlike the
+    `ride_frequency` metric, which uses the configured secant
+    `suspension_rate`. Same split as `suspension_rate` itself: the metric is
+    a secant scalar, the plot is the full local-gradient curve.
+    """
+    indexed = {(item["corner"], item["signal"]): item for item in curves}
+    derived = []
+    for corner in CORNERS:
+        mass = corner_mass_kg.get(corner)
+        travel = indexed.get((corner, "wheel_center_z"))
+        load = indexed.get((corner, "wheel_load"))
+        if mass is None or not (travel and load):
+            continue
+        travel_values = np.asarray(travel["values"], dtype=np.float64)
+        load_values = np.asarray(load["values"], dtype=np.float64)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rate = np.gradient(load_values, travel_values)
+            frequency = np.where(
+                rate > 0.0,
+                (1.0 / (2.0 * pi)) * np.sqrt(1000.0 * rate / mass),
+                np.nan,
+            )
+        derived.append(
+            {
+                "corner": corner,
+                "signal": "ride_frequency",
+                "values": frequency.tolist(),
+                "unit": "Hz",
             }
         )
     return [*curves, *derived]
@@ -534,9 +581,13 @@ def plot(
     gradient_points_mm: float | None = None,
     branch: str | None = None,
     debug: str | None = None,
+    corner_mass_kg: str | None = None,
 ) -> dict[str, bytes]:
     """Render vertical report catalog through generic KnC plot kernel."""
     curves = _with_pad_travel(json.loads(curves_json))
+    curves = _with_ride_frequency(
+        curves, json.loads(corner_mass_kg) if corner_mass_kg else {}
+    )
     options = BranchOptions.from_json(branch)
     reports = render_reports(
         curves,

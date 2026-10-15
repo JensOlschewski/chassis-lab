@@ -375,6 +375,29 @@ def test_plot_adds_optional_direct_vertical_curves_and_suspension_rate() -> (
     assert "plots/knc/vertical/knc_vertical_spin.pdf" in reports
     assert "plots/knc/vertical/knc_vertical_ride_rate.pdf" in reports
     assert "plots/knc/vertical/knc_vertical_tire_rate.pdf" in reports
+    # No corner_mass_kg supplied: the ride_frequency plot is skipped, same as
+    # any other optional plot missing its signal -- not an error.
+    assert "plots/knc/vertical/knc_vertical_ride_frequency.pdf" not in reports
+
+    reports_with_mass = plot(
+        json.dumps(curves),
+        gradient_points_mm=0.5,
+        corner_mass_kg=json.dumps(
+            {
+                "front_left": 449.0,
+                "front_right": 427.0,
+                "rear_left": 384.0,
+                "rear_right": 383.0,
+            }
+        ),
+    )
+    assert (
+        "plots/knc/vertical/knc_vertical_ride_frequency.pdf"
+        in reports_with_mass
+    )
+    assert reports_with_mass[
+        "plots/knc/vertical/knc_vertical_ride_frequency.pdf"
+    ].startswith(b"%PDF")
 
 
 def test_comparison_plot_uses_ordered_curve_colors_and_footer() -> None:

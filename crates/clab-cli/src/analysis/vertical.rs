@@ -285,7 +285,7 @@ fn gradient_metrics(
 /// Per-corner mass for `ride_frequency`: a configured `sprung_mass_<corner>_kg`
 /// overrides the same run's SVC `<corner>_mass_kg`; otherwise SVC fills the gap.
 /// Missing both leaves that corner absent from the maps.
-fn corner_mass(
+pub(crate) fn corner_mass(
     window: &clab_core::config::VerticalWindow,
     svc_corner_mass_kg: Option<&BTreeMap<String, f64>>,
 ) -> (BTreeMap<String, f64>, BTreeMap<String, &'static str>) {
@@ -639,11 +639,17 @@ fn convention(
 
 /// Render KnC vertical PDF plots. Separate from `analyze_input` so slow
 /// rendering happens only after the caller has already displayed metrics.
+///
+/// `corner_mass_kg` renders the `ride_frequency` curve plot (same per-corner
+/// mass the metric uses: config override, else this run's SVC
+/// `<corner>_mass_kg` -- see `corner_mass`). Empty when neither is available;
+/// the plot is then skipped like any other optional signal.
 pub(crate) fn curve_plots(
     config: &CaseConfig,
     curves: &serde_json::Value,
     footer: &str,
     measurement: bool,
+    corner_mass_kg: &BTreeMap<String, f64>,
     debug: Option<&str>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let source_label = source_label(measurement);
@@ -653,10 +659,20 @@ pub(crate) fn curve_plots(
         .as_ref()
         .map(|vertical| effective_gradient_points(&vertical.window));
     let branch = serde_json::to_string(branch_options(config, measurement))?;
+    let corner_mass_kg = serde_json::to_string(corner_mass_kg)?;
     with_kernel(|py, module| {
         module
             .getattr("plot")?
-            .call1((curves, source_label, footer, logo(py), gradient, &branch, debug))?
+            .call1((
+                curves,
+                source_label,
+                footer,
+                logo(py),
+                gradient,
+                &branch,
+                debug,
+                &corner_mass_kg,
+            ))?
             .extract()
     })
     .context("failed to generate vertical PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'")
