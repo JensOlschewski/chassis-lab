@@ -24,7 +24,7 @@ checks.
 
 | Compare Plot                                                 | Debug                                                      |
 | ------------------------------------------------------------ | ---------------------------------------------------------- |
-| <img src="docs/assets/compare-plot-spin.svg" width="450em"/> | <img src="docs/assets/debug-ride-rate.svg" width="450em"/> |
+| <img src="docs/assets/compare-plot-spin.png" width="450em"/> | <img src="docs/assets/debug-ride-rate.png" width="450em"/> |
 
 ## Pre-built executables
 
