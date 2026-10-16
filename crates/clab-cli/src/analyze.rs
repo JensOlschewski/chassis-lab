@@ -119,8 +119,9 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
                 write_svc(&config, args, Some(&args.input))
             }
             Some(clab_core::config::SourceKind::Measurement) => {
-                let reference = load_svc_reference(&config.simulation_json)
-                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let reference =
+                    load_svc_reference(&config.simulation_json, &config.svc_measurement_signals)
+                        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 write_svc_reference(&reference, args, &config, Some(&args.input))
             }
             None => unreachable!(),
@@ -174,8 +175,9 @@ fn write_combined_run(
                 )
             }
             Some(clab_core::config::SourceKind::Measurement) => {
-                let reference = load_svc_reference(&config.simulation_json)
-                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let reference =
+                    load_svc_reference(&config.simulation_json, &config.svc_measurement_signals)
+                        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 let reports = svc_reference_reports(&reference, &args.config, config)?;
                 let metrics = reports.report["metrics"].as_array().unwrap().len();
                 (
@@ -325,7 +327,7 @@ fn analyze_svc(args: &AnalyzeArgs) -> Result<()> {
                             args.config.display()
                         )
                     })?;
-            let reference = load_svc_reference(&args.input)
+            let reference = load_svc_reference(&args.input, &config.svc_measurement_signals)
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             write_svc_reference(&reference, args, &config, None)
         }

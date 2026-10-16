@@ -13,7 +13,7 @@ use clab_core::{
 };
 use sha2::{Digest, Sha256};
 
-use super::display::{missing_unit_warning, tag_warnings};
+use super::display::{mapping_missing, missing_unit_warning, tag_warnings};
 
 const WHEEL_LOADS: [&str; 4] = [
     "front_left_wheel_load",
@@ -143,7 +143,7 @@ fn evaluate(
         let reference = config
             .signals
             .get(name)
-            .ok_or_else(|| anyhow::anyhow!("missing SVC signal mapping: {name}"))?;
+            .ok_or_else(|| anyhow::anyhow!(mapping_missing("svc", name)))?;
         let convention = conventions
             .get(name)
             .ok_or_else(|| anyhow::anyhow!("missing SVC signal convention: {name}"))?;

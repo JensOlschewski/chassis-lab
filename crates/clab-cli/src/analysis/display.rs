@@ -47,6 +47,14 @@ pub(crate) fn missing_unit_warning(entity: &str, component: &str, declared_unit:
     )
 }
 
+/// Error text for a canonical signal with no entry in `mappings.toml`.
+/// Shared by every required lookup that resolves a canonical name before
+/// reading its raw signal (SVC and KnC vertical; simulation and
+/// measurement) so the message never drifts between call sites.
+pub(crate) fn mapping_missing(domain: &str, name: &str) -> String {
+    format!("{domain} signal mapping missing: {name}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{qualified_metric_name, tag_warning};

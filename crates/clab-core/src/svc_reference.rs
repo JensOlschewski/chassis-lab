@@ -8,7 +8,7 @@ use std::{
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::conventions::SVC_METRICS;
+use crate::config::MeasurementSignalRef;
 
 #[derive(Debug, Clone, PartialEq, Error)]
 #[error("{0}")]
@@ -39,16 +39,14 @@ pub struct SvcReference {
 
 pub fn load_svc_reference(
     path: impl AsRef<Path>,
+    measurement_signals: &BTreeMap<String, MeasurementSignalRef>,
 ) -> Result<SvcReference, Box<dyn std::error::Error>> {
     let path = if path.as_ref().is_absolute() {
         path.as_ref().to_path_buf()
     } else {
         std::env::current_dir()?.join(path.as_ref())
     };
-
-    if !path.is_file() {
-        return Err(format!("SVC reference file does not exist: {}", path.display()).into());
-    };
+if !path.is_file() { return Err(format!("SVC reference file does not exist: {}", path.display()).into()); };
 
     let path = path.canonicalize()?;
     let raw: Value = serde_json::from_str(&fs::read_to_string(&path)?)
@@ -97,7 +95,7 @@ pub fn load_svc_reference(
     }
     let co = parse_coordinates(root.get("coordinate_system").unwrap())?;
     let sources = parse_sources(root.get("sources").unwrap())?;
-    let values = parse_values(root.get("values").unwrap())?;
+    let values = parse_values(root.get("values").unwrap(), measurement_signals)?;
 
     consistency(&values)?;
     Ok(SvcReference {
@@ -233,19 +231,36 @@ fn valid_calendar_date(parts: &[&str]) -> bool {
     (1..=days).contains(&day)
 }
 
-fn parse_values(v: &Value) -> Result<BTreeMap<String, f64>, Box<dyn std::error::Error>> {
+/// Translate raw JSON keys to canonical metric names via
+/// `[measurement.svc.signals]` (see `clab_core::config`) — the reference
+/// file can name its keys however it wants; only the mapping decides what
+/// they mean. A JSON key with no mapping entry is an error, not a silent
+/// drop: a renamed/misspelled key would otherwise vanish instead of failing.
+fn parse_values(
+    v: &Value,
+    measurement_signals: &BTreeMap<String, MeasurementSignalRef>,
+) -> Result<BTreeMap<String, f64>, Box<dyn std::error::Error>> {
     let t = obj(v, "values")?;
 
     if t.is_empty() {
         return Err(SvcReferenceError("values must define at least one metric".into()).into());
     };
 
-    let allowed = SVC_METRICS.map(|(name, _)| name);
-
-    reject(t, &allowed, "SVC reference metric")?;
+    let raw_to_canonical: BTreeMap<&str, &str> = measurement_signals
+        .iter()
+        .map(|(canonical, reference)| (reference.entity.as_str(), canonical.as_str()))
+        .collect();
 
     t.iter()
-        .map(|(k, v)| Ok((k.clone(), finite(v, &format!("reference metric '{k}'"))?)))
+        .map(|(raw_key, v)| {
+            let canonical = raw_to_canonical.get(raw_key.as_str()).ok_or_else(|| {
+                SvcReferenceError(format!("unknown SVC reference key: {raw_key}"))
+            })?;
+            Ok((
+                (*canonical).to_string(),
+                finite(v, &format!("reference metric '{raw_key}'"))?,
+            ))
+        })
         .collect()
 }
 
@@ -399,26 +414,65 @@ fn finite(v: &Value, w: &str) -> Result<f64, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conventions::SVC_METRICS;
 
     fn data() -> String {
         r#"{"schema_version":1,"source_kind":"measurement","coordinate_system":{"cg_x_origin":"front_axle_wheel_center","cg_x_positive":"rearward"},"sources":[{"file":"source.txt","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","result":"reviewed","test_date":"2019-09-06"}],"values":{"total_mass_kg":1500}}"#.into()
     }
 
+    /// Every canonical SVC metric mapped to itself, so tests can use the
+    /// canonical name as the JSON key directly.
+    fn identity_mapping() -> BTreeMap<String, MeasurementSignalRef> {
+        SVC_METRICS
+            .iter()
+            .map(|&(name, unit)| {
+                (
+                    name.to_string(),
+                    MeasurementSignalRef {
+                        entity: name.to_string(),
+                        unit: unit.to_string(),
+                    },
+                )
+            })
+            .collect()
+    }
+
     #[test]
-    fn parses_reference_and_rejects_unknown_metric() {
+    fn parses_reference_and_rejects_unmapped_key() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("reference.json");
         fs::write(&path, data()).unwrap();
         assert_eq!(
-            load_svc_reference(&path).unwrap().values["total_mass_kg"],
+            load_svc_reference(&path, &identity_mapping())
+                .unwrap()
+                .values["total_mass_kg"],
             1500.0
         );
         fs::write(&path, data().replace("total_mass_kg", "unknown_metric")).unwrap();
         assert!(
-            load_svc_reference(&path)
+            load_svc_reference(&path, &identity_mapping())
                 .unwrap_err()
                 .to_string()
                 .contains("unknown")
+        );
+    }
+
+    #[test]
+    fn resolves_renamed_key_through_mapping() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reference.json");
+        fs::write(&path, data().replace("total_mass_kg", "totalMass")).unwrap();
+        let mut mapping = identity_mapping();
+        mapping.insert(
+            "total_mass_kg".into(),
+            MeasurementSignalRef {
+                entity: "totalMass".into(),
+                unit: "kg".into(),
+            },
+        );
+        assert_eq!(
+            load_svc_reference(&path, &mapping).unwrap().values["total_mass_kg"],
+            1500.0
         );
     }
 
@@ -434,7 +488,7 @@ mod tests {
             ),
         )
         .unwrap();
-        assert!(load_svc_reference(&path).is_ok());
+        assert!(load_svc_reference(&path, &identity_mapping()).is_ok());
     }
 
     #[test]
@@ -447,7 +501,7 @@ mod tests {
         );
         fs::write(&path, json).unwrap();
         assert!(
-            load_svc_reference(&path)
+            load_svc_reference(&path, &identity_mapping())
                 .unwrap_err()
                 .to_string()
                 .contains("total_mass")

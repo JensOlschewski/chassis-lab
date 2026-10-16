@@ -52,13 +52,14 @@ tolerance files.
 `run.toml` defines input files and case metadata for each analysis or
 comparison.
 
-| File              | Purpose                                                             |
-| ----------------- | ------------------------------------------------------------------- |
-| `config.toml`     | Main configuration file                                             |
-| `setup.toml`      | Test setup.                                                         |
-| `mappings.toml`   | Mappings source signals to ChassisLab signals and units.            |
-| `tolerances.toml` | Optional absolute and relative tolerances used by (`--tolerances`). |
-| `run.toml`        | Run collection for `analyze` or `compare`.                          |
+| File                        | Purpose                                                             |
+| --------------------------- | ------------------------------------------------------------------- |
+| `config.toml`               | Main configuration file                                             |
+| `setup.toml`                | Test setup.                                                         |
+| `simulation-mappings.toml`  | Maps simulation source signals to ChassisLab signals and units      |
+| `measurement-mappings.toml` | Same, for measurement sources.                                      |
+| `tolerances.toml`           | Optional absolute and relative tolerances used by (`--tolerances`). |
+| `run.toml`                  | Run collection for `analyze` or `compare`.                          |
 
 ## Commands `>_`
 

@@ -115,6 +115,18 @@ fn channel(signals: &Group, name: &str, values: &[f64], offset: f64) {
     scalar(&group, "column", 0_u64);
 }
 fn measurement(path: &std::path::Path) {
+    measurement_with_front_left_wcx_name(path, "lfwcx");
+}
+
+/// Same fixture as `measurement`, but the front-left wheel-center-X channel
+/// has a non-default name: proves `[measurement.knc.vertical.signals]`
+/// mapping overrides, not just the conventional `lf`/`rf`/`lr`/`rr` names,
+/// resolve a measurement channel.
+fn measurement_renamed_channel(path: &std::path::Path) {
+    measurement_with_front_left_wcx_name(path, "custom_lfwcx");
+}
+
+fn measurement_with_front_left_wcx_name(path: &std::path::Path, front_left_wcx_name: &str) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 6_u64);
@@ -138,9 +150,14 @@ fn measurement(path: &std::path::Path) {
             &[2., 2., 2., 3., 3., 3.],
             0.,
         );
+        let wcx_name = if prefix == "lf" {
+            front_left_wcx_name.to_string()
+        } else {
+            format!("{prefix}wcx")
+        };
         channel(
             &signals,
-            &format!("{prefix}wcx"),
+            &wcx_name,
             &[98., 100., 102., 102., 100., 98.],
             100.,
         );
@@ -246,10 +263,35 @@ fn config(path: &std::path::Path, omit: bool) {
             if omit && corner == "front_left" && name == "wheel_center_x" {
                 continue;
             }
-            signals.push_str(&format!("[mappings.knc.vertical.signals.{corner}_{name}]\nentity = \"{corner}\"\ncomponent = \"{component}\"\nunit = \"mm\"\n"));
+            signals.push_str(&format!("[mappings.simulation.knc.vertical.signals.{corner}_{name}]\nentity = \"{corner}\"\ncomponent = \"{component}\"\nunit = \"mm\"\n"));
         }
     }
-    fs::write(path,format!("[meta]\nname=\"fixture\"\nloadcase=\"L\"\n[physics]\ngravity=9.80665\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}" )).unwrap();
+    let mut measurement_signals = String::new();
+    for (corner, prefix) in [
+        ("front_left", "lf"),
+        ("front_right", "rf"),
+        ("rear_left", "lr"),
+        ("rear_right", "rr"),
+    ] {
+        for (name, channel, unit) in [
+            ("wheel_center_x", "wcx", "mm"),
+            ("wheel_center_y", "wcy", "mm"),
+            ("wheel_center_z", "wcz", "mm"),
+            ("wheel_load", "fz", "N"),
+            ("toe", "steer", "deg"),
+            ("camber", "cam", "deg"),
+            ("spin", "cas", "deg"),
+            ("wheel_pad_z", "pz", "mm"),
+            ("tire_deflection", "tdef", "mm"),
+            ("contact_patch_x", "cpx", "mm"),
+            ("contact_patch_y", "cpy", "mm"),
+        ] {
+            measurement_signals.push_str(&format!(
+                "[mappings.measurement.knc.vertical.signals.{corner}_{name}]\nentity = \"{prefix}{channel}\"\nunit = \"{unit}\"\n"
+            ));
+        }
+    }
+    fs::write(path,format!("[meta]\nname=\"fixture\"\nloadcase=\"L\"\n[physics]\ngravity=9.80665\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}{measurement_signals}" )).unwrap();
 }
 
 /// Real reverse-engineered VARB corner masses; ride_frequency's fallback when
@@ -327,6 +369,54 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
         .unwrap();
     assert_eq!(missing_result.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&missing_result.stderr).contains("mapping missing"));
+}
+
+/// Measurement channel naming is mapping-driven, not hardcoded: a channel
+/// under a non-conventional name resolves once
+/// `[measurement.knc.vertical.signals]` is pointed at it, proving the
+/// override reaches the measurement path the same way simulation
+/// entity/component mappings already do.
+#[test]
+fn analyzes_measurement_vertical_with_renamed_channel_via_mapping() {
+    let directory = tempdir().unwrap();
+    let measurement_path = directory.path().join("measurement.h5");
+    closed_fixture(&measurement_path, measurement_renamed_channel);
+    let config_path = directory.path().join("case.toml");
+    config(&config_path, false);
+    let text = fs::read_to_string(&config_path).unwrap().replace(
+        "[mappings.measurement.knc.vertical.signals.front_left_wheel_center_x]\nentity = \"lfwcx\"\nunit = \"mm\"\n",
+        "[mappings.measurement.knc.vertical.signals.front_left_wheel_center_x]\nentity = \"custom_lfwcx\"\nunit = \"mm\"\n",
+    );
+    fs::write(&config_path, text).unwrap();
+    let output = directory.path().join("reports");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "analyze",
+            config_path.to_str().unwrap(),
+            measurement_path.to_str().unwrap(),
+            "-r",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let detail: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("knc-vertical.json")).unwrap())
+            .unwrap();
+    let front_left_wheel_center_x = detail["curves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|curve| curve["corner"] == "front_left" && curve["signal"] == "wheel_center_x")
+        .expect("front_left wheel_center_x curve");
+    assert_eq!(
+        front_left_wheel_center_x["values"],
+        serde_json::json!([-2.0, 0.0, 2.0, 2.0, 0.0, -2.0])
+    );
 }
 
 #[test]
@@ -491,10 +581,12 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
         );
         // Neither input has SVC/sprung-mass data, so ride_frequency (4 rows)
         // is always unavailable. Both fixtures now carry real-derived
-        // contact-patch data (the simulation `run` via
-        // examples/mappings.toml entity mappings, the measurement fixture
-        // via its own lfcpx/lfcpy-style channels), so brake_support_angle
-        // computes for both. Every other metric must compute for both.
+        // contact-patch data, resolved through examples/mappings.toml either
+        // way (the simulation `run` via `[simulation.knc.vertical.signals]`
+        // entity mappings, the measurement fixture via
+        // `[measurement.knc.vertical.signals]` channel mappings), so
+        // brake_support_angle computes for both. Every other metric must
+        // compute for both.
         let expected_missing = 4;
         assert_eq!(
             stdout.matches("... missing").count(),

@@ -18,7 +18,7 @@ use pyo3::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::display::{missing_unit_warning, tag_warnings};
+use super::display::{mapping_missing, missing_unit_warning, tag_warnings};
 
 const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
 const AXES: [&str; 3] = ["x", "y", "z"];
@@ -92,11 +92,17 @@ pub(crate) fn analyze_input(
                 )
             }
         }
-        SourceKind::Measurement => (
-            measurement_curves(&file)?,
-            Vec::new(),
-            serde_json::json!({"method": "measurement_native"}),
-        ),
+        SourceKind::Measurement => {
+            let vertical = config
+                .vertical
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("KnC vertical configuration is required"))?;
+            (
+                measurement_curves(vertical, &file)?,
+                Vec::new(),
+                serde_json::json!({"method": "measurement_native"}),
+            )
+        }
     };
     let measurement = file.summary().source_kind == SourceKind::Measurement;
     if debug.is_some() && !measurement {
@@ -513,12 +519,17 @@ fn simulation_curves(
     Ok((curves, warnings))
 }
 
-fn measurement_curves(measurement: &CanonicalFile) -> Result<Vec<Curve>> {
+fn measurement_curves(
+    vertical: &clab_core::config::VerticalConfig,
+    measurement: &CanonicalFile,
+) -> Result<Vec<Curve>> {
     let mut curves = Vec::new();
-    for (corner, prefix) in CORNERS.into_iter().zip(["lf", "rf", "lr", "rr"]) {
+    for corner in CORNERS {
         for axis in AXES {
+            let name = format!("{corner}_wheel_center_{axis}");
+            let reference = measurement_mapping(vertical, &name)?;
             let channel =
-                measurement.read_signal(&format!("{prefix}wc{axis}"), None, Some("mm"))?;
+                measurement.read_signal(&reference.entity, None, Some(&reference.unit))?;
             curves.push(Curve {
                 corner: corner.into(),
                 signal: format!("wheel_center_{axis}"),
@@ -527,11 +538,11 @@ fn measurement_curves(measurement: &CanonicalFile) -> Result<Vec<Curve>> {
                     .into_iter()
                     .map(|value| value - channel.info.offset.unwrap_or_default())
                     .collect(),
-                unit: "mm".into(),
+                unit: reference.unit.clone(),
                 travel: None,
             });
         }
-        optional_measurement_curves(measurement, corner, prefix, &mut curves)?;
+        optional_measurement_curves(vertical, measurement, corner, &mut curves)?;
     }
     Ok(curves)
 }
@@ -601,30 +612,42 @@ fn drop_initial_sample(values: Vec<f64>) -> Vec<f64> {
     }
 }
 
+/// Optional per-corner measurement curves: a canonical name absent from
+/// `measurement_signals`, or present but not found in the file, just skips
+/// that curve (same leniency `optional_simulation_curves` gives a canonical
+/// name absent from `vertical.signals`).
 fn optional_measurement_curves(
+    vertical: &clab_core::config::VerticalConfig,
     measurement: &CanonicalFile,
     corner: &str,
-    prefix: &str,
     curves: &mut Vec<Curve>,
 ) -> Result<()> {
-    for (suffix, channel, unit, relative) in [
-        ("wheel_load", format!("{prefix}fz"), "N", false),
-        ("toe", format!("{prefix}steer"), "deg", false),
-        ("camber", format!("{prefix}cam"), "deg", false),
-        ("spin", format!("{prefix}cas"), "deg", false),
-        ("wheel_pad_z", format!("{prefix}pz"), "mm", true),
-        ("tire_deflection", format!("{prefix}tdef"), "mm", true),
-        ("contact_patch_x", format!("{prefix}cpx"), "mm", true),
-        ("contact_patch_y", format!("{prefix}cpy"), "mm", true),
+    for suffix in [
+        "wheel_load",
+        "toe",
+        "camber",
+        "spin",
+        "wheel_pad_z",
+        "tire_deflection",
+        "contact_patch_x",
+        "contact_patch_y",
     ] {
+        let name = format!("{corner}_{suffix}");
+        let Some(reference) = vertical.measurement_signals.get(&name) else {
+            continue;
+        };
         if !measurement
             .signals()
             .iter()
-            .any(|info| info.safe_name == channel)
+            .any(|info| info.safe_name == reference.entity)
         {
             continue;
         }
-        let channel = measurement.read_signal(&channel, None, Some(unit))?;
+        let channel = measurement.read_signal(&reference.entity, None, Some(&reference.unit))?;
+        let relative = matches!(
+            suffix,
+            "wheel_pad_z" | "tire_deflection" | "contact_patch_x" | "contact_patch_y"
+        );
         let sign = if suffix == "toe" && matches!(corner, "front_right" | "rear_right") {
             -1.0
         } else {
@@ -643,7 +666,7 @@ fn optional_measurement_curves(
                 .into_iter()
                 .map(|value| (value - offset) * sign)
                 .collect(),
-            unit: unit.into(),
+            unit: reference.unit.clone(),
             travel: None,
         });
     }
@@ -657,7 +680,17 @@ fn mapping<'a>(
     vertical
         .signals
         .get(name)
-        .ok_or_else(|| anyhow::anyhow!("vertical signal mapping missing: {name}"))
+        .ok_or_else(|| anyhow::anyhow!(mapping_missing("vertical", name)))
+}
+
+fn measurement_mapping<'a>(
+    vertical: &'a clab_core::config::VerticalConfig,
+    name: &str,
+) -> Result<&'a clab_core::config::MeasurementSignalRef> {
+    vertical
+        .measurement_signals
+        .get(name)
+        .ok_or_else(|| anyhow::anyhow!(mapping_missing("vertical measurement", name)))
 }
 
 fn convention(

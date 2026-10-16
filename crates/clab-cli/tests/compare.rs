@@ -7,27 +7,32 @@ fn clab() -> Command {
     Command::new(env!("CARGO_BIN_EXE_clab"))
 }
 
-fn config_with_tolerance(directory: &Path, tolerance: f64) -> std::path::PathBuf {
-    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    for name in ["setup.toml", "mappings.toml", "tolerances.toml"] {
-        fs::copy(examples.join(name), directory.join(name)).unwrap();
-    }
-    let config = directory.join("config.toml");
-    fs::copy(examples.join("config.toml"), &config).unwrap();
-    fs::write(
-        &config,
-        fs::read_to_string(&config).unwrap().replace(
-            "[meta]\nname = \"example-config\"\nloadcase = \"example-loadcase\"\n\n",
-            "",
-        ),
+/// Shared fixture (`tests/fixtures/svc-simulation-mapping.toml`): SVC
+/// simulation mapping for the 24 canonical WHEEL_LOADS + GEOMETRY signals,
+/// matching `write_simulation_json`'s entity/component names below. Read
+/// from a file (not duplicated inline) so it has one definition shared
+/// with `analyze.rs`, and renaming or restructuring `examples/` never
+/// breaks a test whose only need was "some valid SVC mapping".
+fn svc_simulation_mapping_toml() -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/svc-simulation-mapping.toml"),
     )
-    .unwrap();
+    .unwrap()
+}
+
+fn config_with_tolerance(directory: &Path, tolerance: f64) -> std::path::PathBuf {
     let tolerances = directory.join("tolerances.toml");
     fs::write(
         &tolerances,
-        fs::read_to_string(&tolerances).unwrap().replace(
-            "total_mass_kg = 20.0",
-            &format!("total_mass_kg = {tolerance}"),
+        format!("[svc.validation.tolerances.absolute]\ntotal_mass_kg = {tolerance}\n"),
+    )
+    .unwrap();
+    let config = directory.join("config.toml");
+    fs::write(
+        &config,
+        format!(
+            "[physics]\ngravity = 9.80665\n{}\n[compare]\nfile = \"tolerances.toml\"\n",
+            svc_simulation_mapping_toml()
         ),
     )
     .unwrap();

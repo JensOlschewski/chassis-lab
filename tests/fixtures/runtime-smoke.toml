@@ -126,3 +126,51 @@ unit = "mm"
 entity = "rear_right"
 component = "z"
 unit = "mm"
+
+[vertical.measurement_signals.front_left_wheel_center_x]
+entity = "lfwcx"
+unit = "mm"
+
+[vertical.measurement_signals.front_left_wheel_center_y]
+entity = "lfwcy"
+unit = "mm"
+
+[vertical.measurement_signals.front_left_wheel_center_z]
+entity = "lfwcz"
+unit = "mm"
+
+[vertical.measurement_signals.front_right_wheel_center_x]
+entity = "rfwcx"
+unit = "mm"
+
+[vertical.measurement_signals.front_right_wheel_center_y]
+entity = "rfwcy"
+unit = "mm"
+
+[vertical.measurement_signals.front_right_wheel_center_z]
+entity = "rfwcz"
+unit = "mm"
+
+[vertical.measurement_signals.rear_left_wheel_center_x]
+entity = "lrwcx"
+unit = "mm"
+
+[vertical.measurement_signals.rear_left_wheel_center_y]
+entity = "lrwcy"
+unit = "mm"
+
+[vertical.measurement_signals.rear_left_wheel_center_z]
+entity = "lrwcz"
+unit = "mm"
+
+[vertical.measurement_signals.rear_right_wheel_center_x]
+entity = "rrwcx"
+unit = "mm"
+
+[vertical.measurement_signals.rear_right_wheel_center_y]
+entity = "rrwcy"
+unit = "mm"
+
+[vertical.measurement_signals.rear_right_wheel_center_z]
+entity = "rrwcz"
+unit = "mm"
