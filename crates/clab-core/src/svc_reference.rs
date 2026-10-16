@@ -46,7 +46,9 @@ pub fn load_svc_reference(
     } else {
         std::env::current_dir()?.join(path.as_ref())
     };
-if !path.is_file() { return Err(format!("SVC reference file does not exist: {}", path.display()).into()); };
+    if !path.is_file() {
+        return Err(format!("SVC reference file does not exist: {}", path.display()).into());
+    };
 
     let path = path.canonicalize()?;
     let raw: Value = serde_json::from_str(&fs::read_to_string(&path)?)

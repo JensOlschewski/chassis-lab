@@ -16,7 +16,8 @@ fn clab() -> Command {
 /// test whose only need was "some valid SVC mapping".
 fn svc_simulation_mapping_toml() -> String {
     fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/svc-simulation-mapping.toml"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/svc-simulation-mapping.toml"),
     )
     .unwrap()
 }

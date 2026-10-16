@@ -551,17 +551,23 @@ fn parse_function_first(
             ConfigError("run manifest mixes simulation and measurement inputs".into()).into(),
         );
     }
-    let (simulation_json, signals, validation, svc_signal_map, svc_source_kind, svc_measurement_signals) =
-        svc.unwrap_or_else(|| {
-            (
-                PathBuf::new(),
-                BTreeMap::new(),
-                None,
-                None,
-                SourceKind::Simulation,
-                BTreeMap::new(),
-            )
-        });
+    let (
+        simulation_json,
+        signals,
+        validation,
+        svc_signal_map,
+        svc_source_kind,
+        svc_measurement_signals,
+    ) = svc.unwrap_or_else(|| {
+        (
+            PathBuf::new(),
+            BTreeMap::new(),
+            None,
+            None,
+            SourceKind::Simulation,
+            BTreeMap::new(),
+        )
+    });
     let has_svc = !simulation_json.as_os_str().is_empty();
     Ok(CaseConfig {
         path: path.to_path_buf(),
@@ -1322,7 +1328,8 @@ fn merged_mapping(
         // `file = "..."` pointer covering every domain, not just an inline
         // table — resolve that one level the same way `merge_mapping_source`
         // resolves a file pointer at the domain/test level.
-        let by_kind_table = resolve_mapping_file(by_kind, path, &format!("[signals.{source_kind}]"))?;
+        let by_kind_table =
+            resolve_mapping_file(by_kind, path, &format!("[signals.{source_kind}]"))?;
         let by_kind_table = &by_kind_table;
         if let Some(shared) = by_kind_table.get(domain) {
             let shared_table = table(shared, &format!("[signals.{source_kind}.{domain}]"))?;
@@ -1335,10 +1342,13 @@ fn merged_mapping(
         }
         if let Some(test) = test
             && let Some(domain_value) = by_kind_table.get(domain)
-            && let Some(specific) = table(domain_value, &format!("[signals.{source_kind}.{domain}]"))?.get(test)
+            && let Some(specific) =
+                table(domain_value, &format!("[signals.{source_kind}.{domain}]"))?.get(test)
         {
-            let specific_table =
-                table(specific, &format!("[signals.{source_kind}.{domain}.{test}]"))?;
+            let specific_table = table(
+                specific,
+                &format!("[signals.{source_kind}.{domain}.{test}]"),
+            )?;
             merge_mapping_source(
                 &mut result,
                 specific_table.get("signals").unwrap_or(specific),
@@ -1850,8 +1860,10 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
         window_branch.entry(key).or_insert(value);
     }
     let source = signal_source(v, path, "[vertical]", Some(i))?;
-    let measurement_signals =
-        parse_measurement_signals(v.get("measurement_signals"), "[vertical.measurement_signals]")?;
+    let measurement_signals = parse_measurement_signals(
+        v.get("measurement_signals"),
+        "[vertical.measurement_signals]",
+    )?;
     let branch = VerticalBranches::parse(&metric, &window_branch)?;
     Ok(VerticalConfig {
         measurement_hdf5: resolve(
@@ -2643,11 +2655,7 @@ mod tests {
         // literal path (whose own inline `signals`/`measurement_signals`
         // keys bypass `merged_mapping` entirely and are unrelated here).
         let input = d.path().join("input.toml");
-        fs::write(
-            &input,
-            "[knc.vertical.simulation]\nfile='simulation.h5'\n",
-        )
-        .unwrap();
+        fs::write(&input, "[knc.vertical.simulation]\nfile='simulation.h5'\n").unwrap();
         let setup = d.path().join("setup.toml");
         fs::write(
             &setup,
