@@ -8,6 +8,20 @@ fn clab() -> Command {
     Command::new(env!("CARGO_BIN_EXE_clab"))
 }
 
+/// Shared fixture (`tests/fixtures/svc-simulation-mapping.toml`): SVC
+/// simulation mapping for the 24 canonical WHEEL_LOADS + GEOMETRY signals,
+/// matching the synthetic SVC inputs these tests build. Read from a file
+/// (not duplicated inline) so it has one definition shared with
+/// `compare.rs`, and renaming or restructuring `examples/` never breaks a
+/// test whose only need was "some valid SVC mapping".
+fn svc_simulation_mapping_toml() -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/svc-simulation-mapping.toml"),
+    )
+    .unwrap()
+}
+
 fn clear_simulation_units(path: &Path) {
     let staging = path.with_extension("units.h5");
     fs::copy(path, &staging).unwrap();
@@ -58,8 +72,8 @@ fn analyzes_svc_with_report_bundle() {
     fs::write(
         &direct_config,
         format!(
-            "[physics]\ngravity = 9.80665\n[signals]\nfile = {:?}\n",
-            examples.join("mappings.toml")
+            "[physics]\ngravity = 9.80665\n{}",
+            svc_simulation_mapping_toml()
         ),
     )
     .unwrap();
@@ -119,11 +133,7 @@ fn warns_when_run_manifest_uses_schema_version_one() {
     file.close().unwrap();
 
     let config = directory.path().join("config.toml");
-    fs::write(
-        &config,
-        format!("[signals]\nfile={:?}\n", examples.join("mappings.toml")),
-    )
-    .unwrap();
+    fs::write(&config, svc_simulation_mapping_toml()).unwrap();
     let run = directory.path().join("run.toml");
     fs::write(&run, format!("[input.svc]\nfile={input:?}\n")).unwrap();
     let result = clab()

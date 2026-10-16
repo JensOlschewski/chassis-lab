@@ -19,6 +19,15 @@ pub struct SignalRef {
     pub component: String,
     pub unit: String,
 }
+/// Raw-signal mapping for a measurement source: a flat channel or JSON key
+/// name, unlike simulation's entity+component pair. Shared by every
+/// measurement-mapping table (KnC vertical HDF5 channels, SVC reference
+/// JSON keys).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeasurementSignalRef {
+    pub entity: String,
+    pub unit: String,
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidationTolerances {
     pub absolute: BTreeMap<String, f64>,
@@ -77,6 +86,11 @@ pub struct VerticalConfig {
     pub branch: VerticalBranches,
     pub signals: BTreeMap<String, SignalRef>,
     pub signal_map: Option<PathBuf>,
+    /// Measurement channel mapping: canonical signal name ->
+    /// `{entity (channel name), unit}`. Required whenever this vertical
+    /// config is used to analyze a measurement HDF5 — there is no
+    /// hardcoded-channel-name fallback.
+    pub measurement_signals: BTreeMap<String, MeasurementSignalRef>,
     pub tolerances: ValidationTolerances,
 }
 
@@ -287,6 +301,11 @@ pub struct CaseConfig {
     pub validation: Option<ValidationConfig>,
     pub vertical: Option<VerticalConfig>,
     pub svc_signal_map: Option<PathBuf>,
+    /// SVC measurement reference JSON key mapping: canonical metric name ->
+    /// `{entity (JSON key), unit}`. Required whenever this config's SVC
+    /// input is a measurement reference — there is no hardcoded canonical
+    /// name fallback.
+    pub svc_measurement_signals: BTreeMap<String, MeasurementSignalRef>,
 }
 impl CaseConfig {
     pub fn configured_domains(&self) -> Vec<Domain> {
@@ -525,23 +544,30 @@ fn parse_function_first(
     if svc.is_none() && vertical.is_none() {
         return Err(ConfigError("[input] must define at least one domain".into()).into());
     }
-    if let (Some((_, _, _, _, svc_kind)), Some(vertical)) = (&svc, &vertical)
+    if let (Some((_, _, _, _, svc_kind, _)), Some(vertical)) = (&svc, &vertical)
         && *svc_kind != vertical.source_kind
     {
         return Err(
             ConfigError("run manifest mixes simulation and measurement inputs".into()).into(),
         );
     }
-    let (simulation_json, signals, validation, svc_signal_map, svc_source_kind) = svc
-        .unwrap_or_else(|| {
-            (
-                PathBuf::new(),
-                BTreeMap::new(),
-                None,
-                None,
-                SourceKind::Simulation,
-            )
-        });
+    let (
+        simulation_json,
+        signals,
+        validation,
+        svc_signal_map,
+        svc_source_kind,
+        svc_measurement_signals,
+    ) = svc.unwrap_or_else(|| {
+        (
+            PathBuf::new(),
+            BTreeMap::new(),
+            None,
+            None,
+            SourceKind::Simulation,
+            BTreeMap::new(),
+        )
+    });
     let has_svc = !simulation_json.as_os_str().is_empty();
     Ok(CaseConfig {
         path: path.to_path_buf(),
@@ -554,6 +580,7 @@ fn parse_function_first(
         validation,
         vertical,
         svc_signal_map,
+        svc_measurement_signals,
     })
 }
 
@@ -690,6 +717,7 @@ type FunctionSvc = (
     Option<ValidationConfig>,
     Option<PathBuf>,
     SourceKind,
+    BTreeMap<String, MeasurementSignalRef>,
 );
 
 fn function_svc(
@@ -739,8 +767,13 @@ fn function_svc(
             (None, None) => return Ok(None),
         }
     };
-    let mappings = merged_mapping(root, "svc", None, path)?;
+    let mappings = merged_mapping(root, "simulation", "svc", None, path)?;
     let signals = parse_signals(Some(&Value::Table(mappings.clone())), "[signals.svc]")?;
+    let measurement_mappings = merged_mapping(root, "measurement", "svc", None, path)?;
+    let measurement_signals = parse_measurement_signals(
+        Some(&Value::Table(measurement_mappings)),
+        "[signals.svc.measurement]",
+    )?;
     let validation = function_validation(
         root,
         (source_kind == SourceKind::Measurement).then_some(simulation.clone()),
@@ -753,6 +786,7 @@ fn function_svc(
         validation,
         map_path,
         source_kind,
+        measurement_signals,
     )))
 }
 
@@ -907,7 +941,8 @@ fn function_vertical(
             Some("static"),
         )?;
     }
-    let mappings = merged_mapping(root, "knc", Some("vertical"), path)?;
+    let mappings = merged_mapping(root, "simulation", "knc", Some("vertical"), path)?;
+    let measurement_mappings = merged_mapping(root, "measurement", "knc", Some("vertical"), path)?;
     let setup_root = table(
         root.get("setup")
             .ok_or_else(|| ConfigError("missing [setup] table".into()))?,
@@ -956,6 +991,10 @@ fn function_vertical(
     }
     vertical.insert("inputs".into(), Value::Table(inputs));
     vertical.insert("signals".into(), Value::Table(mappings));
+    vertical.insert(
+        "measurement_signals".into(),
+        Value::Table(measurement_mappings),
+    );
     let mut setup_copy = setup.clone();
     // `[meta]` holds the test setup flags; flags directly in `[setup.knc]`
     // remain accepted.
@@ -1263,8 +1302,15 @@ fn hdf5_source_kind(path: &Path, role: &str) -> Result<SourceKind, Box<dyn std::
     }
 }
 
+/// Resolve one domain's (and optional test's) signal mapping for one
+/// `source_kind` ("simulation" or "measurement"). Every mapping table ends
+/// in the same shape: `domain[.test].source_kind[.signals]`, so simulation
+/// and measurement are resolved identically, just with a different
+/// `source_kind` — the only asymmetry left is which one a given fixture
+/// happens to define entries under.
 fn merged_mapping(
     root: &toml::map::Map<String, Value>,
+    source_kind: &str,
     domain: &str,
     test: Option<&str>,
     path: &Path,
@@ -1276,42 +1322,79 @@ fn merged_mapping(
         .transpose()?;
     let mut result = Map::new();
     if let Some(all) = all
-        && let Some(base) = all.get(domain)
+        && let Some(by_kind) = all.get(source_kind)
     {
-        let base_table = table(base, &format!("[signals.{domain}]"))?;
-        if let Some(shared) = base_table.get("base") {
+        // `[mappings.simulation]`/`[mappings.measurement]` may itself be a
+        // `file = "..."` pointer covering every domain, not just an inline
+        // table — resolve that one level the same way `merge_mapping_source`
+        // resolves a file pointer at the domain/test level.
+        let by_kind_table =
+            resolve_mapping_file(by_kind, path, &format!("[signals.{source_kind}]"))?;
+        let by_kind_table = &by_kind_table;
+        if let Some(shared) = by_kind_table.get(domain) {
+            let shared_table = table(shared, &format!("[signals.{source_kind}.{domain}]"))?;
             merge_mapping_source(
                 &mut result,
-                shared,
+                shared_table.get("signals").unwrap_or(shared),
                 path,
-                &format!("[signals.{domain}.base]"),
-            )?;
-        } else {
-            merge_mapping_source(
-                &mut result,
-                base_table.get("signals").unwrap_or(base),
-                path,
-                &format!("[signals.{domain}.signals]"),
+                &format!("[signals.{source_kind}.{domain}.signals]"),
             )?;
         }
         if let Some(test) = test
-            && let Some(child) = base_table.get(test)
+            && let Some(domain_value) = by_kind_table.get(domain)
+            && let Some(specific) =
+                table(domain_value, &format!("[signals.{source_kind}.{domain}]"))?.get(test)
         {
+            let specific_table = table(
+                specific,
+                &format!("[signals.{source_kind}.{domain}.{test}]"),
+            )?;
             merge_mapping_source(
                 &mut result,
-                child
-                    .as_table()
-                    .and_then(|table| table.get("signals"))
-                    .unwrap_or(child),
+                specific_table.get("signals").unwrap_or(specific),
                 path,
-                &format!("[signals.{domain}.{test}]"),
+                &format!("[signals.{source_kind}.{domain}.{test}.signals]"),
             )?;
         }
     }
     if result.is_empty() {
-        return Err(ConfigError(format!("[signals.{domain}] must define mappings")).into());
+        let where_ = match test {
+            Some(test) => format!("{source_kind}.{domain}.{test}"),
+            None => format!("{source_kind}.{domain}"),
+        };
+        return Err(ConfigError(format!("[signals.{where_}] must define mappings")).into());
     }
     Ok(result)
+}
+
+/// Resolve a mapping node that may be a `file = "..."` pointer into its
+/// actual table — the loaded file's `mappings`/`signal_mappings`/`signals`
+/// wrapper if present, else the file's content as-is; an inline table (no
+/// `file` key) is returned unchanged. Same resolution `merge_mapping_source`
+/// does for a domain/test-level file pointer, lifted one level so a
+/// `source_kind`-level pointer (covering every domain in one file) works too.
+fn resolve_mapping_file(
+    value: &Value,
+    path: &Path,
+    where_: &str,
+) -> Result<Map<String, Value>, Box<dyn std::error::Error>> {
+    let t = table(value, where_)?;
+    let Some(file) = t.get("file") else {
+        return Ok(t.clone());
+    };
+    let file = resolve(file, path, &format!("{where_}.file"))?;
+    let text = fs::read_to_string(&file)?;
+    let external: toml::Table = text
+        .parse()
+        .map_err(|e| ConfigError(format!("invalid mapping TOML in {}: {e}", file.display())))?;
+    let values = external
+        .get("mappings")
+        .or_else(|| external.get("signal_mappings"))
+        .or_else(|| external.get("signals"));
+    match values {
+        Some(values) => Ok(table(values, &format!("mapping file {}", file.display()))?.clone()),
+        None => Ok(external),
+    }
 }
 
 fn merge_mapping_source(
@@ -1505,6 +1588,7 @@ fn parse_legacy(
         validation,
         vertical: None,
         svc_signal_map: signal_map.0,
+        svc_measurement_signals: BTreeMap::new(),
     })
 }
 
@@ -1608,6 +1692,7 @@ fn parse_unified(
         validation,
         vertical,
         svc_signal_map,
+        svc_measurement_signals: BTreeMap::new(),
     })
 }
 
@@ -1624,6 +1709,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             "branch",
             "signals",
             "signal_mappings",
+            "measurement_signals",
             "validation",
         ],
         "[vertical]",
@@ -1774,6 +1860,10 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
         window_branch.entry(key).or_insert(value);
     }
     let source = signal_source(v, path, "[vertical]", Some(i))?;
+    let measurement_signals = parse_measurement_signals(
+        v.get("measurement_signals"),
+        "[vertical.measurement_signals]",
+    )?;
     let branch = VerticalBranches::parse(&metric, &window_branch)?;
     Ok(VerticalConfig {
         measurement_hdf5: resolve(
@@ -1823,6 +1913,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
         branch,
         signals: source.1,
         signal_map: source.0,
+        measurement_signals,
         tolerances: vertical_tolerances(v)?,
     })
 }
@@ -1974,6 +2065,37 @@ fn parse_signal(n: &str, v: &Value) -> Result<SignalRef, Box<dyn std::error::Err
     Ok(SignalRef {
         entity: string(t, "entity", &format!("signal '{n}'"))?,
         component: string(t, "component", &format!("signal '{n}'"))?,
+        unit: string_allow_empty(t, "unit", &format!("signal '{n}'"))?,
+    })
+}
+/// Same as `parse_signals`, for measurement mapping tables (flat
+/// entity/unit, no component).
+fn parse_measurement_signals(
+    v: Option<&Value>,
+    where_: &str,
+) -> Result<BTreeMap<String, MeasurementSignalRef>, Box<dyn std::error::Error>> {
+    let t = table(
+        v.ok_or_else(|| ConfigError(format!("{where_} must be a table")))?,
+        where_,
+    )?;
+    if t.is_empty() {
+        return Err(ConfigError(format!("{where_} must define at least one signal")).into());
+    };
+    t.iter()
+        .map(|(n, v)| Ok((n.clone(), parse_measurement_signal(n, v)?)))
+        .collect()
+}
+fn parse_measurement_signal(
+    n: &str,
+    v: &Value,
+) -> Result<MeasurementSignalRef, Box<dyn std::error::Error>> {
+    if n.is_empty() {
+        return Err(ConfigError("signal names must be non-empty strings".into()).into());
+    };
+    let t = table(v, &format!("signal '{n}'"))?;
+    keys(t, &["entity", "unit"], &format!("signal '{n}'"))?;
+    Ok(MeasurementSignalRef {
+        entity: string(t, "entity", &format!("signal '{n}'"))?,
         unit: string_allow_empty(t, "unit", &format!("signal '{n}'"))?,
     })
 }
@@ -2364,7 +2486,7 @@ mod tests {
     fn parses_vertical_only_unified_config() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
+        fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.configured_domains(), vec![Domain::Knc]);
     }
@@ -2373,7 +2495,7 @@ mod tests {
     fn validates_vertical_branch_options() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n";
+        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n";
         fs::write(&p, base).unwrap();
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
         assert_eq!((branch.measurement.index, branch.simulation.index), (2, 2));
@@ -2402,7 +2524,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
         let write = |window: &str| {
-            fs::write(&p, format!("[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\n{window}\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n")).unwrap();
+            fs::write(&p, format!("[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\n{window}\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n")).unwrap();
         };
         write(
             "travel_minimum_mm=-10\ntravel_maximum_mm=10\nstep_mm=1\nmetric_gradient_points_mm=5",
@@ -2442,7 +2564,7 @@ mod tests {
         let p = d.path().join("case.toml");
         fs::write(
             &p,
-            "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.metric]\nsprung_mass_front_left_kg=449.0\nsprung_mass_rear_right_kg=383.0\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n",
+            "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.metric]\nsprung_mass_front_left_kg=449.0\nsprung_mass_rear_right_kg=383.0\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n",
         )
         .unwrap();
         let window = load_config(&p).unwrap().vertical.unwrap().window;
@@ -2462,7 +2584,7 @@ mod tests {
         .unwrap();
         fs::write(
             d.path().join("mappings.toml"),
-            "[svc.base.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+            "[simulation.svc.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[measurement.svc.total]\nentity='e'\nunit='kg'\n",
         )
         .unwrap();
         fs::write(d.path().join("validation.toml"), "[svc]\n").unwrap();
@@ -2480,6 +2602,132 @@ mod tests {
     }
 
     #[test]
+    fn splits_simulation_and_measurement_mappings_into_separate_files() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("svc-simulation-mappings.toml"),
+            "[front_left_wheel_load]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("svc-measurement-mappings.toml"),
+            "[front_left_mass_kg]\nentity='e2'\nunit='kg'\n",
+        )
+        .unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input.svc.simulation]\nfile='simulation.json'\n\
+             [mappings.simulation.svc]\nfile='svc-simulation-mappings.toml'\n\
+             [mappings.measurement.svc]\nfile='svc-measurement-mappings.toml'\n",
+        )
+        .unwrap();
+
+        let config = load_config(&p).unwrap();
+        assert_eq!(config.signals["front_left_wheel_load"].entity, "e");
+        assert_eq!(
+            config.svc_measurement_signals["front_left_mass_kg"].entity,
+            "e2"
+        );
+    }
+
+    #[test]
+    fn splits_knc_domain_shared_and_vertical_test_mappings_into_separate_files() {
+        let d = tempfile::tempdir().unwrap();
+        // Domain-shared (every knc test, not just vertical).
+        fs::write(
+            d.path().join("knc-simulation-mappings.toml"),
+            "[front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n",
+        )
+        .unwrap();
+        // Vertical-test-specific.
+        fs::write(
+            d.path().join("knc-vertical-simulation-mappings.toml"),
+            "[front_left_wheel_center_x]\nentity='fl'\ncomponent='x'\nunit='mm'\n",
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("knc-vertical-measurement-mappings.toml"),
+            "[front_left_wheel_center_x]\nentity='lfwcx'\nunit='mm'\n",
+        )
+        .unwrap();
+        // Function-first `[input]`/`[mappings]` path, not the raw `[vertical]`
+        // literal path (whose own inline `signals`/`measurement_signals`
+        // keys bypass `merged_mapping` entirely and are unrelated here).
+        let input = d.path().join("input.toml");
+        fs::write(&input, "[knc.vertical.simulation]\nfile='simulation.h5'\n").unwrap();
+        let setup = d.path().join("setup.toml");
+        fs::write(
+            &setup,
+            "[knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n\
+             [knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n",
+        )
+        .unwrap();
+        let case = d.path().join("function-case.toml");
+        fs::write(
+            &case,
+            "[meta]\nname='n'\nloadcase='l'\n[input]\nfile='input.toml'\n[setup]\nfile='setup.toml'\n\
+             [mappings.simulation.knc]\nfile='knc-simulation-mappings.toml'\n\
+             [mappings.simulation.knc.vertical]\nfile='knc-vertical-simulation-mappings.toml'\n\
+             [mappings.measurement.knc.vertical]\nfile='knc-vertical-measurement-mappings.toml'\n",
+        )
+        .unwrap();
+
+        let vertical = load_config(&case).unwrap().vertical.unwrap();
+        assert_eq!(vertical.signals["front_left_travel"].entity, "fl");
+        assert_eq!(vertical.signals["front_left_wheel_center_x"].component, "x");
+        assert_eq!(
+            vertical.measurement_signals["front_left_wheel_center_x"].entity,
+            "lfwcx"
+        );
+    }
+
+    #[test]
+    fn resolves_fully_flat_inline_mapping_headers() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input.svc.simulation]\nfile='simulation.json'\n\
+             [mappings.simulation.svc.front_left_wheel_load]\nentity='e'\ncomponent='c'\nunit='kg'\n\
+             [mappings.measurement.svc.front_left_mass_kg]\nentity='e2'\nunit='kg'\n",
+        )
+        .unwrap();
+
+        let config = load_config(&p).unwrap();
+        assert_eq!(config.signals["front_left_wheel_load"].entity, "e");
+        assert_eq!(
+            config.svc_measurement_signals["front_left_mass_kg"].entity,
+            "e2"
+        );
+    }
+
+    #[test]
+    fn resolves_single_combined_mapping_file() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("combined-mappings.toml"),
+            "[simulation.svc.front_left_wheel_load]\nentity='e'\ncomponent='c'\nunit='kg'\n\
+             [measurement.svc.front_left_mass_kg]\nentity='e2'\nunit='kg'\n",
+        )
+        .unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input.svc.simulation]\nfile='simulation.json'\n\
+             [mappings]\nfile='combined-mappings.toml'\n",
+        )
+        .unwrap();
+
+        let config = load_config(&p).unwrap();
+        assert_eq!(config.signals["front_left_wheel_load"].entity, "e");
+        assert_eq!(
+            config.svc_measurement_signals["front_left_mass_kg"].entity,
+            "e2"
+        );
+    }
+
+    #[test]
     fn resolves_external_input_paths_relative_to_input_role_file() {
         let d = tempfile::tempdir().unwrap();
         fs::create_dir(d.path().join("input")).unwrap();
@@ -2491,7 +2739,7 @@ mod tests {
         let p = d.path().join("case.toml");
         fs::write(
             &p,
-            "[meta]\nname='n'\nloadcase='l'\n[input]\nfile='input/input.toml'\n[signals.svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+            "[meta]\nname='n'\nloadcase='l'\n[input]\nfile='input/input.toml'\n[signals.simulation.svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[signals.measurement.svc.signals.total]\nentity='e'\nunit='kg'\n",
         )
         .unwrap();
 
@@ -2518,7 +2766,7 @@ mod tests {
     fn parses_canonical_inline_roles() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p, "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input.svc.simulation]\nfile='simulation.json'\n[signals.svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[validation.svc.tolerances.absolute]\ntotal=1\n").unwrap();
+        fs::write(&p, "[meta]\nname='n'\nloadcase='l'\n[physics]\ngravity=9.8\n[input.svc.simulation]\nfile='simulation.json'\n[signals.simulation.svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[signals.measurement.svc.signals.total]\nentity='e'\nunit='kg'\n[validation.svc.tolerances.absolute]\ntotal=1\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.signals["total"].unit, "kg");
         assert_eq!(config.validation.unwrap().tolerances.absolute["total"], 1.0);
@@ -2529,7 +2777,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("input.toml"), "[svc.simulation]\nfile='simulation.json'\n[knc.vertical.simulation]\nfile='simulation.h5'\n").unwrap();
         fs::write(d.path().join("setup.toml"), "[knc.vertical]\nbrakes_applied=false\nengine_running=false\nfront_arb_connected=true\n[knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n").unwrap();
-        fs::write(d.path().join("signals.toml"), "[svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[knc.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n[knc.vertical.signals.front_left_wheel_center_x]\nentity='fl'\ncomponent='x'\nunit='mm'\n").unwrap();
+        fs::write(d.path().join("signals.toml"), "[simulation.svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[measurement.svc.signals.total]\nentity='e'\nunit='kg'\n[simulation.knc.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n[simulation.knc.vertical.signals.front_left_wheel_center_x]\nentity='fl'\ncomponent='x'\nunit='mm'\n[measurement.knc.vertical.signals.front_left_wheel_center_x]\nentity='fl'\nunit='mm'\n").unwrap();
         fs::write(
             d.path().join("validation.toml"),
             "[svc.validation.tolerances.absolute]\ntotal=1\n[knc.validation.tolerances.absolute]\nrear_left_wheel_center_x_mm=0.2\n[knc.vertical.tolerances.absolute]\nfront_left_wheel_center_x_mm=0.1\n",
@@ -2588,7 +2836,7 @@ mod tests {
         .unwrap();
         fs::write(
             d.path().join("signals.toml"),
-            "[knc.vertical.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n",
+            "[simulation.knc.vertical.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n[measurement.knc.vertical.signals.front_left_travel]\nentity='fl'\nunit='mm'\n",
         )
         .unwrap();
         fs::write(
@@ -2640,7 +2888,7 @@ mod tests {
         .unwrap();
         fs::write(
             d.path().join("signals.toml"),
-            "[knc.vertical.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n",
+            "[simulation.knc.vertical.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n[measurement.knc.vertical.signals.front_left_travel]\nentity='fl'\nunit='mm'\n",
         )
         .unwrap();
         let p = d.path().join("case.toml");
@@ -2679,7 +2927,7 @@ mod tests {
     fn vertical_reports_defaulted_branch_keys() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n";
+        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n";
         fs::write(&p, base).unwrap();
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
         assert_eq!(
@@ -2791,7 +3039,7 @@ mod tests {
         fs::write(
             &config,
             format!(
-                "[meta]\nname='n'\nloadcase='l'\n[input.svc]\nfile={:?}\n[input.knc.vertical]\nfile={:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.svc.signals.x]\nentity='e'\ncomponent='c'\nunit='kg'\n[signals.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n",
+                "[meta]\nname='n'\nloadcase='l'\n[input.svc]\nfile={:?}\n[input.knc.vertical]\nfile={:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.svc.signals.x]\nentity='e'\ncomponent='c'\nunit='kg'\n[signals.measurement.svc.signals.x]\nentity='e'\nunit='kg'\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[signals.measurement.knc.vertical.signals.x]\nentity='e'\nunit='mm'\n",
                 svc, vertical
             ),
         )
@@ -2814,7 +3062,7 @@ mod tests {
         source_kind(&input, "simulation");
         source_kind(&static_input, "simulation");
         let config = d.path().join("case.toml");
-        fs::write(&config, "[meta]\nname='n'\nloadcase='l'\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n").unwrap();
+        fs::write(&config, "[meta]\nname='n'\nloadcase='l'\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[signals.measurement.knc.vertical.signals.x]\nentity='e'\nunit='mm'\n").unwrap();
         let run = run_dir.join("run.toml");
         fs::write(
             &run,
@@ -2839,7 +3087,7 @@ mod tests {
         source_kind(&second_input, "simulation");
         fs::write(
             &config,
-            "[meta]\nname='shared'\nloadcase='shared'\n[physics]\ngravity=9.80665\n[signals.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n",
+            "[meta]\nname='shared'\nloadcase='shared'\n[physics]\ngravity=9.80665\n[signals.simulation.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n[signals.measurement.svc.signals.total]\nentity='vehicle'\nunit='kg'\n",
         )
         .unwrap();
         let first_run = directory.path().join("first.toml");
@@ -2893,7 +3141,7 @@ mod tests {
         let config = directory.path().join("config.toml");
         fs::write(
             &config,
-            "[physics]\ngravity=9.80665\n[signals.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n",
+            "[physics]\ngravity=9.80665\n[signals.simulation.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n[signals.measurement.svc.signals.total]\nentity='vehicle'\nunit='kg'\n",
         )
         .unwrap();
 
@@ -2904,7 +3152,7 @@ mod tests {
 
         fs::write(
             &config,
-            "[meta]\nname='named'\n[physics]\ngravity=9.80665\n[signals.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n",
+            "[meta]\nname='named'\n[physics]\ngravity=9.80665\n[signals.simulation.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n[signals.measurement.svc.signals.total]\nentity='vehicle'\nunit='kg'\n",
         )
         .unwrap();
         let loaded = load_config_with_input(&config, &input, false).unwrap();
@@ -2923,7 +3171,7 @@ mod tests {
         fs::write(
             &config,
             format!(
-                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
+                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
             ),
         )
         .unwrap();
@@ -2946,7 +3194,7 @@ mod tests {
         fs::write(
             &config,
             format!(
-                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
+                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
             ),
         )
         .unwrap();
@@ -2967,7 +3215,7 @@ mod tests {
         fs::write(
             &config,
             format!(
-                "[meta]\nname='n'\nloadcase='l'\n[input.svc]\nfile={input:?}\n[signals.svc.signals.x]\nentity='e'\ncomponent='c'\nunit='kg'\n"
+                "[meta]\nname='n'\nloadcase='l'\n[input.svc]\nfile={input:?}\n[signals.simulation.svc.signals.x]\nentity='e'\ncomponent='c'\nunit='kg'\n"
             ),
         )
         .unwrap();
@@ -2981,7 +3229,6 @@ mod tests {
 
     #[test]
     fn direct_vertical_input_keeps_configured_static_simulation() {
-        let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
         let d = tempfile::tempdir().unwrap();
         let simulation = d.path().join("simulation.h5");
         source_kind(&simulation, "simulation");
@@ -2989,9 +3236,12 @@ mod tests {
         fs::write(
             &config,
             format!(
-                "[meta]\nname='n'\nloadcase='l'\n[setup]\nfile='{}'\n[signals]\nfile='{}'\n[input.knc.vertical.static_simulation]\nfile='{}'\n",
-                examples.join("setup.toml").display(),
-                examples.join("mappings.toml").display(),
+                "[meta]\nname='n'\nloadcase='l'\n\
+                 [setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n\
+                 [setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n\
+                 [signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n\
+                 [signals.measurement.knc.vertical.signals.x]\nentity='e'\nunit='mm'\n\
+                 [input.knc.vertical.static_simulation]\nfile='{}'\n",
                 simulation.display(),
             ),
         )

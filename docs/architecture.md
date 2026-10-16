@@ -164,24 +164,27 @@ file = "static-simulation.h5"
 [input.knc.vertical]
 file = "vertical.h5"
 
-[mappings.svc]
-file = "example-signals.toml"
+[mappings.simulation]
+file = "simulation-mappings.toml"
 
-[mappings.knc]
-file = "example-vertical-signals.toml"
-
-[mappings.knc.vertical]
-# inline values add to or override domain mappings
+[mappings.measurement]
+file = "measurement-mappings.toml"
 ```
 
 Source kind comes from required input metadata: HDF5 and SVC JSON `source_kind`
 must declare it. SVC and vertical must have same source
 kind. `[input.knc.static]` is run-relative simulation HDF5 baseline for vertical
 normalization. Nested simulation/measurement role tables remain compatible.
-External role files can replace inline sections. Input JSON combines SVC and
+External role files can replace inline sections, at any depth — a whole
+`source_kind` under `[mappings]`, one domain under it, or one test under that
+domain, can each point at its own file (`examples/` combines every domain
+into one file per source_kind, `simulation-mappings.toml` /
+`measurement-mappings.toml`; splitting further per domain or test, or
+combining into one file overall, works identically — see `merged_mapping` in
+`crates/clab-core/src/config.rs`). Input JSON combines SVC and
 KnC paths; setup JSON contains setup and window data; mappings TOML contains
-`[svc]` and `[knc]` bases plus test overrides; validation TOML contains optional
-policy. `[meta]` contains optional run `name` and `loadcase`; domain is derived.
+`[simulation]` and `[measurement]` bases plus domain and test overrides;
+validation TOML contains optional policy. `[meta]` contains optional run `name` and `loadcase`; domain is derived.
 Run metadata overrides shared configuration metadata, and absent values report
 as `undefined`. Paths resolve relative to main config.
 
@@ -203,11 +206,38 @@ are left out use their default and produce one analysis warning each.
 in `[metric]` are the `ride_frequency` metric's per-corner mass fallback: this run's
 own SVC `<corner>_mass_kg` is used automatically when SVC and KnC vertical run
 together, and a configured value overrides it. Signal maps contain
-canonical names, entities, components, and units. Mapping precedence is shared <
-domain < test; child values override, child-only values add, missing values inherit,
-and nested tables deep-merge. External mapping files use same merge rules. Legacy
-domain-first sections remain accepted. SVC tolerances are optional; without them,
-comparisons are informational. Paths resolve relative to config file.
+canonical names, entities, components, and units. Every mapping table ends
+in the same shape: `source_kind.domain[.test][.signals].<canonical_name>`
+(`source_kind` is `simulation` or `measurement`, always the outermost key),
+so a simulation and a measurement table for the same domain/test sit side by
+side instead of one being an unmarked default — e.g. `[simulation.svc]` /
+`[measurement.svc]`, `[simulation.knc.vertical]` /
+`[measurement.knc.vertical]`. The `.signals` level and the trailing
+canonical-name level can both collapse — `[simulation.knc.vertical.signals.x]`,
+`[simulation.knc.vertical.x]`, and a single flat
+`[simulation.knc.vertical.x]` header all resolve the same way; `unit`/`entity`
+(and `component` for simulation) always sit one level below the canonical
+name. Mapping precedence is shared < domain < test; child values override,
+child-only values add, missing values inherit, and nested tables deep-merge.
+External mapping files use the same merge rules. SVC tolerances are
+optional; without them, comparisons are informational. Paths resolve
+relative to config file.
+
+Measurement sources resolve through mapping tables the same way simulation
+sources do, just without a `component`: a flat channel or JSON key has
+nothing to split off. `[measurement.knc.vertical]` maps canonical
+KnC vertical names to HDF5 measurement channel names (`entity` + `unit`);
+`[measurement.svc]` maps canonical SVC metric names
+(`clab_core::conventions::SVC_METRICS`) to SVC measurement reference JSON
+keys (`entity`; `unit` is informational only there, since reference values
+are already final). There is no hardcoded fallback: a required canonical
+name absent from the mapping is a config error (KnC vertical wheel-center
+signals, every SVC simulation signal); a JSON key absent from the mapping
+is a reference-file error (SVC measurement). KnC vertical's other
+measurement signals (`wheel_load`, `toe`, `camber`, `spin`, `wheel_pad_z`,
+`tire_deflection`, `contact_patch_x/y`) are optional the same way their
+simulation counterparts are: missing from the mapping, or mapped but absent
+from the file, just skips that curve.
 
 ## Conventions
 

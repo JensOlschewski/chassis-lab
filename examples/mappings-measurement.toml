@@ -1,0 +1,300 @@
+# Measurement signal mappings for every domain. Loaded by [mappings.measurement]
+# in config.toml, so top-level keys here are domain names (svc, knc) — no
+# "measurement" prefix needed, the pointer already scoped that. Measurement
+# sources are flat names (DAQ channel, JSON key), so entries carry only
+# `entity` + `unit`, no `component`. SVC entries map a canonical metric name
+# to its reviewed-reference JSON key (identity here; rename `entity` to match
+# a file using different key names). KnC `*_wheel_center_x/y/z` are required;
+# every other KnC entry is optional — missing it just skips that curve.
+
+[svc.front_left_mass_kg]
+entity = "front_left_mass_kg"
+unit = "kg"
+
+[svc.front_right_mass_kg]
+entity = "front_right_mass_kg"
+unit = "kg"
+
+[svc.rear_left_mass_kg]
+entity = "rear_left_mass_kg"
+unit = "kg"
+
+[svc.rear_right_mass_kg]
+entity = "rear_right_mass_kg"
+unit = "kg"
+
+[svc.front_mass_kg]
+entity = "front_mass_kg"
+unit = "kg"
+
+[svc.rear_mass_kg]
+entity = "rear_mass_kg"
+unit = "kg"
+
+[svc.total_mass_kg]
+entity = "total_mass_kg"
+unit = "kg"
+
+[svc.front_distribution_percent]
+entity = "front_distribution_percent"
+unit = "%"
+
+[svc.rear_distribution_percent]
+entity = "rear_distribution_percent"
+unit = "%"
+
+[svc.wheelbase_mm]
+entity = "wheelbase_mm"
+unit = "mm"
+
+[svc.cg_x_from_front_axle_mm]
+entity = "cg_x_from_front_axle_mm"
+unit = "mm"
+
+[svc.cg_height_mm]
+entity = "cg_height_mm"
+unit = "mm"
+
+[svc.ride_height_front_left_mm]
+entity = "ride_height_front_left_mm"
+unit = "mm"
+
+[svc.ride_height_front_right_mm]
+entity = "ride_height_front_right_mm"
+unit = "mm"
+
+[svc.ride_height_rear_left_mm]
+entity = "ride_height_rear_left_mm"
+unit = "mm"
+
+[svc.ride_height_rear_right_mm]
+entity = "ride_height_rear_right_mm"
+unit = "mm"
+
+[svc.front_track_mm]
+entity = "front_track_mm"
+unit = "mm"
+
+[svc.rear_track_mm]
+entity = "rear_track_mm"
+unit = "mm"
+
+[svc.toe_front_left_deg]
+entity = "toe_front_left_deg"
+unit = "deg"
+
+[svc.toe_front_right_deg]
+entity = "toe_front_right_deg"
+unit = "deg"
+
+[svc.toe_rear_left_deg]
+entity = "toe_rear_left_deg"
+unit = "deg"
+
+[svc.toe_rear_right_deg]
+entity = "toe_rear_right_deg"
+unit = "deg"
+
+[svc.camber_front_left_deg]
+entity = "camber_front_left_deg"
+unit = "deg"
+
+[svc.camber_front_right_deg]
+entity = "camber_front_right_deg"
+unit = "deg"
+
+[svc.camber_rear_left_deg]
+entity = "camber_rear_left_deg"
+unit = "deg"
+
+[svc.camber_rear_right_deg]
+entity = "camber_rear_right_deg"
+unit = "deg"
+
+[svc.inertia_xx_kg_mm2]
+entity = "inertia_xx_kg_mm2"
+unit = "kg*mm^2"
+
+[svc.inertia_yy_kg_mm2]
+entity = "inertia_yy_kg_mm2"
+unit = "kg*mm^2"
+
+[svc.inertia_zz_kg_mm2]
+entity = "inertia_zz_kg_mm2"
+unit = "kg*mm^2"
+
+[knc.vertical.front_left_wheel_center_x]
+entity = "lfwcx"
+unit = "mm"
+
+[knc.vertical.front_left_wheel_center_y]
+entity = "lfwcy"
+unit = "mm"
+
+[knc.vertical.front_left_wheel_center_z]
+entity = "lfwcz"
+unit = "mm"
+
+[knc.vertical.front_right_wheel_center_x]
+entity = "rfwcx"
+unit = "mm"
+
+[knc.vertical.front_right_wheel_center_y]
+entity = "rfwcy"
+unit = "mm"
+
+[knc.vertical.front_right_wheel_center_z]
+entity = "rfwcz"
+unit = "mm"
+
+[knc.vertical.rear_left_wheel_center_x]
+entity = "lrwcx"
+unit = "mm"
+
+[knc.vertical.rear_left_wheel_center_y]
+entity = "lrwcy"
+unit = "mm"
+
+[knc.vertical.rear_left_wheel_center_z]
+entity = "lrwcz"
+unit = "mm"
+
+[knc.vertical.rear_right_wheel_center_x]
+entity = "rrwcx"
+unit = "mm"
+
+[knc.vertical.rear_right_wheel_center_y]
+entity = "rrwcy"
+unit = "mm"
+
+[knc.vertical.rear_right_wheel_center_z]
+entity = "rrwcz"
+unit = "mm"
+
+[knc.vertical.front_left_wheel_load]
+entity = "lffz"
+unit = "N"
+
+[knc.vertical.front_right_wheel_load]
+entity = "rffz"
+unit = "N"
+
+[knc.vertical.rear_left_wheel_load]
+entity = "lrfz"
+unit = "N"
+
+[knc.vertical.rear_right_wheel_load]
+entity = "rrfz"
+unit = "N"
+
+[knc.vertical.front_left_toe]
+entity = "lfsteer"
+unit = "deg"
+
+[knc.vertical.front_right_toe]
+entity = "rfsteer"
+unit = "deg"
+
+[knc.vertical.rear_left_toe]
+entity = "lrsteer"
+unit = "deg"
+
+[knc.vertical.rear_right_toe]
+entity = "rrsteer"
+unit = "deg"
+
+[knc.vertical.front_left_camber]
+entity = "lfcam"
+unit = "deg"
+
+[knc.vertical.front_right_camber]
+entity = "rfcam"
+unit = "deg"
+
+[knc.vertical.rear_left_camber]
+entity = "lrcam"
+unit = "deg"
+
+[knc.vertical.rear_right_camber]
+entity = "rrcam"
+unit = "deg"
+
+[knc.vertical.front_left_spin]
+entity = "lfcas"
+unit = "deg"
+
+[knc.vertical.front_right_spin]
+entity = "rfcas"
+unit = "deg"
+
+[knc.vertical.rear_left_spin]
+entity = "lrcas"
+unit = "deg"
+
+[knc.vertical.rear_right_spin]
+entity = "rrcas"
+unit = "deg"
+
+[knc.vertical.front_left_wheel_pad_z]
+entity = "lfpz"
+unit = "mm"
+
+[knc.vertical.front_right_wheel_pad_z]
+entity = "rfpz"
+unit = "mm"
+
+[knc.vertical.rear_left_wheel_pad_z]
+entity = "lrpz"
+unit = "mm"
+
+[knc.vertical.rear_right_wheel_pad_z]
+entity = "rrpz"
+unit = "mm"
+
+[knc.vertical.front_left_tire_deflection]
+entity = "lftdef"
+unit = "mm"
+
+[knc.vertical.front_right_tire_deflection]
+entity = "rftdef"
+unit = "mm"
+
+[knc.vertical.rear_left_tire_deflection]
+entity = "lrtdef"
+unit = "mm"
+
+[knc.vertical.rear_right_tire_deflection]
+entity = "rrtdef"
+unit = "mm"
+
+[knc.vertical.front_left_contact_patch_x]
+entity = "lfcpx"
+unit = "mm"
+
+[knc.vertical.front_right_contact_patch_x]
+entity = "rfcpx"
+unit = "mm"
+
+[knc.vertical.rear_left_contact_patch_x]
+entity = "lrcpx"
+unit = "mm"
+
+[knc.vertical.rear_right_contact_patch_x]
+entity = "rrcpx"
+unit = "mm"
+
+[knc.vertical.front_left_contact_patch_y]
+entity = "lfcpy"
+unit = "mm"
+
+[knc.vertical.front_right_contact_patch_y]
+entity = "rfcpy"
+unit = "mm"
+
+[knc.vertical.rear_left_contact_patch_y]
+entity = "lrcpy"
+unit = "mm"
+
+[knc.vertical.rear_right_contact_patch_y]
+entity = "rrcpy"
+unit = "mm"

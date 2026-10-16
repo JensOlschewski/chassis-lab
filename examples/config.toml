@@ -9,10 +9,10 @@ gravity = 9.80665 # m/s²
 # test definitions and their setup values.
 file = "setup.toml"
 
-[signals]
-# signal mappings
-# test-specific mappings can extend or override them.
-file = "mappings.toml"
+[mappings.simulation]
+file = "mappings-simulation.toml"
+[mappings.measurement]
+file = "mappings-measurement.toml"
 
 [compare]
 # Tolerances used for acceptance checks by `clab compare --tolerances`.

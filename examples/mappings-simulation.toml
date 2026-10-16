@@ -1,366 +1,355 @@
-# Signal mappings.
-# Each entry maps one canonical signal understood by the program (the table name)
-# to a signal in the raw input file (`entity` + `component`) and declares its
-# unit which is converted if necessary by the program!
+# SVC simulation signal mappings.
 #
-# Example
-# Run `clab inspect --mapping svc` to list available canonical SVC signals.
-# Run `clab inspect --mapping svc --template` for an empty generated TOML template.
+# Loaded by [mappings.simulation.svc] in config.toml, so this file is already
+# scoped to "svc, simulation" — canonical names sit at the top level, no
+# domain/source_kind prefix needed.
 #
-# clab inspect --mapping svc
-# SVC
-#   front_left_wheel_load       N
-#   front_right_wheel_load      N
-#   rear_left_wheel_load        N
-#   rear_right_wheel_load       N
-#   wheelbase                   mm
-#   ...
+# Run `clab inspect --mapping svc` to list every canonical SVC signal.
 
-# SVC signal mappings.
-
-[svc.signals.front_left_wheel_load]
+[svc.front_left_wheel_load]
 entity = "example.wheel_loads"
 component = "front_left"
 unit = "newton"
 
-[svc.signals.front_right_wheel_load]
+[svc.front_right_wheel_load]
 entity = "example.wheel_loads"
 component = "front_right"
 unit = "newton"
 
-[svc.signals.rear_left_wheel_load]
+[svc.rear_left_wheel_load]
 entity = "example.wheel_loads"
 component = "rear_left"
 unit = "newton"
 
-[svc.signals.rear_right_wheel_load]
+[svc.rear_right_wheel_load]
 entity = "example.wheel_loads"
 component = "rear_right"
 unit = "newton"
 
-[svc.signals.wheelbase]
+[svc.wheelbase]
 entity = "example.geometry"
 component = "wheelbase"
 unit = "mm"
 
-[svc.signals.front_left_ride_height]
+[svc.front_left_ride_height]
 entity = "example.ride_heights"
 component = "front_left"
 unit = "mm"
 
-[svc.signals.front_right_ride_height]
+[svc.front_right_ride_height]
 entity = "example.ride_heights"
 component = "front_right"
 unit = "mm"
 
-[svc.signals.rear_left_ride_height]
+[svc.rear_left_ride_height]
 entity = "example.ride_heights"
 component = "rear_left"
 unit = "mm"
 
-[svc.signals.rear_right_ride_height]
+[svc.rear_right_ride_height]
 entity = "example.ride_heights"
 component = "rear_right"
 unit = "mm"
 
-[svc.signals.front_track]
+[svc.front_track]
 entity = "example.geometry"
 component = "front_track"
 unit = "mm"
 
-[svc.signals.rear_track]
+[svc.rear_track]
 entity = "example.geometry"
 component = "rear_track"
 unit = "mm"
 
-[svc.signals.cg_height]
+[svc.cg_height]
 entity = "example.geometry"
 component = "cg_height"
 unit = "mm"
 
-[svc.signals.inertia_xx]
+[svc.inertia_xx]
 entity = "example.geometry"
 component = "inertia_xx"
 unit = "kg*mm^2"
 
-[svc.signals.inertia_yy]
+[svc.inertia_yy]
 entity = "example.geometry"
 component = "inertia_yy"
 unit = "kg*mm^2"
 
-[svc.signals.inertia_zz]
+[svc.inertia_zz]
 entity = "example.geometry"
 component = "inertia_zz"
 unit = "kg*mm^2"
 
-[svc.signals.front_left_wheel_center_x]
+[svc.front_left_wheel_center_x]
 entity = "example.geometry"
 component = "front_left_wheel_center_x"
 unit = "mm"
 
-[svc.signals.gyro_x]
+[svc.gyro_x]
 entity = "example.geometry"
 component = "gyro_x"
 unit = "mm"
 
-[svc.signals.front_left_toe]
+[svc.front_left_toe]
 entity = "example.toe_camber"
 component = "front_left_toe"
 unit = "deg"
 
-[svc.signals.front_right_toe]
+[svc.front_right_toe]
 entity = "example.toe_camber"
 component = "front_right_toe"
 unit = "deg"
 
-[svc.signals.rear_left_toe]
+[svc.rear_left_toe]
 entity = "example.toe_camber"
 component = "rear_left_toe"
 unit = "deg"
 
-[svc.signals.rear_right_toe]
+[svc.rear_right_toe]
 entity = "example.toe_camber"
 component = "rear_right_toe"
 unit = "deg"
 
-[svc.signals.front_left_camber]
+[svc.front_left_camber]
 entity = "example.toe_camber"
 component = "front_left_camber"
 unit = "deg"
 
-[svc.signals.front_right_camber]
+[svc.front_right_camber]
 entity = "example.toe_camber"
 component = "front_right_camber"
 unit = "deg"
 
-[svc.signals.rear_left_camber]
+[svc.rear_left_camber]
 entity = "example.toe_camber"
 component = "rear_left_camber"
 unit = "deg"
 
-[svc.signals.rear_right_camber]
+[svc.rear_right_camber]
 entity = "example.toe_camber"
 component = "rear_right_camber"
 unit = "deg"
 
-# KnC signal mappings from the real Ford varb simulation.
 
-[knc.signals.front_left_travel]
+## KNC signal mappings.
+
+[knc.front_left_travel]
 entity = "wheel_travel"
 component = "vertical_left_front"
 unit = "mm"
 
-[knc.signals.front_right_travel]
+[knc.front_right_travel]
 entity = "wheel_travel"
 component = "vertical_right_front"
 unit = "mm"
 
-[knc.signals.rear_left_travel]
+[knc.rear_left_travel]
 entity = "wheel_travel"
 component = "vertical_left_rear"
 unit = "mm"
 
-[knc.signals.rear_right_travel]
+[knc.rear_right_travel]
 entity = "wheel_travel"
 component = "vertical_right_rear"
 unit = "mm"
 
-[knc.vertical.signals.front_left_wheel_center_x]
+[knc.front_left_wheel_center_x]
 entity = "wheel_center_rise_front_wrt_body"
 component = "left_x"
 unit = "mm"
 
-[knc.vertical.signals.front_left_wheel_center_y]
+[knc.front_left_wheel_center_y]
 entity = "wheel_center_rise_front_wrt_body"
 component = "left_y"
 unit = "mm"
 
-[knc.vertical.signals.front_left_wheel_center_z]
+[knc.front_left_wheel_center_z]
 entity = "wheel_center_rise_front_wrt_body"
 component = "left_z"
 unit = "mm"
 
-[knc.vertical.signals.front_right_wheel_center_x]
+[knc.front_right_wheel_center_x]
 entity = "wheel_center_rise_front_wrt_body"
 component = "right_x"
 unit = "mm"
 
-[knc.vertical.signals.front_right_wheel_center_y]
+[knc.front_right_wheel_center_y]
 entity = "wheel_center_rise_front_wrt_body"
 component = "right_y"
 unit = "mm"
 
-[knc.vertical.signals.front_right_wheel_center_z]
+[knc.front_right_wheel_center_z]
 entity = "wheel_center_rise_front_wrt_body"
 component = "right_z"
 unit = "mm"
 
-[knc.vertical.signals.rear_left_wheel_center_x]
+[knc.rear_left_wheel_center_x]
 entity = "wheel_center_rise_rear_wrt_body"
 component = "left_x"
 unit = "mm"
 
-[knc.vertical.signals.rear_left_wheel_center_y]
+[knc.rear_left_wheel_center_y]
 entity = "wheel_center_rise_rear_wrt_body"
 component = "left_y"
 unit = "mm"
 
-[knc.vertical.signals.rear_left_wheel_center_z]
+[knc.rear_left_wheel_center_z]
 entity = "wheel_center_rise_rear_wrt_body"
 component = "left_z"
 unit = "mm"
 
-[knc.vertical.signals.rear_right_wheel_center_x]
+[knc.rear_right_wheel_center_x]
 entity = "wheel_center_rise_rear_wrt_body"
 component = "right_x"
 unit = "mm"
 
-[knc.vertical.signals.rear_right_wheel_center_y]
+[knc.rear_right_wheel_center_y]
 entity = "wheel_center_rise_rear_wrt_body"
 component = "right_y"
 unit = "mm"
 
-[knc.vertical.signals.rear_right_wheel_center_z]
+[knc.rear_right_wheel_center_z]
 entity = "wheel_center_rise_rear_wrt_body"
 component = "right_z"
 unit = "mm"
 
-[knc.vertical.signals.front_left_wheel_load]
+[knc.front_left_wheel_load]
 entity = "til_wheel_tire_forces"
 component = "normal_front"
 unit = "newton"
 
-[knc.vertical.signals.front_right_wheel_load]
+[knc.front_right_wheel_load]
 entity = "tir_wheel_tire_forces"
 component = "normal_front"
 unit = "newton"
 
-[knc.vertical.signals.rear_left_wheel_load]
+[knc.rear_left_wheel_load]
 entity = "til_wheel_tire_forces"
 component = "normal_rear"
 unit = "newton"
 
-[knc.vertical.signals.rear_right_wheel_load]
+[knc.rear_right_wheel_load]
 entity = "tir_wheel_tire_forces"
 component = "normal_rear"
 unit = "newton"
 
-[knc.vertical.signals.front_left_toe]
+[knc.front_left_toe]
 entity = "toe_camber_body"
 component = "left_toe_angle_front"
 unit = "deg"
 
-[knc.vertical.signals.front_right_toe]
+[knc.front_right_toe]
 entity = "toe_camber_body"
 component = "right_toe_angle_front"
 unit = "deg"
 
-[knc.vertical.signals.rear_left_toe]
+[knc.rear_left_toe]
 entity = "toe_camber_body"
 component = "left_toe_angle_rear"
 unit = "deg"
 
-[knc.vertical.signals.rear_right_toe]
+[knc.rear_right_toe]
 entity = "toe_camber_body"
 component = "right_toe_angle_rear"
 unit = "deg"
 
-[knc.vertical.signals.front_left_camber]
+[knc.front_left_camber]
 entity = "toe_camber_body"
 component = "left_camber_angle_front"
 unit = "deg"
 
-[knc.vertical.signals.front_right_camber]
+[knc.front_right_camber]
 entity = "toe_camber_body"
 component = "right_camber_angle_front"
 unit = "deg"
 
-[knc.vertical.signals.rear_left_camber]
+[knc.rear_left_camber]
 entity = "toe_camber_body"
 component = "left_camber_angle_rear"
 unit = "deg"
 
-[knc.vertical.signals.rear_right_camber]
+[knc.rear_right_camber]
 entity = "toe_camber_body"
 component = "right_camber_angle_rear"
 unit = "deg"
 
-[knc.vertical.signals.front_left_tire_deflection]
+[knc.front_left_tire_deflection]
 entity = "til_wheel_tire_rolling_states"
 component = "tire_deflection_front"
 unit = "mm"
 
-[knc.vertical.signals.front_right_tire_deflection]
+[knc.front_right_tire_deflection]
 entity = "tir_wheel_tire_rolling_states"
 component = "tire_deflection_front"
 unit = "mm"
 
-[knc.vertical.signals.rear_left_tire_deflection]
+[knc.rear_left_tire_deflection]
 entity = "til_wheel_tire_rolling_states"
 component = "tire_deflection_rear"
 unit = "mm"
 
-[knc.vertical.signals.rear_right_tire_deflection]
+[knc.rear_right_tire_deflection]
 entity = "tir_wheel_tire_rolling_states"
 component = "tire_deflection_rear"
 unit = "mm"
 
-[knc.vertical.signals.front_left_spin]
+[knc.front_left_spin]
 entity = "hub_rotation_front_wrt_to_body"
 component = "left_y"
 unit = "rad"
 
-[knc.vertical.signals.front_right_spin]
+[knc.front_right_spin]
 entity = "hub_rotation_front_wrt_to_body"
 component = "right_y"
 unit = "rad"
 
-[knc.vertical.signals.rear_left_spin]
+[knc.rear_left_spin]
 entity = "hub_rotation_rear_wrt_to_body"
 component = "left_y"
 unit = "rad"
 
-[knc.vertical.signals.rear_right_spin]
+[knc.rear_right_spin]
 entity = "hub_rotation_rear_wrt_to_body"
 component = "right_y"
 unit = "rad"
 
-[knc.vertical.signals.front_left_contact_patch_x]
+[knc.front_left_contact_patch_x]
 entity = "til_wheel_contact_patch"
 component = "x_front"
 unit = "mm"
 
-[knc.vertical.signals.front_right_contact_patch_x]
+[knc.front_right_contact_patch_x]
 entity = "tir_wheel_contact_patch"
 component = "x_front"
 unit = "mm"
 
-[knc.vertical.signals.rear_left_contact_patch_x]
+[knc.rear_left_contact_patch_x]
 entity = "til_wheel_contact_patch"
 component = "x_rear"
 unit = "mm"
 
-[knc.vertical.signals.rear_right_contact_patch_x]
+[knc.rear_right_contact_patch_x]
 entity = "tir_wheel_contact_patch"
 component = "x_rear"
 unit = "mm"
 
-[knc.vertical.signals.front_left_contact_patch_y]
+[knc.front_left_contact_patch_y]
 entity = "til_wheel_contact_patch"
 component = "y_front"
 unit = "mm"
 
-[knc.vertical.signals.front_right_contact_patch_y]
+[knc.front_right_contact_patch_y]
 entity = "tir_wheel_contact_patch"
 component = "y_front"
 unit = "mm"
 
-[knc.vertical.signals.rear_left_contact_patch_y]
+[knc.rear_left_contact_patch_y]
 entity = "til_wheel_contact_patch"
 component = "y_rear"
 unit = "mm"
 
-[knc.vertical.signals.rear_right_contact_patch_y]
+[knc.rear_right_contact_patch_y]
 entity = "tir_wheel_contact_patch"
 component = "y_rear"
 unit = "mm"
