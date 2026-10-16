@@ -5,7 +5,6 @@ simulation and measurement data. Rust owns `clab` workflow, input validation,
 reports, and output safety. Embedded Python provides scientific kernels and
 plotting.
 
-
 ## Workflow
 
 ```text
@@ -21,13 +20,11 @@ curves. \
 ⚖️ **Compare** baseline with compatible candidates. Tolerances enable acceptance
 checks.
 
-<p align="center">
-  <img
-    src="docs/assets/compare.svg"
-    alt="ChassisLab comparison report"
-    width="900"
-  />
-</p>
+## 👀 Preview
+
+| Compare Plot                                                 | Debug                                                      |
+| ------------------------------------------------------------ | ---------------------------------------------------------- |
+| <img src="docs/assets/compare-plot-spin.png" width="450em"/> | <img src="docs/assets/debug-ride-rate.png" width="450em"/> |
 
 ## Pre-built executables
 
@@ -41,8 +38,8 @@ dependencies together.
 bin/clab --help
 ```
 
-Release archives include private embedded CPython runtime and scientific
-dependencies. No Python, pip, virtual environment, or Rust toolchain needed.
+Release archives include embedded CPython runtime and scientific dependencies.
+No Python, pip, virtual environment, or Rust toolchain needed.
 
 ## Configuration ⚙️
 
@@ -58,38 +55,29 @@ comparison.
 | File              | Purpose                                                             |
 | ----------------- | ------------------------------------------------------------------- |
 | `config.toml`     | Main configuration file                                             |
-| `setup.toml`      | Test setup and KnC travel-window parameters.                        |
-| `mappings.toml`   | Maps source signals to canonical ChassisLab signals and units.      |
-| `tolerances.toml` | Optional absolute and relative comparison tolerances (`[compare]`). |
-| `run.toml`        | Run-specific input paths and provenance for `analyze` or `compare`. |
+| `setup.toml`      | Test setup.                                                         |
+| `mappings.toml`   | Mappings source signals to ChassisLab signals and units.            |
+| `tolerances.toml` | Optional absolute and relative tolerances used by (`--tolerances`). |
+| `run.toml`        | Run collection for `analyze` or `compare`.                          |
 
 ## Commands `>_`
 
-### clab convert
+### 🔄 clab convert
 
-Convert raw simulation or measurement data to HDF5. Default output is
-`INPUT.h5`. Use `--output` for an explicit file, or a directory (a trailing `/`
-creates it) that receives the derived filename. Use `--force` to replace an
-existing output.
+Convert raw simulation or measurement data to HDF5. Default output is `INPUT.h5`
 
-`--domain` (`-d`) is required and names the data: `svc` or `knc`. `--test`
-(`-t`) is required for `knc` (`vertical`) and not allowed for `svc`. Both are
-stored in the HDF5 file, and `analyze`, `compare` and run manifests use them to
-pick the analysis. Where the data identifies itself (`analysis_type` in `.res`,
-`testtype` in `.acd`), a contradicting flag gives a warning.
+- Use `--output` for an explicit file.
+- Use `--force` to replace an existing output.
+- `--domain` (`-d`) is required and defines test domain > (`svc`|`knc`)
+- `--test` (`-t`) is required for `knc` > (`vertical`|`static`)
 
 ```bash
 clab convert examples/input/example-measurement-knc-vertical.acd \
-    -d knc -t vertical --output input/converted-measurement-knc-vertical.h5
-clab convert examples/input/example-simulation-svc.res -d svc
+    -d knc -t vertical \
+    --output input/converted-measurement-knc-vertical.h5
 ```
 
-HDF5 files converted without `--domain` and `--test` still load. They are
-identified from the config and give a warning; convert them again to fix it.
-
-### clab inspect
-
-Inspect a HDF5 or SVC JSON input.
+### 🔍 clab inspect
 
 `--list` to show signals and \
 `--match TEXT` to filter them \
@@ -107,73 +95,31 @@ Create a mapping template for KnC vertical analysis:
 clab inspect --mapping knc --test vertical --template
 ```
 
-### clab analyze
+### 📊 clab analyze
 
-Analyze one normalized input or a multi-domain run manifest. Configuration owns
-mappings, units, conventions, physics, and setup. Use `--report DIRECTORY` to
-write a report bundle: SVC analysis creates JSON and CSV; KnC vertical analysis
-creates JSON, CSV, and PDF plots.
+Analyze one normalized input or run manifest to calculate metrics and curves.
 
-KnC vertical metrics use secants between `-g` and `+g` mm wheel-center travel.
-`g` is `gradient_points_mm` in `[setup.knc.metric]` (or `[setup.knc.vertical.metric]`
-for the vertical test only), default 10 mm, limited to the travel window. The
-same table selects the sweep (`direction`, `index`) the metrics use;
-`[setup.knc.window]` sets the plot range and `plot_branches`;
-`[setup.knc.meta]` describes the test setup and is printed in the report footer.
-See `examples/setup.toml`. Keys that are left out use their default, with one
-warning each (`--verbose` prints them).
-
-Per corner, analysis reports bump steer, bump camber, bump spin, wheel recession angle,
-suspension rate, ride rate, and tire rate. Bump spin is the secant gradient of
-the hub rotation about the wheel Y axis (caster/Aufziehwinkel, deg/mm) over
-wheel-center travel, with the same sign on both sides: measurement channel
-`lfcas`/`rfcas`/`lrcas`/`rrcas`, Adams `hub_rotation_<axle>_wrt_to_body`
-`left_y`/`right_y`. Simulation
-input requires `[input.knc.static]` normalization. Metrics with missing signals
-or insufficient travel coverage are reported as missing, with a warning.
-
-The example HDF5 files are generated locally from the committed raw fixtures.
-Run these commands from the repository root (add `--force` to `convert` when
-regenerating existing outputs):
+- Use `--report PATH` to write a report bundle (SVC: JSON/CSV; KnC vertical:
+  JSON/CSV/PDF).
+- Use `--debug` for measurement branch detection diagnostics (needs `--report`).
+- Use `--verbose` (`-v`) to print default-value warnings.
+- Use `--force` to replace an existing report bundle.
 
 ```bash
-clab convert examples/input/example-simulation-svc.res -d svc -o examples/input/generated-simulation-svc.h5
-clab convert examples/input/example-simulation-knc-vertical.res -d knc -t vertical -o examples/input/generated-simulation-knc-vertical.h5
-clab convert examples/input/example-simulation-knc-static.res -d knc -t vertical -o examples/input/generated-simulation-knc-static.h5
-clab convert examples/input/example-measurement-knc-vertical.acd -d knc -t vertical -o examples/input/generated-measurement-knc-vertical.h5
-clab analyze examples/config.toml examples/run-simulation.toml
-clab analyze examples/config.toml examples/run-measurement.toml
+ clab analyze examples/config.toml examples/run-simulation.toml
 ```
 
-Both example runs calculate 28 KnC vertical metrics. Analyze the measurement
-HDF5 directly if only the vertical domain is needed. For simulation, use the
-run manifest: it supplies the static baseline required to normalize travel.
-The SVC measurement JSON reference intentionally contains only a subset of
-SVC metrics, so the measurement run also reports SVC missing-value warnings.
+### ⚖️ clab compare
 
-The KnC measurement contains all 4096 samples of the Ford varb bounce test,
-trimmed to its relevant channels. The simulation fixtures contain independent
-Ford varb ADAMS results: all 182 vertical samples and all 106 static samples,
-trimmed to 36 mapped channels with original values and units preserved. They
-are not smoothed copies of the measurement. `examples/mappings.toml` uses the
-Ford simulation's original entity/component names. Its toe/camber request
-omits unit metadata, so eight warnings report the mapped degree-unit fallback.
-The simulation selects rise sweep 2 to skip its initial settling motion.
+Compare compatible SVC or KnC baseline and candidate inputs.
 
-Real measurement and simulation can disagree and fail the example tolerances.
-`--debug` adds measurement rate-filter diagnostics; simulation skips these
-measurement-only diagnostics while still producing the normal report plots.
-Use separate report directories when inspecting both runs; `--force` replaces
-an existing report bundle.
-
-### clab compare
-
-Compare compatible SVC or KnC vertical baseline and candidate inputs. Without
-`--tolerances`, complete metrics are informational. With it, configured
-tolerances produce pass/fail status. Replace `BASELINE` and `CANDIDATE` with
-compatible normalized inputs or run manifests.
+- Use `--tolerances` (`-t`) for pass/fail status from config tolerances (without
+  it, metrics are informational only).
+- Use `--report PATH` to write a report bundle.
+- Use `--debug` for measurement rate-filter diagnostics (needs `--report`).
+- Use `--force` to replace an existing report bundle.
 
 ```bash
-clab compare examples/config.toml BASELINE CANDIDATE \
-  --tolerances --report reports/compare
+ clab compare examples/config.toml BASELINE CANDIDATE \
+   --tolerances --report reports/compare
 ```
