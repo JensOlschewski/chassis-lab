@@ -1,6 +1,5 @@
 """Reusable, path-free plotting primitives for KnC report kernels."""
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -10,6 +9,13 @@ from typing import Any, NamedTuple, cast
 
 import numpy as np
 from pypdf import PdfReader, PdfWriter, Transformation
+
+from chassis_lab.knc_kernel import (
+    BranchOptions,
+    CurveIndex,
+    gradient_curve,
+    sweep_gradient,
+)
 
 # ---------------------------------------------------------------------------
 # Settings
@@ -100,7 +106,7 @@ PDF_METADATA = {
 
 
 # ---------------------------------------------------------------------------
-# Branch detection options
+# Signal and gradient display
 # ---------------------------------------------------------------------------
 
 
@@ -129,58 +135,11 @@ class GradientDisplay:
         return delta / span
 
 
-@dataclass(frozen=True)
-class BranchOptions:
-    """Branch detection and edge trimming; per-plot via `PlotSpec.branch`.
-
-    direction, index, plot_branches: which sweep the metrics use and which
-    sweeps the plots draw.
-    min_branch_fraction: measured branches shorter than this fraction of all
-    samples are ignored (noise flips at turnarounds).
-    edge_width: samples searched for the curvature cut at each sweep end.
-    edge_percentile: |d²y/dx²| percentile (0-1) above which a point is an
-    outlier that starts the cut.
-    """
-
-    direction: str = "rise"
-    index: int = 2
-    plot_branches: str = "all"
-    measurement: bool = False
-    min_branch_fraction: float = 0.05
-    edge_width: int = 200
-    edge_percentile: float = 0.95
-
-    @classmethod
-    def from_json(cls, raw: str | dict[str, Any] | None) -> "BranchOptions":
-        values = json.loads(raw) if isinstance(raw, str) else raw
-        return cls(**(values or {}))
-
-    def sweeps(self, travel: np.ndarray) -> list[slice]:
-        """Sweeps of the configured direction, in travel order."""
-        return [
-            segment
-            for segment, sign in branch_ranges(travel, self)
-            if self.direction == "any"
-            or sign == (1 if self.direction == "rise" else -1)
-        ]
-
-    def metric_sweep(self, travel: np.ndarray) -> slice | None:
-        sweeps = self.sweeps(travel)
-        return sweeps[self.index - 1] if len(sweeps) >= self.index else None
-
-    def plot_sweeps(self, travel: np.ndarray) -> list[slice]:
-        if self.plot_branches == "selected":
-            selected = self.metric_sweep(travel)
-            return [] if selected is None else [selected]
-        return [segment for segment, _ in branch_ranges(travel, self)]
-
-
 # (x, y, denominator, sweeps, branch options) -> plotted (x, y)
 Transform = Callable[
     [np.ndarray, np.ndarray, np.ndarray | None, list[slice], BranchOptions],
     tuple[np.ndarray, np.ndarray],
 ]
-CurveIndex = dict[tuple[str, str], dict[str, object]]
 
 
 class Source(NamedTuple):
@@ -192,122 +151,6 @@ class Source(NamedTuple):
 
 
 Series = list[Source]
-
-
-# ---------------------------------------------------------------------------
-# Branch splitting and rate computation
-# ---------------------------------------------------------------------------
-
-
-def _fill_zeros(signs: np.ndarray) -> np.ndarray:
-    """Give flat steps the direction of the previous (else next) moving step."""
-
-    def forward(values: np.ndarray) -> np.ndarray:
-        last = np.maximum.accumulate(
-            np.where(values != 0, np.arange(len(values)), 0)
-        )
-        return values[last]
-
-    return forward(forward(signs)[::-1])[::-1]
-
-
-def branch_ranges(
-    travel: np.ndarray, options: BranchOptions
-) -> list[tuple[slice, int]]:
-    """Split raw travel at reversals, ignoring flat steps and short branches.
-
-    Measurements drop the first branch: it runs from the start position to the
-    first reversal and is only a partial, noisy sweep.
-    """
-    dz = np.diff(travel)
-    if not np.isfinite(dz).any():
-        return []
-    signs = _fill_zeros(np.where(np.isfinite(dz), np.sign(dz), 0.0))
-    starts = np.r_[0, np.flatnonzero(signs[1:] != signs[:-1]) + 1]
-    ends = np.r_[starts[1:], len(signs)]
-    minimum = (
-        max(2, int(options.min_branch_fraction * len(travel)))
-        if options.measurement
-        else 2
-    )
-    branches = [
-        (slice(int(start), int(end) + 1), int(signs[start]))
-        for start, end in zip(starts, ends, strict=True)
-        if signs[start] != 0 and end - start + 1 >= minimum
-    ]
-    return branches[1:] if options.measurement else branches
-
-
-def gradient_curve(
-    x: np.ndarray,
-    y: np.ndarray,
-    denominator: np.ndarray | None,
-    sweeps: list[slice],
-    options: BranchOptions,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Pointwise MATLAB-style d(y)/d(denominator or x) for each sweep.
-
-    Sweeps stay separate (NaN gap between them) so hysteresis remains visible.
-    Measured sweeps trim each end from its first curvature outlier outward.
-    """
-    xs: list[np.ndarray] = [np.empty(0)]
-    ys: list[np.ndarray] = [np.empty(0)]
-    for sweep in sweeps:
-        result = _sweep_gradient(x, y, denominator, sweep, options)
-        if result is None:
-            continue
-        axis, slope, _, _, masked = result
-        slope[masked] = np.nan
-        xs += [axis, np.array([np.nan])]
-        ys += [slope, np.array([np.nan])]
-    return np.concatenate(xs), np.concatenate(ys)
-
-
-def _curvature_limit(
-    curvature: np.ndarray, options: BranchOptions
-) -> float | None:
-    valid = np.isfinite(curvature)
-    if not valid.any():
-        return None
-    return float(np.percentile(curvature[valid], options.edge_percentile * 100))
-
-
-def _sweep_gradient(
-    x: np.ndarray,
-    y: np.ndarray,
-    denominator: np.ndarray | None,
-    sweep: slice,
-    options: BranchOptions,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
-    """Return x, raw rate, |curvature|, edge zone, and actual mask."""
-    axis, values = x[sweep], y[sweep]
-    travel = axis if denominator is None else denominator[sweep]
-    finite = np.isfinite(axis) & np.isfinite(values) & np.isfinite(travel)
-    axis, values, travel = axis[finite], values[finite], travel[finite]
-    if len(axis) < 2:
-        return None
-    with np.errstate(divide="ignore", invalid="ignore"):
-        slope = np.gradient(values, travel)
-        curvature = np.abs(np.gradient(slope, travel))
-    slope[~np.isfinite(slope)] = np.nan
-    size = len(slope)
-    width = options.edge_width
-    position = np.arange(size)
-    at_edge = (position < width) | (position >= size - width)
-    masked = np.zeros(size, dtype=bool)
-    limit = _curvature_limit(curvature, options)
-    if options.measurement and limit is not None:
-        outlier = ~(curvature <= limit)
-        # Search from the middle toward each end. Keep the cutoff point and
-        # all points between it and the turnaround masked, with no gaps.
-        start = np.flatnonzero(outlier[: min(width, (size + 1) // 2)])
-        end_from = max(size - width, size // 2)
-        end = np.flatnonzero(outlier[end_from:])
-        if start.size:
-            masked[: start[-1] + 1] = True
-        if end.size:
-            masked[end_from + end[0] :] = True
-    return axis, slope, curvature, at_edge, masked
 
 
 # ---------------------------------------------------------------------------
@@ -742,7 +585,7 @@ def _draw_sweep(
     options: BranchOptions,
 ) -> None:
     """Draw curvature, raw rate and final rate of one plotted sweep."""
-    result = _sweep_gradient(
+    result = sweep_gradient(
         _values(curves, corner, spec.x_signal),
         _values(curves, corner, spec.y_signal),
         _denominator(spec, curves, corner),

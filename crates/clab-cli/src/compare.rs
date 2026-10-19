@@ -69,7 +69,8 @@ struct Metric {
 
 enum ComparedDomain {
     Svc(Vec<svc::CanonicalMetric>),
-    Vertical {
+    Knc {
+        test: KncTest,
         curves: serde_json::Value,
         metrics: Vec<serde_json::Value>,
         branch: clab_core::config::VerticalBranch,
@@ -81,6 +82,20 @@ enum ComparedDomain {
     },
 }
 
+impl ComparedDomain {
+    /// KnC test of the domain; `None` for SVC.
+    fn test(&self) -> Option<KncTest> {
+        match self {
+            Self::Svc(_) => None,
+            Self::Knc { test, .. } => Some(*test),
+        }
+    }
+
+    fn title(&self) -> &'static str {
+        self.test().map_or("SVC", KncTest::title)
+    }
+}
+
 struct Input {
     config: clab_core::config::CaseConfig,
     domains: BTreeMap<&'static str, ComparedDomain>,
@@ -89,7 +104,7 @@ struct Input {
 
 struct ComparisonTolerances {
     svc: clab_core::config::ValidationTolerances,
-    vertical: clab_core::config::ValidationTolerances,
+    knc: clab_core::config::ValidationTolerances,
 }
 
 type GroupedMetrics<'a> = Vec<(Option<&'a str>, &'a str, Vec<(usize, &'a Metric)>)>;
@@ -103,11 +118,8 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             .as_ref()
             .map(|v| v.tolerances.clone())
             .unwrap_or_else(empty_tolerances),
-        vertical: baseline
-            .config
-            .vertical
-            .as_ref()
-            .map(|v| v.tolerances.clone())
+        knc: knc_config(&baseline.config)
+            .map(|(_, knc)| knc.tolerances.clone())
             .unwrap_or_else(empty_tolerances),
     });
     let mut failed = false;
@@ -126,7 +138,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             let Some(candidate_domain) = candidate.domains.get(name) else {
                 incomplete = true;
                 unavailable_domains.push((index, *name));
-                domains.push(serde_json::json!({"domain": name, "test": if *name == "knc" { serde_json::Value::String("vertical".into()) } else { serde_json::Value::Null }, "status": "not compared"}));
+                domains.push(serde_json::json!({"domain": name, "test": base_domain.test().map(KncTest::name), "status": "not compared"}));
                 continue;
             };
             match (base_domain, candidate_domain) {
@@ -144,25 +156,33 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     );
                 }
                 (
-                    ComparedDomain::Vertical {
+                    ComparedDomain::Knc {
+                        test: base_test,
                         metrics: base_metrics,
                         ..
                     },
-                    ComparedDomain::Vertical {
+                    ComparedDomain::Knc {
+                        test,
                         curves: candidate_curves,
                         metrics: candidate_metrics,
                         branch: candidate_branch,
                         corner_mass_kg: candidate_mass,
                     },
-                ) => {
-                    let compared = compare_vertical_gradient_metrics(
+                ) if base_test == test => {
+                    let compared = compare_knc_metrics(
+                        *test,
                         base_metrics,
                         candidate_metrics,
-                        tolerances.as_ref().map(|value| &value.vertical),
+                        tolerances.as_ref().map(|value| &value.knc),
                     );
                     failed |= compared.iter().any(|metric| metric.status == "failed");
                     incomplete |= compared.iter().any(|metric| metric.status == "missing");
                     metrics.extend(compared);
+                    domains.push(serde_json::json!({"domain": "knc", "test": test.name(), "status": "compared"}));
+                    // Roll comparison plots arrive with #143/#144.
+                    if *test != KncTest::Vertical {
+                        continue;
+                    }
                     vertical_candidates.push((
                         format!("Curve {}", index + 1),
                         candidate_curves.clone(),
@@ -177,7 +197,6 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                         ),
                         path.as_path(),
                     ));
-                    domains.push(serde_json::json!({"domain": "knc", "test": "vertical", "status": "compared"}));
                 }
                 _ => bail!(
                     "incompatible comparison domains between '{}' and '{}'",
@@ -210,7 +229,8 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
     if args.output.is_some()
-        && let Some(ComparedDomain::Vertical {
+        && let Some(ComparedDomain::Knc {
+            test: KncTest::Vertical,
             curves: base,
             branch: base_branch,
             corner_mass_kg: base_mass,
@@ -277,15 +297,20 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     let report = serde_json::json!({
         "schema_version": 1, "command": "compare",
         "domain": baseline.domains.keys().next().copied().unwrap_or(""),
-        "domains": baseline.domains.keys().map(|name| serde_json::json!({
+        "domains": baseline.domains.iter().map(|(name, domain)| serde_json::json!({
             "domain": name,
-            "test": if *name == "knc" { serde_json::Value::String("vertical".into()) } else { serde_json::Value::Null },
+            "test": domain.test().map(KncTest::name),
         })).collect::<Vec<_>>(),
         "baseline": {"input": provenance(&args.baseline)?, "case": {"name": baseline.config.name, "loadcase": baseline.config.loadcase}},
         "candidates": candidates, "status": status,
     });
     if let Some(output) = &args.output {
         let csv = metrics_csv(&args.baseline, &rows)?;
+        let knc_detail = baseline
+            .domains
+            .get("knc")
+            .and_then(ComparedDomain::test)
+            .map(|test| format!("knc-{}.json", test.name()));
         let detail = serde_json::to_string_pretty(&report)? + "\n";
         let mut files = vec![
             ("report.json", detail.clone().into_bytes()),
@@ -294,9 +319,9 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         if baseline.domains.contains_key("svc") {
             files.push(("svc.json", detail.into_bytes()));
         }
-        if baseline.domains.contains_key("knc") {
+        if let Some(knc_detail) = &knc_detail {
             files.push((
-                "knc-vertical.json",
+                knc_detail,
                 (serde_json::to_string_pretty(&report)? + "\n").into_bytes(),
             ));
         }
@@ -326,7 +351,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         .extension()
         .and_then(|v| v.to_str())
         .map(str::to_ascii_lowercase);
-    let (case, include_svc, include_vertical) = match extension.as_deref() {
+    let (case, include_svc, include_knc) = match extension.as_deref() {
         Some("toml") => {
             clab_core::config::load_config_and_run(config, path).map(|case| (case, true, true))
         }
@@ -340,12 +365,12 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             ) {
                 (Some("svc"), _) => clab_core::config::load_config_with_input(config, path, None)
                     .map(|case| (case, true, false)),
-                (Some("knc"), Some("vertical")) => {
-                    clab_core::config::load_config_with_input(config, path, Some("vertical"))
+                (Some("knc"), Some(test @ ("vertical" | "roll"))) => {
+                    clab_core::config::load_config_with_input(config, path, Some(test))
                         .map(|case| (case, false, true))
                 }
                 (Some(domain), test) => bail!(
-                    "unsupported domain '{domain}'{} in '{}'; supported: svc, knc vertical",
+                    "unsupported domain '{domain}'{} in '{}'; supported: svc, knc vertical, knc roll",
                     test.map(|test| format!(" test '{test}'"))
                         .unwrap_or_default(),
                     path.display()
@@ -379,23 +404,20 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
     .map_err(|error| {
         anyhow::anyhow!("failed to load compare input '{}': {error}", path.display())
     })?;
-    if case.roll.is_some() {
+    if case.roll.is_some() && case.vertical.is_some() {
         bail!(
-            "compare input '{}' configures [input.knc.roll]; KnC roll comparison is not supported yet",
+            "compare input '{}' combines [input.knc.roll] with [input.knc.vertical]; compare roll in its own run manifest for now",
             path.display()
         );
     }
+    let knc = knc_config(&case).filter(|_| include_knc);
     if include_svc && case.svc_source_kind.is_some() {
         validate_comparison_input(&case.simulation_json)?;
     }
-    if include_vertical && let Some(vertical_config) = &case.vertical {
-        let source = match vertical_config.source_kind {
-            clab_core::config::SourceKind::Simulation => &vertical_config.simulation_hdf5,
-            clab_core::config::SourceKind::Measurement => &vertical_config.measurement_hdf5,
-        };
-        validate_comparison_input(source)?;
-        if vertical_config.source_kind == clab_core::config::SourceKind::Simulation
-            && let Some(static_input) = &vertical_config.static_simulation_hdf5
+    if let Some((_, knc)) = knc {
+        validate_comparison_input(knc_source(knc))?;
+        if knc.source_kind == clab_core::config::SourceKind::Simulation
+            && let Some(static_input) = &knc.static_simulation_hdf5
         {
             validate_comparison_input(static_input)?;
         }
@@ -405,12 +427,9 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         if include_svc && is_hdf5(&case.simulation_json) {
             paths.push(case.simulation_json.as_path());
         }
-        if include_vertical && let Some(vertical) = &case.vertical {
-            paths.push(match vertical.source_kind {
-                clab_core::config::SourceKind::Simulation => &vertical.simulation_hdf5,
-                clab_core::config::SourceKind::Measurement => &vertical.measurement_hdf5,
-            });
-            if let Some(static_input) = &vertical.static_simulation_hdf5 {
+        if let Some((_, knc)) = knc {
+            paths.push(knc_source(knc));
+            if let Some(static_input) = &knc.static_simulation_hdf5 {
                 paths.push(static_input);
             }
         }
@@ -452,26 +471,18 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         sources.push(case.simulation_json.clone());
         domains.insert("svc", ComparedDomain::Svc(svc::canonical_metrics(&values)));
     }
-    if include_vertical && let Some(vertical_config) = &case.vertical {
-        let source = match vertical_config.source_kind {
-            clab_core::config::SourceKind::Simulation => &vertical_config.simulation_hdf5,
-            clab_core::config::SourceKind::Measurement => &vertical_config.measurement_hdf5,
-        };
-        let report = knc::analyze_input(
-            &case,
-            KncTest::Vertical,
-            source,
-            svc_corner_mass_kg.as_ref(),
-            None,
-        )?;
+    if let Some((test, knc)) = knc {
+        let source = knc_source(knc);
+        let report = knc::analyze_input(&case, test, source, svc_corner_mass_kg.as_ref(), None)?;
         let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
-        sources.push(source.clone());
-        if let Some(static_input) = &vertical_config.static_simulation_hdf5 {
+        sources.push(source.to_path_buf());
+        if let Some(static_input) = &knc.static_simulation_hdf5 {
             sources.push(static_input.clone());
         }
         domains.insert(
             "knc",
-            ComparedDomain::Vertical {
+            ComparedDomain::Knc {
+                test,
                 curves: detail["curves"].clone(),
                 metrics: report.metrics,
                 branch: report.branch,
@@ -484,6 +495,22 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         domains,
         sources,
     })
+}
+
+/// The one KnC test a compare input configures.
+fn knc_config(
+    case: &clab_core::config::CaseConfig,
+) -> Option<(KncTest, &clab_core::config::VerticalConfig)> {
+    [KncTest::Vertical, KncTest::Roll]
+        .into_iter()
+        .find_map(|test| test.config(case).map(|knc| (test, knc)))
+}
+
+fn knc_source(knc: &clab_core::config::VerticalConfig) -> &Path {
+    match knc.source_kind {
+        clab_core::config::SourceKind::Simulation => &knc.simulation_hdf5,
+        clab_core::config::SourceKind::Measurement => &knc.measurement_hdf5,
+    }
 }
 
 fn validate_comparison_input(path: &Path) -> Result<()> {
@@ -549,7 +576,8 @@ fn compare_metrics(
         .collect()
 }
 
-fn compare_vertical_gradient_metrics(
+fn compare_knc_metrics(
+    test: KncTest,
     baseline: &[serde_json::Value],
     candidate: &[serde_json::Value],
     tolerances: Option<&clab_core::config::ValidationTolerances>,
@@ -597,7 +625,7 @@ fn compare_vertical_gradient_metrics(
             };
             Metric {
                 domain: "knc",
-                test: Some("vertical"),
+                test: Some(test.name()),
                 metric: name.into(),
                 unit: baseline
                     .or(candidate)
@@ -661,10 +689,10 @@ fn print_metrics(
     unavailable_domains: &[(usize, &'static str)],
     use_tolerances: bool,
 ) {
-    for (domain, title) in [("svc", "SVC"), ("knc", "KnC Vertical")] {
-        if !domains.contains_key(domain) {
+    for domain in ["svc", "knc"] {
+        let Some(title) = domains.get(domain).map(ComparedDomain::title) else {
             continue;
-        }
+        };
         println!();
         let mut grouped: GroupedMetrics<'_> = Vec::new();
         for (candidate, metric) in rows.iter().filter(|(_, metric)| metric.domain == domain) {

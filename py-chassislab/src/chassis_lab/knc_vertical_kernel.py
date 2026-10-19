@@ -1,41 +1,34 @@
 """Path-free numerical kernel for Rust-owned KnC vertical analysis."""
 
 import json
-from math import atan, degrees, pi, sqrt
-from typing import Any, NamedTuple, cast
+from math import pi, sqrt
+from typing import Any, cast
 
 import numpy as np
 
-from chassis_lab.knc_plot_kernel import (
+from chassis_lab.knc_kernel import (
+    CORNERS,
     BranchOptions,
+    GradientMetric,
+    Signal,
+    gradient_curve,
+    gradient_metrics,
+    index_curves,
+    mean_monotonic,
+    metric_row,
+    with_pad_travel,
+)
+from chassis_lab.knc_plot_kernel import (
     GradientDisplay,
     PlotSpec,
     SignalStyle,
-    gradient_curve,
     render_comparison_reports,
     render_rate_debug,
     render_reports,
 )
 
-CORNERS = ("front_left", "front_right", "rear_left", "rear_right")
-
-
-class GradientMetric(NamedTuple):
-    """Secant metric of `signal` between travel points on `axis`.
-
-    The metric is named `<name>_<corner>_<suffix>`. `gradient` divides by the
-    travel span, or by the span of `denominator` when given. `angle` uses the
-    signal span only.
-    """
-
-    name: str
-    suffix: str
-    signal: str
-    unit: str
-    kind: str
-    axis: str = "wheel_center_z"
-    denominator: str | None = None
-
+# Every vertical metric uses the configured sweep of wheel-center travel.
+TRAVEL = Signal("wheel_center_z")
 
 GRADIENT_METRICS = (
     GradientMetric("bump_steer", "deg_per_mm", "toe", "deg/mm", "gradient"),
@@ -53,7 +46,7 @@ GRADIENT_METRICS = (
         "wheel_load",
         "N/mm",
         "gradient",
-        axis="wheel_pad_z",
+        axis=Signal("wheel_pad_z"),
     ),
     GradientMetric(
         "tire_rate",
@@ -61,7 +54,7 @@ GRADIENT_METRICS = (
         "wheel_load",
         "N/mm",
         "gradient",
-        axis="wheel_pad_z",
+        axis=Signal("wheel_pad_z"),
         denominator="tire_deflection",
     ),
     # Stuetzwinkel: atan(-d(contact_patch_x)/d(wheel_pad_z)), same "angle" math
@@ -73,7 +66,7 @@ GRADIENT_METRICS = (
         "contact_patch_x",
         "deg",
         "angle",
-        axis="wheel_pad_z",
+        axis=Signal("wheel_pad_z"),
     ),
 )
 
@@ -250,65 +243,25 @@ PLOT_SPECS = (
 )
 
 
-class VerticalKernelError(ValueError):
-    """Curve data cannot be compared safely."""
-
-
 def metrics(request: dict[str, object]) -> str:
     """Calculate secant KnC vertical metrics at symmetric travel points."""
     gradient = float(cast("float", request["gradient_mm"]))
-    curves = _with_pad_travel(json.loads(str(request["curves"])))
-    indexed = {(item["corner"], item["signal"]): item for item in curves}
-    grid = np.array([-gradient, gradient], dtype=np.float64)
+    curves = index_curves(with_pad_travel(json.loads(str(request["curves"]))))
     options = BranchOptions.from_json(
         cast("str | dict[str, Any] | None", request.get("branch"))
     )
-    results = []
-    for corner in CORNERS:
-        for metric in GRADIENT_METRICS:
-            result = {
-                "corner": corner,
-                "metric": f"{metric.name}_{corner}_{metric.suffix}",
-                "unit": metric.unit,
-                "value": None,
-                "lower": None,
-                "upper": None,
-                "reason": None,
-            }
-            try:
-                lower, upper = _secant_points(
-                    indexed, corner, metric.signal, grid, metric.axis, options
-                )
-                span = 2.0 * gradient
-                if metric.denominator is not None:
-                    span = _span(
-                        _secant_points(
-                            indexed,
-                            corner,
-                            metric.denominator,
-                            grid,
-                            metric.axis,
-                            options,
-                        )
-                    )
-            except VerticalKernelError as error:
-                result["reason"] = str(error)
-            else:
-                delta = upper - lower
-                result["lower"] = lower
-                result["upper"] = upper
-                result["value"] = {
-                    "gradient": delta / span,
-                    "angle": degrees(atan(-delta / (2.0 * gradient))),
-                }[metric.kind]
-            results.append(result)
-    results.extend(_ride_frequency_metrics(results, request))
+    results = gradient_metrics(
+        curves, GRADIENT_METRICS, CORNERS, {"mm": gradient}, TRAVEL, options
+    )
+    results.extend(_ride_frequency_metrics(results, request, gradient))
     results.sort(key=lambda item: str(item["metric"]))
     return json.dumps({"metrics": results})
 
 
 def _ride_frequency_metrics(
-    results: list[dict[str, object]], request: dict[str, object]
+    results: list[dict[str, object]],
+    request: dict[str, object],
+    gradient: float,
 ) -> list[dict[str, object]]:
     """f_ride = 1/(2*pi) * sqrt(1000 * K_w / m), K_w = suspension_rate, m per
     corner.
@@ -335,13 +288,9 @@ def _ride_frequency_metrics(
         rate = suspension_rate.get(corner)
         mass = corner_mass_kg.get(corner)
         result = {
-            "corner": corner,
-            "metric": f"ride_frequency_{corner}_hz",
-            "unit": "Hz",
-            "value": None,
-            "lower": None,
-            "upper": None,
-            "reason": None,
+            **metric_row(
+                corner, f"ride_frequency_{corner}_hz", "Hz", "mm", gradient
+            ),
             "suspension_rate_n_per_mm": rate,
             "corner_mass_kg": mass,
             "corner_mass_source": corner_mass_source.get(corner),
@@ -363,38 +312,6 @@ def _ride_frequency_metrics(
     return ride_frequency_results
 
 
-def _span(points: tuple[float, float]) -> float:
-    span = points[1] - points[0]
-    if span == 0.0:
-        raise VerticalKernelError("denominator signal does not change")
-    return span
-
-
-def _with_pad_travel(
-    curves: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    """Add wheel pad Z as wheel-center Z plus tire deflection when absent."""
-    indexed = {(item["corner"], item["signal"]): item for item in curves}
-    derived = []
-    for corner in CORNERS:
-        center = indexed.get((corner, "wheel_center_z"))
-        deflection = indexed.get((corner, "tire_deflection"))
-        if (corner, "wheel_pad_z") in indexed or not (center and deflection):
-            continue
-        values = np.asarray(center["values"], dtype=np.float64) + np.asarray(
-            deflection["values"], dtype=np.float64
-        )
-        derived.append(
-            {
-                "corner": corner,
-                "signal": "wheel_pad_z",
-                "values": values.tolist(),
-                "unit": "mm",
-            }
-        )
-    return [*curves, *derived]
-
-
 def _with_ride_frequency(
     curves: list[dict[str, object]],
     corner_mass_kg: dict[str, float],
@@ -413,7 +330,7 @@ def _with_ride_frequency(
     full hysteretic travel array, otherwise the derivative blows up at
     sweep reversals where travel briefly reverses direction.
     """
-    indexed = {(item["corner"], item["signal"]): item for item in curves}
+    indexed = index_curves(curves)
     derived = []
     for corner in CORNERS:
         mass = corner_mass_kg.get(corner)
@@ -462,50 +379,8 @@ def _derive_curves(
     `plot_compare()` (baseline plus each candidate, one call per series)
     both route through this instead of repeating the sequence.
     """
-    curves = _with_pad_travel(curves)
+    curves = with_pad_travel(curves)
     return _with_ride_frequency(curves, corner_mass_kg, options)
-
-
-def _secant_points(
-    indexed: dict[tuple[str, str], dict[str, object]],
-    corner: str,
-    signal: str,
-    grid: np.ndarray,
-    axis: str,
-    options: BranchOptions,
-) -> tuple[float, float]:
-    for required in (axis, signal):
-        if (corner, required) not in indexed:
-            raise VerticalKernelError(
-                f"missing canonical signal {corner}_{required}"
-            )
-    travel = np.asarray(indexed[(corner, axis)]["values"], dtype=np.float64)
-    response = np.asarray(indexed[(corner, signal)]["values"], dtype=np.float64)
-    if len(travel) != len(response):
-        raise VerticalKernelError(
-            f"{corner}_{signal} and {corner}_{axis} lengths differ"
-        )
-    center = np.asarray(
-        indexed[(corner, "wheel_center_z")]["values"], dtype=np.float64
-    )
-    if len(center) != len(travel):
-        raise VerticalKernelError(
-            f"{corner}_{axis} and {corner}_wheel_center_z lengths differ"
-        )
-    sweep = options.metric_sweep(center)
-    if sweep is None:
-        raise VerticalKernelError(
-            f"{corner} has no {options.direction} branch {options.index}"
-        )
-    travel, response = travel[sweep], response[sweep]
-    try:
-        lower, upper = _interpolate(travel, response, grid, corner)
-    except VerticalKernelError:
-        raise VerticalKernelError(
-            f"{corner}_{signal} does not cover {axis} travel "
-            f"{grid[0]:g}..{grid[-1]:g} mm"
-        ) from None
-    return float(lower), float(upper)
 
 
 def evaluate(request: dict[str, object]) -> str:
@@ -547,59 +422,12 @@ def evaluate(request: dict[str, object]) -> str:
 def _curve(
     curve: dict[str, list[float]], grid: np.ndarray, source: str
 ) -> np.ndarray:
-    return _mean_monotonic(
+    return mean_monotonic(
         np.asarray(curve["travel"], dtype=np.float64),
         np.asarray(curve["values"], dtype=np.float64),
         grid,
         source,
     )
-
-
-def _mean_monotonic(
-    x: np.ndarray, y: np.ndarray, grid: np.ndarray, source: str
-) -> np.ndarray:
-    """Interpolate every complete monotonic branch, then average branches."""
-    finite = np.isfinite(x) & np.isfinite(y)
-    x, y = x[finite], y[finite]
-    direction = np.sign(np.diff(x))
-    direction[direction == 0] = np.nan
-    boundaries = (
-        np.flatnonzero(
-            np.isfinite(direction[:-1])
-            & np.isfinite(direction[1:])
-            & (direction[:-1] != direction[1:])
-        )
-        + 1
-    )
-    branches = [
-        _interpolate(x[index], y[index], grid, source)
-        for index in np.split(np.arange(len(x)), boundaries)
-        if len(index) >= 2
-        and np.min(x[index]) <= grid[0]
-        and np.max(x[index]) >= grid[-1]
-    ]
-    if not branches:
-        raise VerticalKernelError(
-            f"{source} has no monotonic branch covering requested window"
-        )
-    return np.mean(branches, axis=0)
-
-
-def _interpolate(
-    x: np.ndarray, y: np.ndarray, grid: np.ndarray, source: str
-) -> np.ndarray:
-    """Interpolate finite samples after sorting and duplicate averaging."""
-    finite = np.isfinite(x) & np.isfinite(y)
-    x, y = x[finite], y[finite]
-    if len(x) < 2:
-        raise VerticalKernelError(f"{source} has insufficient finite samples")
-    order = np.argsort(x, kind="stable")
-    x, y = x[order], y[order]
-    unique, starts, counts = np.unique(x, return_index=True, return_counts=True)
-    values = np.add.reduceat(y, starts) / counts
-    if unique[0] > grid[0] or unique[-1] < grid[-1]:
-        raise VerticalKernelError(f"{source} does not cover requested window")
-    return np.interp(grid, unique, values)
 
 
 def _at_zero(grid: np.ndarray, values: np.ndarray) -> float:

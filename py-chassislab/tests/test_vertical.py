@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from pypdf import PdfReader
 
-from chassis_lab.knc_plot_kernel import (
+from chassis_lab.knc_kernel import (
     BranchOptions,
     branch_ranges,
     gradient_curve,

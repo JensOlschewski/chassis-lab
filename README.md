@@ -101,7 +101,7 @@ clab inspect --mapping knc --test vertical --template
 Analyze one normalized input or run manifest to calculate metrics and curves.
 
 - Use `--report PATH` to write a report bundle (SVC: JSON/CSV; KnC vertical:
-  JSON/CSV/PDF; KnC roll: curves JSON only until roll metrics and plots land).
+  JSON/CSV/PDF; KnC roll: JSON/CSV, plots follow).
 - KnC roll runs from a direct HDF5 input or a run manifest with only
   `[input.knc.roll]` (plus optional `[input.knc.static]`).
 - Use `--debug` for measurement branch detection diagnostics (needs `--report`).

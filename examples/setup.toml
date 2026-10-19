@@ -25,6 +25,7 @@ plot_branches = "all"     # all | selected (only the sweep used by the metrics)
 # Metric computation
 # secants between -gradient_points_mm and +gradient_points_mm
 # gradient_points_mm: default 10 and limited to the travel window.
+# gradient_points_deg: roll-angle secants for KnC roll, default 1.
 #
 # ride_frequency = 1/(2*pi) * sqrt(1000 * suspension_rate / mass_kg).
 # mass_kg comes from this run's own SVC `<corner>_mass_kg` output when SVC
@@ -59,3 +60,8 @@ index = 2
 #
 # [knc.vertical.metric]
 # gradient_points_mm = 0.2
+
+# Roll test setup
+# only keys that differ from [knc.*].
+# [knc.roll.metric]
+# gradient_points_deg = 1
