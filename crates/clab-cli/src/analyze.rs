@@ -12,7 +12,10 @@ use clab_core::svc_reference::load_svc_reference;
 use clap::Args;
 use sha2::{Digest, Sha256};
 
-use crate::analysis::{svc, vertical};
+use crate::analysis::{
+    knc::{self, KncTest},
+    svc,
+};
 
 #[derive(Debug, Args)]
 pub(crate) struct AnalyzeArgs {
@@ -81,27 +84,32 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
             )
         })?;
     let has_svc = !config.simulation_json.as_os_str().is_empty();
-    let vertical_path = config
-        .vertical
-        .as_ref()
-        .map(|vertical| match vertical.source_kind {
-            clab_core::config::SourceKind::Simulation => &vertical.simulation_hdf5,
-            clab_core::config::SourceKind::Measurement => &vertical.measurement_hdf5,
-        });
+    let vertical_path = knc_input(&config, KncTest::Vertical);
+    let roll_path = knc_input(&config, KncTest::Roll);
     let mut sources = Vec::new();
     if has_svc && is_hdf5(&config.simulation_json) {
         sources.push(config.simulation_json.as_path());
     }
-    if let Some(vertical) = &config.vertical {
-        sources.push(vertical_path.expect("vertical path"));
-        if let Some(static_input) = &vertical.static_simulation_hdf5 {
-            sources.push(static_input);
+    for test in [KncTest::Vertical, KncTest::Roll] {
+        if let Some(knc) = test.config(&config) {
+            sources.push(knc_input(&config, test).expect("KnC input path"));
+            if let Some(static_input) = &knc.static_simulation_hdf5 {
+                sources.push(static_input);
+            }
         }
     }
     for path in sources {
         if let Some(warning) = CanonicalFile::open(path)?.summary().legacy_warning() {
             eprintln!("warning: {warning}");
         }
+    }
+    if let Some(roll_path) = roll_path {
+        if has_svc || vertical_path.is_some() {
+            bail!(
+                "run manifest combines [input.knc.roll] with other inputs; analyze roll in its own run manifest for now"
+            );
+        }
+        return write_knc(&config, KncTest::Roll, roll_path, args, Some(&args.input));
     }
     match (has_svc, vertical_path) {
         (true, Some(vertical_path)) => write_combined_run(&config, vertical_path, args),
@@ -126,11 +134,23 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
             }
             None => unreachable!(),
         },
-        (false, Some(vertical_path)) => {
-            write_vertical(&config, vertical_path, args, Some(&args.input))
-        }
+        (false, Some(vertical_path)) => write_knc(
+            &config,
+            KncTest::Vertical,
+            vertical_path,
+            args,
+            Some(&args.input),
+        ),
         (false, None) => Ok(()),
     }
+}
+
+/// Configured input file of one KnC test, `None` when the test is absent.
+fn knc_input(config: &clab_core::config::CaseConfig, test: KncTest) -> Option<&Path> {
+    test.config(config).map(|knc| match knc.source_kind {
+        clab_core::config::SourceKind::Simulation => knc.simulation_hdf5.as_path(),
+        clab_core::config::SourceKind::Measurement => knc.measurement_hdf5.as_path(),
+    })
 }
 
 fn validate_input_file(path: &Path) -> Result<()> {
@@ -194,8 +214,9 @@ fn write_combined_run(
     let footer = analysis_footer(&args.config, config, vertical_path, Some(&args.input))?;
     let debug = debug_info(args.debug, &args.config, &[vertical_path])?;
     let svc_corner_mass_kg = svc_corner_mass_kg(&svc_report);
-    let vertical_report = vertical::analyze_input(
+    let vertical_report = knc::analyze_input(
         config,
+        KncTest::Vertical,
         vertical_path,
         Some(&svc_corner_mass_kg),
         debug.as_deref(),
@@ -229,7 +250,7 @@ fn write_combined_run(
     svc_detail["case"] = bundle["case"].clone();
     svc_detail["inputs"]["run"] = bundle["inputs"]["run"].clone();
     let mut vertical_detail: serde_json::Value = serde_json::from_str(&vertical_report.detail)?;
-    let plots = vertical::curve_plots(
+    let plots = knc::curve_plots(
         config,
         &vertical_detail["curves"],
         &footer,
@@ -255,7 +276,8 @@ fn write_combined_run(
         ),
         (
             "metrics.csv",
-            (svc_csv + &vertical_csv_rows(&config.name, &vertical_report.metrics)?).into_bytes(),
+            (svc_csv + &knc_csv_rows(&config.name, KncTest::Vertical, &vertical_report.metrics)?)
+                .into_bytes(),
         ),
         (
             "svc.json",
@@ -277,7 +299,7 @@ fn write_combined_run(
         config.simulation_json.as_path(),
         vertical_path,
     ];
-    add_vertical_inputs(&mut inputs, config);
+    add_knc_inputs(&mut inputs, config, KncTest::Vertical);
     write_bundle(output, &files, args.force, &inputs)?;
     println!("report: {}", output.display());
     Ok(())
@@ -319,27 +341,25 @@ fn analyze_svc(args: &AnalyzeArgs) -> Result<()> {
     .with_context(|| format!("failed to parse JSON input '{}'", args.input.display()))?;
     match input.get("source_kind").and_then(serde_json::Value::as_str) {
         Some("measurement") => {
-            let config =
-                clab_core::config::load_config_with_input(&args.config, &args.input, false)
-                    .map_err(|error| {
-                        anyhow::anyhow!(
-                            "failed to load analysis config '{}': {error}",
-                            args.config.display()
-                        )
-                    })?;
+            let config = clab_core::config::load_config_with_input(&args.config, &args.input, None)
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "failed to load analysis config '{}': {error}",
+                        args.config.display()
+                    )
+                })?;
             let reference = load_svc_reference(&args.input, &config.svc_measurement_signals)
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             write_svc_reference(&reference, args, &config, None)
         }
         Some("simulation") => {
-            let config =
-                clab_core::config::load_config_with_input(&args.config, &args.input, false)
-                    .map_err(|error| {
-                        anyhow::anyhow!(
-                            "failed to load analysis config '{}': {error}",
-                            args.config.display()
-                        )
-                    })?;
+            let config = clab_core::config::load_config_with_input(&args.config, &args.input, None)
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "failed to load analysis config '{}': {error}",
+                        args.config.display()
+                    )
+                })?;
             write_svc(&config, args, None)
         }
         None => bail!(
@@ -364,9 +384,11 @@ fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
         )
     };
     match (summary.domain.as_deref(), summary.test.as_deref()) {
-        (Some("knc"), Some("vertical")) => analyze_vertical(args),
+        (Some("knc"), Some(test)) if KncTest::from_name(test).is_some() => {
+            analyze_knc(args, KncTest::from_name(test).expect("known KnC test"))
+        }
         (Some("knc"), test) => bail!(
-            "unsupported knc test {} in '{}'; supported: vertical",
+            "unsupported knc test {} in '{}'; supported: vertical, roll",
             test.map_or("(none)".into(), |test| format!("'{test}'")),
             args.input.display()
         ),
@@ -374,14 +396,13 @@ fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
             if summary.source_kind == SourceKind::Measurement {
                 return Err(svc_measurement_error());
             }
-            let config =
-                clab_core::config::load_config_with_input(&args.config, &args.input, false)
-                    .map_err(|error| {
-                        anyhow::anyhow!(
-                            "failed to load analysis config '{}': {error}",
-                            args.config.display()
-                        )
-                    })?;
+            let config = clab_core::config::load_config_with_input(&args.config, &args.input, None)
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "failed to load analysis config '{}': {error}",
+                        args.config.display()
+                    )
+                })?;
             write_svc_hdf5(&config, args)
         }
         (Some(domain), _) => bail!(
@@ -395,19 +416,19 @@ fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
             }
             if summary.source_kind == SourceKind::Measurement
                 && let Ok(config) =
-                    clab_core::config::load_config_with_input(&args.config, &args.input, false)
+                    clab_core::config::load_config_with_input(&args.config, &args.input, None)
                 && config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement)
             {
                 return Err(svc_measurement_error());
             }
             if summary.source_kind == SourceKind::Simulation
                 && let Ok(config) =
-                    clab_core::config::load_config_with_input(&args.config, &args.input, false)
+                    clab_core::config::load_config_with_input(&args.config, &args.input, None)
                 && svc::supports_hdf5(&config, &input)
             {
                 return write_svc_hdf5(&config, args);
             }
-            analyze_vertical(args)
+            analyze_knc(args, KncTest::Vertical)
         }
     }
 }
@@ -592,27 +613,29 @@ fn print_warnings(warnings: &[String], args: &AnalyzeArgs) {
     }
 }
 
-fn analyze_vertical(args: &AnalyzeArgs) -> Result<()> {
-    let config = clab_core::config::load_config_with_input(&args.config, &args.input, true)
-        .map_err(|error| {
-            anyhow::anyhow!(
-                "failed to load analysis config '{}': {error}",
-                args.config.display()
-            )
-        })?;
-    write_vertical(&config, &args.input, args, None)
+fn analyze_knc(args: &AnalyzeArgs, test: KncTest) -> Result<()> {
+    let config =
+        clab_core::config::load_config_with_input(&args.config, &args.input, Some(test.name()))
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "failed to load analysis config '{}': {error}",
+                    args.config.display()
+                )
+            })?;
+    write_knc(&config, test, &args.input, args, None)
 }
 
-fn write_vertical(
+fn write_knc(
     config: &clab_core::config::CaseConfig,
+    test: KncTest,
     input: &Path,
     args: &AnalyzeArgs,
     run: Option<&Path>,
 ) -> Result<()> {
     let footer = analysis_footer(&args.config, config, input, run)?;
     let debug = debug_info(args.debug, &args.config, &[input])?;
-    let report = vertical::analyze_input(config, input, None, debug.as_deref())?;
-    print_header("KnC Vertical", report.metrics.len());
+    let report = knc::analyze_input(config, test, input, None, debug.as_deref())?;
+    print_header(test.title(), report.metrics.len());
     print_metrics(&report.metrics);
     print_warnings(&report.warnings, args);
     let Some(output) = &args.output else {
@@ -623,7 +646,7 @@ fn write_vertical(
         "command": "analyze",
         "case": {"name": config.name, "loadcase": config.loadcase},
         "inputs": {"config": provenance(&args.config)?, "input": provenance(input)?},
-        "domains": [{"domain": "knc", "test": "vertical", "metric_count": report.metrics.len(), "curve_count": report.curve_count}],
+        "domains": [{"domain": "knc", "test": test.name(), "metric_count": report.metrics.len(), "curve_count": report.curve_count}],
         "metrics": report.metrics,
         "warnings": report.warnings,
         "normalization": report.normalization,
@@ -632,17 +655,23 @@ fn write_vertical(
         bundle["inputs"]["run"] = provenance(run)?;
     }
     let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
-    let plots = vertical::curve_plots(
-        config,
-        &detail["curves"],
-        &footer,
-        report.measurement,
-        &report.corner_mass_kg,
-        debug.as_deref(),
-    )?;
+    // Roll plots arrive with #143/#144.
+    let plots = if test == KncTest::Vertical {
+        knc::curve_plots(
+            config,
+            &detail["curves"],
+            &footer,
+            report.measurement,
+            &report.corner_mass_kg,
+            debug.as_deref(),
+        )?
+    } else {
+        BTreeMap::new()
+    };
     detail["case"] = bundle["case"].clone();
     detail["inputs"] = bundle["inputs"].clone();
     let detail = serde_json::to_string_pretty(&detail)? + "\n";
+    let detail_name = format!("knc-{}.json", test.name());
     let mut files = vec![
         (
             "report.json",
@@ -651,10 +680,10 @@ fn write_vertical(
         (
             "metrics.csv",
             ("run,domain,test,metric,unit,value\n".to_owned()
-                + &vertical_csv_rows(&config.name, &report.metrics)?)
+                + &knc_csv_rows(&config.name, test, &report.metrics)?)
                 .into_bytes(),
         ),
-        ("knc-vertical.json", detail.into_bytes()),
+        (detail_name.as_str(), detail.into_bytes()),
     ];
     files.extend(
         plots
@@ -662,7 +691,7 @@ fn write_vertical(
             .map(|(name, contents)| (name.as_str(), contents.clone())),
     );
     let mut inputs = vec![args.config.as_path(), input];
-    add_vertical_inputs(&mut inputs, config);
+    add_knc_inputs(&mut inputs, config, test);
     if let Some(run) = run {
         inputs.push(run);
     }
@@ -672,7 +701,7 @@ fn write_vertical(
 }
 
 /// Metric rows in shared analysis CSV layout, without header.
-fn vertical_csv_rows(run: &str, metrics: &[serde_json::Value]) -> Result<String> {
+fn knc_csv_rows(run: &str, test: KncTest, metrics: &[serde_json::Value]) -> Result<String> {
     let mut csv = csv::WriterBuilder::new()
         .has_headers(false)
         .from_writer(Vec::new());
@@ -680,7 +709,7 @@ fn vertical_csv_rows(run: &str, metrics: &[serde_json::Value]) -> Result<String>
         csv.write_record([
             crate::compare::safe_cell(run),
             "knc".into(),
-            "vertical".into(),
+            test.name().into(),
             crate::compare::safe_cell(metric["metric"].as_str().unwrap_or_default()),
             metric["unit"].as_str().unwrap_or_default().into(),
             metric["value"]
@@ -692,13 +721,17 @@ fn vertical_csv_rows(run: &str, metrics: &[serde_json::Value]) -> Result<String>
     Ok(String::from_utf8(csv.into_inner()?)?)
 }
 
-fn add_vertical_inputs<'a>(inputs: &mut Vec<&'a Path>, config: &'a clab_core::config::CaseConfig) {
-    let Some(vertical) = &config.vertical else {
+fn add_knc_inputs<'a>(
+    inputs: &mut Vec<&'a Path>,
+    config: &'a clab_core::config::CaseConfig,
+    test: KncTest,
+) {
+    let Some(knc) = test.config(config) else {
         return;
     };
-    inputs.push(&vertical.simulation_hdf5);
-    inputs.push(&vertical.measurement_hdf5);
-    if let Some(static_simulation) = &vertical.static_simulation_hdf5 {
+    inputs.push(&knc.simulation_hdf5);
+    inputs.push(&knc.measurement_hdf5);
+    if let Some(static_simulation) = &knc.static_simulation_hdf5 {
         inputs.push(static_simulation);
     }
 }
@@ -710,8 +743,8 @@ fn analysis_footer(
     run: Option<&Path>,
 ) -> Result<String> {
     let mut lines = Vec::new();
-    if let Some(vertical) = &config.vertical {
-        lines.push(format!("KnC setup: {}", vertical.setup.summary()));
+    if let Some(knc) = config.vertical.as_ref().or(config.roll.as_ref()) {
+        lines.push(format!("KnC setup: {}", knc.setup.summary()));
     }
     lines.push(format!("Config: {}", absolute_path(config_path)?.display()));
     lines.push(format!("Case: {} | {}", config.name, config.loadcase));
