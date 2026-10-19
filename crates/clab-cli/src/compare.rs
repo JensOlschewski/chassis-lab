@@ -13,7 +13,10 @@ use serde::Serialize;
 use sha2::Digest;
 
 use crate::{
-    analysis::{svc, vertical},
+    analysis::{
+        knc::{self, KncTest},
+        svc,
+    },
     analyze::{absolute_path, debug_info, write_bundle},
 };
 
@@ -71,7 +74,7 @@ enum ComparedDomain {
         metrics: Vec<serde_json::Value>,
         branch: clab_core::config::VerticalBranch,
         /// This series' own `ride_frequency` mass map (same source as
-        /// `vertical::Reports::corner_mass_kg`): baseline and candidate
+        /// `knc::Reports::corner_mass_kg`): baseline and candidate
         /// resolve it from their own SVC run, so it travels per series,
         /// not shared.
         corner_mass_kg: BTreeMap<String, f64>,
@@ -261,7 +264,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             .into_iter()
             .map(|(label, curves, branch, mass, _, _)| (label, curves, branch, mass))
             .collect::<Vec<_>>();
-        plots.extend(vertical::compare_plots(
+        plots.extend(knc::compare_plots(
             &baseline.config,
             (base, base_branch, base_mass),
             &candidates,
@@ -327,7 +330,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         Some("toml") => {
             clab_core::config::load_config_and_run(config, path).map(|case| (case, true, true))
         }
-        Some("json") => clab_core::config::load_config_with_input(config, path, false)
+        Some("json") => clab_core::config::load_config_with_input(config, path, None)
             .map(|case| (case, true, false)),
         Some("h5" | "hdf5") => {
             let file = CanonicalFile::open(path)?;
@@ -335,10 +338,10 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
                 file.summary().domain.as_deref(),
                 file.summary().test.as_deref(),
             ) {
-                (Some("svc"), _) => clab_core::config::load_config_with_input(config, path, false)
+                (Some("svc"), _) => clab_core::config::load_config_with_input(config, path, None)
                     .map(|case| (case, true, false)),
                 (Some("knc"), Some("vertical")) => {
-                    clab_core::config::load_config_with_input(config, path, true)
+                    clab_core::config::load_config_with_input(config, path, Some("vertical"))
                         .map(|case| (case, false, true))
                 }
                 (Some(domain), test) => bail!(
@@ -353,7 +356,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
                         eprintln!("warning: {warning}");
                     }
                     let svc_case =
-                        clab_core::config::load_config_with_input(config, path, false).ok();
+                        clab_core::config::load_config_with_input(config, path, None).ok();
                     match svc_case {
                         Some(svc_case)
                             if file.summary().source_kind == SourceKind::Simulation
@@ -361,8 +364,12 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
                         {
                             Ok((svc_case, true, false))
                         }
-                        _ => clab_core::config::load_config_with_input(config, path, true)
-                            .map(|case| (case, false, true)),
+                        _ => clab_core::config::load_config_with_input(
+                            config,
+                            path,
+                            Some("vertical"),
+                        )
+                        .map(|case| (case, false, true)),
                     }
                 }
             }
@@ -372,6 +379,12 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
     .map_err(|error| {
         anyhow::anyhow!("failed to load compare input '{}': {error}", path.display())
     })?;
+    if case.roll.is_some() {
+        bail!(
+            "compare input '{}' configures [input.knc.roll]; KnC roll comparison is not supported yet",
+            path.display()
+        );
+    }
     if include_svc && case.svc_source_kind.is_some() {
         validate_comparison_input(&case.simulation_json)?;
     }
@@ -444,7 +457,13 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             clab_core::config::SourceKind::Simulation => &vertical_config.simulation_hdf5,
             clab_core::config::SourceKind::Measurement => &vertical_config.measurement_hdf5,
         };
-        let report = vertical::analyze_input(&case, source, svc_corner_mass_kg.as_ref(), None)?;
+        let report = knc::analyze_input(
+            &case,
+            KncTest::Vertical,
+            source,
+            svc_corner_mass_kg.as_ref(),
+            None,
+        )?;
         let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
         sources.push(source.clone());
         if let Some(static_input) = &vertical_config.static_simulation_hdf5 {

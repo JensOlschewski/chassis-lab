@@ -9,8 +9,11 @@ use std::{
 use anyhow::{Context, Result};
 use clab_core::{
     canonical_hdf5::{CanonicalFile, SourceKind},
-    config::{CaseConfig, SignalRef, VerticalBranch},
-    conventions::{apply_convention, vertical_conventions},
+    config::{CaseConfig, SignalRef, VerticalBranch, VerticalConfig},
+    conventions::{
+        BaselinePolicy, ROLL_AXLE_SIGNALS, SignalConvention, apply_convention, roll_conventions,
+        vertical_conventions,
+    },
 };
 use pyo3::{
     prelude::*,
@@ -24,6 +27,105 @@ const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_righ
 const AXES: [&str; 3] = ["x", "y", "z"];
 const DEFAULT_GRADIENT_POINTS_MM: f64 = 10.0;
 
+/// KnC test analyzed through the shared four-corner pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KncTest {
+    Vertical,
+    Roll,
+}
+
+impl KncTest {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "vertical" => Some(Self::Vertical),
+            "roll" => Some(Self::Roll),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Vertical => "vertical",
+            Self::Roll => "roll",
+        }
+    }
+
+    /// Console section heading.
+    pub(crate) const fn title(self) -> &'static str {
+        match self {
+            Self::Vertical => "KnC Vertical",
+            Self::Roll => "KnC Roll",
+        }
+    }
+
+    pub(crate) fn config(self, config: &CaseConfig) -> Option<&VerticalConfig> {
+        match self {
+            Self::Vertical => config.vertical.as_ref(),
+            Self::Roll => config.roll.as_ref(),
+        }
+    }
+
+    fn required_config(self, config: &CaseConfig) -> Result<&VerticalConfig> {
+        self.config(config)
+            .ok_or_else(|| anyhow::anyhow!("KnC {} configuration is required", self.name()))
+    }
+
+    fn conventions(self) -> BTreeMap<String, SignalConvention> {
+        match self {
+            Self::Vertical => vertical_conventions(),
+            Self::Roll => roll_conventions(),
+        }
+    }
+
+    /// Optional per-corner signals beyond wheel-center x/y/z.
+    fn corner_signals(self) -> &'static [&'static str] {
+        match self {
+            Self::Vertical => &[
+                "wheel_load",
+                "toe",
+                "camber",
+                "spin",
+                "wheel_pad_z",
+                "tire_deflection",
+                "contact_patch_x",
+                "contact_patch_y",
+            ],
+            Self::Roll => &[
+                "wheel_load",
+                "toe",
+                "camber",
+                "spin",
+                "wheel_pad_z",
+                "tire_deflection",
+                "contact_patch_x",
+                "contact_patch_y",
+                "center_of_pressure_y",
+            ],
+        }
+    }
+
+    /// Axle-level signals as `(location, signal, required)`.
+    fn axle_signals(self) -> Vec<(&'static str, &'static str, bool)> {
+        match self {
+            Self::Vertical => Vec::new(),
+            Self::Roll => ROLL_AXLE_SIGNALS
+                .iter()
+                .map(|(location, signal, _)| (*location, *signal, *signal == "roll_angle"))
+                .collect(),
+        }
+    }
+
+    /// Roll metrics and plots arrive with #142-#144; until then roll reports
+    /// curves only.
+    pub(crate) const fn has_metrics(self) -> bool {
+        matches!(self, Self::Vertical)
+    }
+}
+
+/// One sampled signal. `corner` is a corner (`front_left`, ...) or, for roll
+/// axle signals, an axle location (`front`, `rear`, `total`). `offset` is the
+/// baseline subtracted from relative values (measurement channel offset or
+/// static simulation value), so absolute positions stay recoverable.
 #[derive(Debug, Deserialize, Serialize)]
 struct Curve {
     corner: String,
@@ -32,6 +134,8 @@ struct Curve {
     unit: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     travel: Option<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    offset: Option<f64>,
 }
 
 pub(crate) struct Reports {
@@ -49,12 +153,13 @@ pub(crate) struct Reports {
     pub corner_mass_kg: BTreeMap<String, f64>,
 }
 
-/// Calculate KnC vertical curves, metrics, and warnings. Does not render
+/// Calculate KnC curves, metrics, and warnings for one test. Does not render
 /// plots: call `curve_plots` separately once the caller is ready for them
 /// (e.g. after printing the console metrics table), so slow PDF rendering
 /// never delays display.
 pub(crate) fn analyze_input(
     config: &CaseConfig,
+    test: KncTest,
     path: &Path,
     svc_corner_mass_kg: Option<&BTreeMap<String, f64>>,
     debug: Option<&str>,
@@ -63,14 +168,14 @@ pub(crate) fn analyze_input(
         .with_context(|| format!("failed to read HDF5 '{}'", path.display()))?;
     let (curves, mut warnings, normalization) = match file.summary().source_kind {
         SourceKind::Simulation => {
-            let (mut curves, mut warnings) = simulation_curves(config, &file)?;
-            if let Some(static_path) = config
-                .vertical
-                .as_ref()
+            let (mut curves, mut warnings) = simulation_curves(config, test, &file)?;
+            if let Some(static_path) = test
+                .config(config)
                 .and_then(|v| v.static_simulation_hdf5.as_ref())
             {
                 warnings.extend(subtract_static(
                     config,
+                    test,
                     &mut curves,
                     &CanonicalFile::open(static_path)?,
                 )?);
@@ -93,12 +198,9 @@ pub(crate) fn analyze_input(
             }
         }
         SourceKind::Measurement => {
-            let vertical = config
-                .vertical
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("KnC vertical configuration is required"))?;
+            let knc = test.required_config(config)?;
             (
-                measurement_curves(vertical, &file)?,
+                measurement_curves(test, knc, &file)?,
                 Vec::new(),
                 serde_json::json!({"method": "measurement_native"}),
             )
@@ -109,30 +211,33 @@ pub(crate) fn analyze_input(
         warnings
             .push("debug rate plots require measurement input; skipped for simulation data".into());
     }
-    warnings.extend(default_warnings(config, measurement));
     let relative_travel = normalization["method"] != "none";
-    let (corner_mass_kg, corner_mass_source) = config
-        .vertical
-        .as_ref()
-        .map(|vertical| corner_mass(&vertical.window, svc_corner_mass_kg))
+    let (corner_mass_kg, corner_mass_source) = test
+        .config(config)
+        .map(|knc| corner_mass(&knc.window, svc_corner_mass_kg))
         .unwrap_or_default();
-    let metrics = gradient_metrics(
-        config,
-        &curves,
-        relative_travel,
-        measurement,
-        &corner_mass_kg,
-        &corner_mass_source,
-        &mut warnings,
-    )?;
+    let metrics = if test.has_metrics() {
+        warnings.extend(default_warnings(config, measurement));
+        gradient_metrics(
+            config,
+            &curves,
+            relative_travel,
+            measurement,
+            &corner_mass_kg,
+            &corner_mass_source,
+            &mut warnings,
+        )?
+    } else {
+        Vec::new()
+    };
     warnings.sort();
     warnings.dedup();
-    let warnings = tag_warnings("knc", Some("vertical"), warnings);
+    let warnings = tag_warnings("knc", Some(test.name()), warnings);
     let detail = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
         "domain": "knc",
-        "test": "vertical",
+        "test": test.name(),
         "metrics": metrics,
         "curves": curves,
         "warnings": warnings,
@@ -150,7 +255,11 @@ pub(crate) fn analyze_input(
             .filter_map(|v| v.as_str().map(str::to_owned))
             .collect(),
         normalization: detail["normalization"].clone(),
-        branch: branch_options(config, measurement).clone(),
+        branch: test
+            .required_config(config)?
+            .branch
+            .for_measurement(measurement)
+            .clone(),
         measurement,
         corner_mass_kg,
     })
@@ -399,19 +508,20 @@ pub(crate) fn compare_plots(
 
 fn subtract_static(
     config: &CaseConfig,
+    test: KncTest,
     curves: &mut [Curve],
     static_file: &CanonicalFile,
 ) -> Result<Vec<String>> {
-    let vertical = config
-        .vertical
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("KnC vertical configuration is required"))?;
-    let conventions = vertical_conventions();
+    let knc = test.required_config(config)?;
+    let conventions = test.conventions();
     let mut warnings = Vec::new();
     for curve in curves {
         let name = format!("{}_{}", curve.corner, curve.signal);
-        let reference = mapping(vertical, &name)?;
         let mut convention = convention(&conventions, &name)?;
+        if convention.baseline != BaselinePolicy::StaticSimulation {
+            continue;
+        }
+        let reference = mapping(test, knc, &name)?;
         convention.source_unit = reference.unit.clone();
         let signal = static_file.read_signal(
             &reference.entity,
@@ -439,24 +549,23 @@ fn subtract_static(
         for value in &mut curve.values {
             *value -= static_value;
         }
+        curve.offset = Some(static_value);
     }
     Ok(warnings)
 }
 
 fn simulation_curves(
     config: &CaseConfig,
+    test: KncTest,
     simulation: &CanonicalFile,
 ) -> Result<(Vec<Curve>, Vec<String>)> {
-    let vertical = config
-        .vertical
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("KnC vertical configuration is required"))?;
-    let conventions = vertical_conventions();
+    let knc = test.required_config(config)?;
+    let conventions = test.conventions();
     let mut curves = Vec::new();
     let mut warnings = Vec::new();
     for corner in CORNERS {
         let travel_name = format!("{corner}_travel");
-        let travel_reference = mapping(vertical, &travel_name)?;
+        let travel_reference = mapping(test, knc, &travel_name)?;
         let mut travel_convention = convention(&conventions, &travel_name)?;
         travel_convention.source_unit = travel_reference.unit.clone();
         let travel_signal = simulation.read_signal(
@@ -475,7 +584,7 @@ fn simulation_curves(
         let travel = drop_initial_sample(travel);
         for axis in AXES {
             let name = format!("{corner}_wheel_center_{axis}");
-            let reference = mapping(vertical, &name)?;
+            let reference = mapping(test, knc, &name)?;
             let mut convention = convention(&conventions, &name)?;
             convention.source_unit = reference.unit.clone();
             let signal = simulation.read_signal(
@@ -504,103 +613,187 @@ fn simulation_curves(
                 values: drop_initial_sample(value),
                 unit: "mm".into(),
                 travel: Some(travel.clone()),
+                offset: None,
             });
         }
         optional_simulation_curves(
             config,
             simulation,
-            vertical,
+            (test, knc),
             &conventions,
             corner,
             &mut curves,
             &mut warnings,
         )?;
     }
+    for (location, signal, required) in test.axle_signals() {
+        let name = format!("{location}_{signal}");
+        let Some(reference) = knc.signals.get(&name) else {
+            if required {
+                anyhow::bail!(mapping_missing(test.name(), &name));
+            }
+            continue;
+        };
+        let (values, unit) = simulation_signal(
+            config,
+            simulation,
+            &conventions,
+            &name,
+            reference,
+            &mut warnings,
+        )?;
+        curves.push(Curve {
+            corner: location.into(),
+            signal: signal.into(),
+            values: drop_initial_sample(values),
+            unit,
+            travel: None,
+            offset: None,
+        });
+    }
     Ok((curves, warnings))
 }
 
 fn measurement_curves(
-    vertical: &clab_core::config::VerticalConfig,
+    test: KncTest,
+    knc: &VerticalConfig,
     measurement: &CanonicalFile,
 ) -> Result<Vec<Curve>> {
     let mut curves = Vec::new();
     for corner in CORNERS {
         for axis in AXES {
             let name = format!("{corner}_wheel_center_{axis}");
-            let reference = measurement_mapping(vertical, &name)?;
+            let reference = measurement_mapping(test, knc, &name)?;
             let channel =
                 measurement.read_signal(&reference.entity, None, Some(&reference.unit))?;
+            let offset = channel.info.offset.unwrap_or_default();
             curves.push(Curve {
                 corner: corner.into(),
                 signal: format!("wheel_center_{axis}"),
                 values: channel
                     .values
                     .into_iter()
-                    .map(|value| value - channel.info.offset.unwrap_or_default())
+                    .map(|value| value - offset)
                     .collect(),
                 unit: reference.unit.clone(),
                 travel: None,
+                offset: Some(offset),
             });
         }
-        optional_measurement_curves(vertical, measurement, corner, &mut curves)?;
+        optional_measurement_curves(test, knc, measurement, corner, &mut curves)?;
+    }
+    for (location, signal, required) in test.axle_signals() {
+        let name = format!("{location}_{signal}");
+        let channel = knc
+            .measurement_signals
+            .get(&name)
+            .map(|reference| measurement_channel(measurement, reference))
+            .transpose()?
+            .flatten();
+        let Some((values, unit)) = channel else {
+            if required {
+                anyhow::bail!(mapping_missing(
+                    &format!("{} measurement", test.name()),
+                    &name
+                ));
+            }
+            continue;
+        };
+        curves.push(Curve {
+            corner: location.into(),
+            signal: signal.into(),
+            values,
+            unit,
+            travel: None,
+            offset: None,
+        });
     }
     Ok(curves)
+}
+
+/// Raw values and mapped unit of a measurement channel, `None` when the file
+/// lacks it.
+fn measurement_channel(
+    measurement: &CanonicalFile,
+    reference: &clab_core::config::MeasurementSignalRef,
+) -> Result<Option<(Vec<f64>, String)>> {
+    if !measurement
+        .signals()
+        .iter()
+        .any(|info| info.safe_name == reference.entity)
+    {
+        return Ok(None);
+    }
+    let channel = measurement.read_signal(&reference.entity, None, Some(&reference.unit))?;
+    Ok(Some((channel.values, reference.unit.clone())))
 }
 
 fn optional_simulation_curves(
     config: &CaseConfig,
     simulation: &CanonicalFile,
-    vertical: &clab_core::config::VerticalConfig,
-    conventions: &BTreeMap<String, clab_core::conventions::SignalConvention>,
+    (test, knc): (KncTest, &VerticalConfig),
+    conventions: &BTreeMap<String, SignalConvention>,
     corner: &str,
     curves: &mut Vec<Curve>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
-    for suffix in [
-        "wheel_load",
-        "toe",
-        "camber",
-        "spin",
-        "tire_deflection",
-        "contact_patch_x",
-        "contact_patch_y",
-    ] {
+    for suffix in test.corner_signals() {
+        // Simulation pad travel is derived in the kernel from wheel-center
+        // travel and tire deflection.
+        if *suffix == "wheel_pad_z" {
+            continue;
+        }
         let name = format!("{corner}_{suffix}");
-        let Some(reference) = vertical.signals.get(&name) else {
+        let Some(reference) = knc.signals.get(&name) else {
             continue;
         };
-        let mut convention = convention(conventions, &name)?;
-        convention.source_unit = reference.unit.clone();
-        let unit = convention.unit.as_str().into();
-        let signal = simulation.read_signal(
-            &reference.entity,
-            Some(&reference.component),
-            Some(&convention.source_unit),
-        )?;
-        if signal.info.unit.is_empty() {
-            warnings.push(missing_unit_warning(
-                &reference.entity,
-                &reference.component,
-                &convention.source_unit,
-            ));
-        }
-        let values = apply_convention(
-            &signal.values,
-            &name,
-            format!("{}/{}", reference.entity, reference.component),
-            convention,
-            config.gravity,
-        )?
-        .values;
+        let (values, unit) =
+            simulation_signal(config, simulation, conventions, &name, reference, warnings)?;
         curves.push(Curve {
             corner: corner.into(),
-            signal: suffix.into(),
+            signal: (*suffix).into(),
             values: drop_initial_sample(values),
             unit,
             travel: None,
+            offset: None,
         });
     }
     Ok(())
+}
+
+/// Read one mapped simulation signal and apply its canonical convention.
+fn simulation_signal(
+    config: &CaseConfig,
+    simulation: &CanonicalFile,
+    conventions: &BTreeMap<String, SignalConvention>,
+    name: &str,
+    reference: &SignalRef,
+    warnings: &mut Vec<String>,
+) -> Result<(Vec<f64>, String)> {
+    let mut convention = convention(conventions, name)?;
+    convention.source_unit = reference.unit.clone();
+    let unit = convention.unit.as_str().into();
+    let signal = simulation.read_signal(
+        &reference.entity,
+        Some(&reference.component),
+        Some(&convention.source_unit),
+    )?;
+    if signal.info.unit.is_empty() {
+        warnings.push(missing_unit_warning(
+            &reference.entity,
+            &reference.component,
+            &convention.source_unit,
+        ));
+    }
+    let values = apply_convention(
+        &signal.values,
+        name,
+        format!("{}/{}", reference.entity, reference.component),
+        convention,
+        config.gravity,
+    )?
+    .values;
+    Ok((values, unit))
 }
 
 /// Adams legacy evaluation removes column one from every multi-sample signal.
@@ -617,23 +810,16 @@ fn drop_initial_sample(values: Vec<f64>) -> Vec<f64> {
 /// that curve (same leniency `optional_simulation_curves` gives a canonical
 /// name absent from `vertical.signals`).
 fn optional_measurement_curves(
-    vertical: &clab_core::config::VerticalConfig,
+    test: KncTest,
+    knc: &VerticalConfig,
     measurement: &CanonicalFile,
     corner: &str,
     curves: &mut Vec<Curve>,
 ) -> Result<()> {
-    for suffix in [
-        "wheel_load",
-        "toe",
-        "camber",
-        "spin",
-        "wheel_pad_z",
-        "tire_deflection",
-        "contact_patch_x",
-        "contact_patch_y",
-    ] {
+    for suffix in test.corner_signals() {
+        let suffix = *suffix;
         let name = format!("{corner}_{suffix}");
-        let Some(reference) = vertical.measurement_signals.get(&name) else {
+        let Some(reference) = knc.measurement_signals.get(&name) else {
             continue;
         };
         if !measurement
@@ -646,7 +832,11 @@ fn optional_measurement_curves(
         let channel = measurement.read_signal(&reference.entity, None, Some(&reference.unit))?;
         let relative = matches!(
             suffix,
-            "wheel_pad_z" | "tire_deflection" | "contact_patch_x" | "contact_patch_y"
+            "wheel_pad_z"
+                | "tire_deflection"
+                | "contact_patch_x"
+                | "contact_patch_y"
+                | "center_of_pressure_y"
         );
         let sign = if suffix == "toe" && matches!(corner, "front_right" | "rear_right") {
             -1.0
@@ -668,39 +858,39 @@ fn optional_measurement_curves(
                 .collect(),
             unit: reference.unit.clone(),
             travel: None,
+            offset: relative.then_some(offset),
         });
     }
     Ok(())
 }
 
-fn mapping<'a>(
-    vertical: &'a clab_core::config::VerticalConfig,
-    name: &str,
-) -> Result<&'a SignalRef> {
-    vertical
-        .signals
+fn mapping<'a>(test: KncTest, knc: &'a VerticalConfig, name: &str) -> Result<&'a SignalRef> {
+    knc.signals
         .get(name)
-        .ok_or_else(|| anyhow::anyhow!(mapping_missing("vertical", name)))
+        .ok_or_else(|| anyhow::anyhow!(mapping_missing(test.name(), name)))
 }
 
 fn measurement_mapping<'a>(
-    vertical: &'a clab_core::config::VerticalConfig,
+    test: KncTest,
+    knc: &'a VerticalConfig,
     name: &str,
 ) -> Result<&'a clab_core::config::MeasurementSignalRef> {
-    vertical
-        .measurement_signals
-        .get(name)
-        .ok_or_else(|| anyhow::anyhow!(mapping_missing("vertical measurement", name)))
+    knc.measurement_signals.get(name).ok_or_else(|| {
+        anyhow::anyhow!(mapping_missing(
+            &format!("{} measurement", test.name()),
+            name
+        ))
+    })
 }
 
 fn convention(
-    conventions: &BTreeMap<String, clab_core::conventions::SignalConvention>,
+    conventions: &BTreeMap<String, SignalConvention>,
     name: &str,
-) -> Result<clab_core::conventions::SignalConvention> {
+) -> Result<SignalConvention> {
     conventions
         .get(name)
         .cloned()
-        .ok_or_else(|| anyhow::anyhow!("vertical signal convention missing: {name}"))
+        .ok_or_else(|| anyhow::anyhow!("KnC signal convention missing: {name}"))
 }
 
 /// Render KnC vertical PDF plots. Separate from `analyze_input` so slow

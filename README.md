@@ -70,7 +70,7 @@ Convert raw simulation or measurement data to HDF5. Default output is `INPUT.h5`
 - Use `--output` for an explicit file.
 - Use `--force` to replace an existing output.
 - `--domain` (`-d`) is required and defines test domain > (`svc`|`knc`)
-- `--test` (`-t`) is required for `knc` > (`vertical`|`static`)
+- `--test` (`-t`) is required for `knc` > (`vertical`|`roll`|`static`)
 
 ```bash
 clab convert examples/input/example-measurement-knc-vertical.acd \
@@ -101,7 +101,9 @@ clab inspect --mapping knc --test vertical --template
 Analyze one normalized input or run manifest to calculate metrics and curves.
 
 - Use `--report PATH` to write a report bundle (SVC: JSON/CSV; KnC vertical:
-  JSON/CSV/PDF).
+  JSON/CSV/PDF; KnC roll: curves JSON only until roll metrics and plots land).
+- KnC roll runs from a direct HDF5 input or a run manifest with only
+  `[input.knc.roll]` (plus optional `[input.knc.static]`).
 - Use `--debug` for measurement branch detection diagnostics (needs `--report`).
 - Use `--verbose` (`-v`) to print default-value warnings.
 - Use `--force` to replace an existing report bundle.

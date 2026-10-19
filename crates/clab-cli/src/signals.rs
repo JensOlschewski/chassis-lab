@@ -1,5 +1,8 @@
 use anyhow::{Result, bail};
-use clab_core::conventions::{SignalConvention, svc_conventions, vertical_conventions};
+use clab_core::{
+    config::KNC_TESTS,
+    conventions::{SignalConvention, roll_conventions, svc_conventions, vertical_conventions},
+};
 use clap::ValueEnum;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -8,15 +11,27 @@ pub(crate) enum Domain {
     Knc,
 }
 
+type Conventions = std::collections::BTreeMap<String, SignalConvention>;
+
 pub(crate) fn mapping(domain: Option<Domain>, test: Option<&str>, template: bool) -> Result<()> {
-    if test.is_some_and(|test| test != "vertical") {
-        bail!("unsupported KnC test; expected vertical");
+    if test.is_some_and(|test| !KNC_TESTS.contains(&test)) {
+        bail!("unsupported KnC test; expected {}", KNC_TESTS.join(" or "));
     }
     if test.is_some() && matches!(domain, Some(Domain::Svc)) {
         bail!("--test requires --domain knc");
     }
     let svc = svc_conventions();
-    let knc = vertical_conventions();
+    let knc: Vec<(&str, Conventions)> = KNC_TESTS
+        .into_iter()
+        .filter(|name| test.is_none_or(|test| test == *name))
+        .map(|name| {
+            let conventions = match name {
+                "roll" => roll_conventions(),
+                _ => vertical_conventions(),
+            };
+            (name, conventions)
+        })
+        .collect();
     if template {
         print_template(domain, test.is_some(), &svc, &knc);
     } else {
@@ -25,11 +40,13 @@ pub(crate) fn mapping(domain: Option<Domain>, test: Option<&str>, template: bool
     Ok(())
 }
 
+/// Without `--test`, wheel travel is shared by every KnC test and listed once
+/// under `knc`; with it, all signals of that test are listed under the test.
 fn print_list(
     domain: Option<Domain>,
-    vertical: bool,
-    svc: &std::collections::BTreeMap<String, SignalConvention>,
-    knc: &std::collections::BTreeMap<String, SignalConvention>,
+    single_test: bool,
+    svc: &Conventions,
+    knc: &[(&str, Conventions)],
 ) {
     if domain.is_none() || matches!(domain, Some(Domain::Svc)) {
         println!("svc:");
@@ -37,11 +54,18 @@ fn print_list(
     }
     if domain.is_none() || matches!(domain, Some(Domain::Knc)) {
         println!("knc:");
-        if !vertical {
-            print_rows(2, knc.iter().filter(|(name, _)| name.ends_with("_travel")));
+        if !single_test {
+            print_rows(2, knc[0].1.iter().filter(|(name, _)| !test_signal(name)));
         }
-        println!("  vertical:");
-        print_rows(4, knc.iter().filter(|(name, _)| !name.ends_with("_travel")));
+        for (test, conventions) in knc {
+            println!("  {test}:");
+            print_rows(
+                4,
+                conventions
+                    .iter()
+                    .filter(|(name, _)| single_test || test_signal(name)),
+            );
+        }
     }
 }
 
@@ -60,15 +84,15 @@ where
     }
 }
 
-fn vertical_signal(name: &str) -> bool {
+fn test_signal(name: &str) -> bool {
     !name.ends_with("_travel")
 }
 
 fn print_template(
     domain: Option<Domain>,
-    vertical: bool,
-    svc: &std::collections::BTreeMap<String, SignalConvention>,
-    knc: &std::collections::BTreeMap<String, SignalConvention>,
+    single_test: bool,
+    svc: &Conventions,
+    knc: &[(&str, Conventions)],
 ) {
     if domain.is_none() || matches!(domain, Some(Domain::Svc)) {
         for (name, convention) in svc {
@@ -76,14 +100,18 @@ fn print_template(
         }
     }
     if domain.is_none() || matches!(domain, Some(Domain::Knc)) {
-        for (name, convention) in knc {
-            if !vertical && !vertical_signal(name) {
-                signal_table("knc", name, convention);
+        if !single_test {
+            for (name, convention) in &knc[0].1 {
+                if !test_signal(name) {
+                    signal_table("knc", name, convention);
+                }
             }
         }
-        for (name, convention) in knc {
-            if vertical || vertical_signal(name) {
-                signal_table("knc.vertical", name, convention);
+        for (test, conventions) in knc {
+            for (name, convention) in conventions {
+                if single_test || test_signal(name) {
+                    signal_table(&format!("knc.{test}"), name, convention);
+                }
             }
         }
     }

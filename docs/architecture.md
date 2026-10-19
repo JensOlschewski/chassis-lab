@@ -164,6 +164,9 @@ file = "static-simulation.h5"
 [input.knc.vertical]
 file = "vertical.h5"
 
+[input.knc.roll]
+file = "roll.h5"
+
 [mappings.simulation]
 file = "simulation-mappings.toml"
 
@@ -172,9 +175,14 @@ file = "measurement-mappings.toml"
 ```
 
 Source kind comes from required input metadata: HDF5 and SVC JSON `source_kind`
-must declare it. SVC and vertical must have same source
+must declare it. SVC and KnC tests must have same source
 kind. `[input.knc.static]` is run-relative simulation HDF5 baseline for vertical
-normalization. Nested simulation/measurement role tables remain compatible.
+and roll normalization. Roll axle signals (`total_roll_angle`,
+`front|rear_suspension_roll_angle`, `front|rear|total_roll_moment`,
+`front|rear|total_suspension_roll_moment`) keep absolute values; only corner
+signals are normalized. Every normalized curve records the subtracted
+`offset`, so absolute positions stay recoverable. Roll does not yet combine
+with SVC or vertical in one run manifest. Nested simulation/measurement role tables remain compatible.
 External role files can replace inline sections, at any depth — a whole
 `source_kind` under `[mappings]`, one domain under it, or one test under that
 domain, can each point at its own file (`examples/` combines every domain
@@ -188,8 +196,9 @@ validation TOML contains optional policy. `[meta]` contains optional run `name` 
 Run metadata overrides shared configuration metadata, and absent values report
 as `undefined`. Paths resolve relative to main config.
 
-KnC setup lives under `[setup.knc]`; `[setup.knc.vertical]` holds vertical-only
-values and overrides `[setup.knc]` key by key (nested tables deep-merge).
+KnC setup lives under `[setup.knc]`; `[setup.knc.vertical]` and
+`[setup.knc.roll]` hold test-only values and override `[setup.knc]` key by key
+(nested tables deep-merge).
 `[meta]` holds the test setup flags (`brakes_applied`, `engine_running`,
 `front_arb_connected`, optional `rear_arb_connected`), which also appear in the
 report footer. `[window]` defines the plot range (`minimum_mm`, `maximum_mm`,

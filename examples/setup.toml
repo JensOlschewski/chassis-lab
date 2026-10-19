@@ -1,7 +1,7 @@
 # This file is the [setup] table of config.toml.
 #
 # [knc.*] applies to every KnC test
-# [knc.vertical.*] applies to the vertical test only and overrides [knc.*]
+# [knc.vertical.*] and [knc.roll.*] apply to that test only and override [knc.*]
 #
 # Optional keys that are left out fall back to their default, and clab warns
 # about each one (details with --verbose).

@@ -11,7 +11,7 @@ use crate::acd::AcdMeasurement;
 use crate::model::AdamsResult;
 
 /// Known domains and their tests. Add new domains and tests here.
-pub const DOMAINS: &[(&str, &[&str])] = &[("svc", &[]), ("knc", &["vertical", "static"])];
+pub const DOMAINS: &[(&str, &[&str])] = &[("svc", &[]), ("knc", &["vertical", "roll", "static"])];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
@@ -92,6 +92,7 @@ pub fn check_res_identity(result: &AdamsResult, identity: &Identity, source: &st
 fn acd_test(testtype: &str) -> Option<(&'static str, &'static str)> {
     match testtype {
         "vert" => Some(("knc", "vertical")),
+        "roll" => Some(("knc", "roll")),
         _ => None,
     }
 }
@@ -140,6 +141,7 @@ mod tests {
         assert!(Identity::new("svc", None).is_ok());
         assert!(Identity::new("knc", Some("vertical")).is_ok());
         assert!(Identity::new("knc", Some("static")).is_ok());
+        assert!(Identity::new("knc", Some("roll")).is_ok());
         for (domain, test, message) in [
             ("driving", None, "unknown domain 'driving'"),
             ("knc", None, "requires --test"),
@@ -204,6 +206,17 @@ mod tests {
     fn acd_identity_passes_when_testtype_agrees() {
         let identity = Identity::new("knc", Some("vertical")).unwrap();
         check_acd_identity(&acd_with_testtype("vert"), &identity, "source.acd").unwrap();
+    }
+
+    #[test]
+    fn acd_identity_maps_roll_testtype() {
+        let identity = Identity::new("knc", Some("roll")).unwrap();
+        check_acd_identity(&acd_with_testtype("roll"), &identity, "source.acd").unwrap();
+        let identity = Identity::new("knc", Some("vertical")).unwrap();
+        let error = check_acd_identity(&acd_with_testtype("roll"), &identity, "source.acd")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("indicates roll"), "{error}");
     }
 
     #[test]

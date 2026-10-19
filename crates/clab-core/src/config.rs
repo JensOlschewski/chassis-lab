@@ -279,6 +279,10 @@ fn fold_legacy_branch(
     Ok(())
 }
 
+/// KnC tests analyzed from one configured input each. `static` is not listed:
+/// it is only a baseline for these tests.
+pub const KNC_TESTS: [&str; 2] = ["vertical", "roll"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Domain {
     Svc,
@@ -300,6 +304,8 @@ pub struct CaseConfig {
     pub signals: BTreeMap<String, SignalRef>,
     pub validation: Option<ValidationConfig>,
     pub vertical: Option<VerticalConfig>,
+    /// KnC roll test; shares the vertical test's configuration shape.
+    pub roll: Option<VerticalConfig>,
     pub svc_signal_map: Option<PathBuf>,
     /// SVC measurement reference JSON key mapping: canonical metric name ->
     /// `{entity (JSON key), unit}`. Required whenever this config's SVC
@@ -313,7 +319,7 @@ impl CaseConfig {
         if !self.simulation_json.as_os_str().is_empty() {
             domains.push(Domain::Svc);
         }
-        if self.vertical.is_some() {
+        if self.vertical.is_some() || self.roll.is_some() {
             domains.push(Domain::Knc);
         }
         domains
@@ -387,8 +393,10 @@ fn validate_run_input_tables(
         validate_run_input_table(svc, run)?;
     }
     if let Some(knc) = input.get("knc").and_then(Value::as_table) {
-        if let Some(vertical) = knc.get("vertical").and_then(Value::as_table) {
-            validate_run_input_table(vertical, run)?;
+        for test in KNC_TESTS {
+            if let Some(input) = knc.get(test).and_then(Value::as_table) {
+                validate_run_input_table(input, run)?;
+            }
         }
         if let Some(static_input) = knc.get("static").and_then(Value::as_table) {
             validate_run_input_table(static_input, run)?;
@@ -425,37 +433,38 @@ fn validate_run_input_table(
 
 /// Load shared analysis configuration for a direct normalized input.
 ///
-/// `vertical` supplies the same file in both roles solely to build its typed
+/// `knc_test` names the KnC test the input belongs to, `None` for SVC. A KnC
+/// input supplies the same file in both roles solely to build its typed
 /// mapping/setup configuration. The caller must only read its actual source.
 /// Direct input has no run manifest, so absent `[meta]` name and loadcase are
 /// reported as `undefined`.
 pub fn load_config_with_input(
     config: impl AsRef<Path>,
     input: impl AsRef<Path>,
-    vertical: bool,
+    knc_test: Option<&str>,
 ) -> Result<CaseConfig, Box<dyn std::error::Error>> {
     let (path, raw) = load_toml(config.as_ref())?;
     let mut root = load_function_role_files(&raw, &path)?;
     let input = absolute(&expand(input.as_ref())?)?.display().to_string();
     let mut role = Map::new();
-    if vertical {
-        let mut vertical_role = Map::new();
-        vertical_role.insert("file".into(), Value::String(input.clone()));
+    if let Some(test) = knc_test {
+        let mut test_role = Map::new();
+        test_role.insert("file".into(), Value::String(input.clone()));
         let mut knc = Map::new();
-        knc.insert("vertical".into(), Value::Table(vertical_role));
+        knc.insert(test.into(), Value::Table(test_role));
         role.insert("knc".into(), Value::Table(knc));
     } else {
         let mut svc = Map::new();
         svc.insert("file".into(), Value::String(input));
         role.insert("svc".into(), Value::Table(svc));
     }
-    if vertical
+    if let Some(test) = knc_test
         && let Some(existing) = root
             .get_mut("input")
             .and_then(Value::as_table_mut)
             .and_then(|input| input.get_mut("knc"))
             .and_then(Value::as_table_mut)
-            .and_then(|knc| knc.get_mut("vertical"))
+            .and_then(|knc| knc.get_mut(test))
             .and_then(Value::as_table_mut)
     {
         // Direct input replaces active source, but keeps configured static input.
@@ -540,12 +549,27 @@ fn parse_function_first(
         .unwrap_or(9.80665);
 
     let svc = function_svc(&root, input, path)?;
-    let vertical = function_vertical(&root, input, path)?;
-    if svc.is_none() && vertical.is_none() {
+    if let Some(knc) = input.get("knc") {
+        let knc = table(knc, "[input.knc]")?;
+        keys(knc, &["vertical", "roll", "static"], "[input.knc]")?;
+        if knc.contains_key("static") && !KNC_TESTS.iter().any(|test| knc.contains_key(*test)) {
+            return Err(ConfigError(
+                "[input.knc.static] requires [input.knc.vertical] or [input.knc.roll]".into(),
+            )
+            .into());
+        }
+    }
+    let vertical = function_knc_test(&root, input, path, "vertical")?;
+    let roll = function_knc_test(&root, input, path, "roll")?;
+    if svc.is_none() && vertical.is_none() && roll.is_none() {
         return Err(ConfigError("[input] must define at least one domain".into()).into());
     }
-    if let (Some((_, _, _, _, svc_kind, _)), Some(vertical)) = (&svc, &vertical)
-        && *svc_kind != vertical.source_kind
+    let mut source_kinds = svc
+        .iter()
+        .map(|(_, _, _, _, kind, _)| *kind)
+        .chain(vertical.iter().chain(&roll).map(|test| test.source_kind));
+    if let Some(first) = source_kinds.next()
+        && source_kinds.any(|kind| kind != first)
     {
         return Err(
             ConfigError("run manifest mixes simulation and measurement inputs".into()).into(),
@@ -579,6 +603,7 @@ fn parse_function_first(
         signals,
         validation,
         vertical,
+        roll,
         svc_signal_map,
         svc_measurement_signals,
     })
@@ -790,25 +815,24 @@ fn function_svc(
     )))
 }
 
-fn function_vertical(
+/// Parse one KnC test (`vertical` or `roll`) from `[input.knc.<test>]`,
+/// `[setup.knc]` merged with `[setup.knc.<test>]`, and `<test>` mappings.
+/// `[input.knc.static]` is the shared static simulation baseline.
+fn function_knc_test(
     root: &toml::map::Map<String, Value>,
     input: &toml::map::Map<String, Value>,
     path: &Path,
+    name: &str,
 ) -> Result<Option<VerticalConfig>, Box<dyn std::error::Error>> {
     let Some(raw) = input.get("knc") else {
         return Ok(None);
     };
     let knc = table(raw, "[input.knc]")?;
-    keys(knc, &["vertical", "static"], "[input.knc]")?;
-    let Some(raw) = knc.get("vertical") else {
-        if knc.contains_key("static") {
-            return Err(
-                ConfigError("[input.knc.static] requires [input.knc.vertical]".into()).into(),
-            );
-        }
+    let Some(raw) = knc.get(name) else {
         return Ok(None);
     };
-    let test = table(raw, "[input.knc.vertical]")?;
+    let scope = format!("[input.knc.{name}]");
+    let test = table(raw, &scope)?;
     keys(
         test,
         &[
@@ -819,7 +843,7 @@ fn function_vertical(
             "measurement",
             "static_simulation",
         ],
-        "[input.knc.vertical]",
+        &scope,
     )?;
     let direct = test.get("file").or_else(|| test.get("input_file"));
     let static_baseline = knc
@@ -852,29 +876,27 @@ fn function_vertical(
                 "file" | "input_file" | "static_file" | "static_simulation"
             )
         }) {
-            return Err(ConfigError(
-                "[input.knc.vertical].file cannot be combined with role tables".into(),
-            )
-            .into());
+            return Err(
+                ConfigError(format!("{scope}.file cannot be combined with role tables")).into(),
+            );
         }
-        let source = resolve(file, path, "[input.knc.vertical].file")?;
-        let input_kind = source_kind(&source, Domain::Knc, Some("vertical"))?;
+        let source = resolve(file, path, &format!("{scope}.file"))?;
+        let input_kind = source_kind(&source, Domain::Knc, Some(name))?;
         let static_file = test
             .get("static_file")
-            .map(|file| resolve(file, path, "[input.knc.vertical].static_file"))
+            .map(|file| resolve(file, path, &format!("{scope}.static_file")))
             .transpose()?;
-        let static_simulation = function_input(test, "static_simulation", "[input.knc.vertical]")?;
+        let static_simulation = function_input(test, "static_simulation", &scope)?;
         if static_file.is_some() && static_simulation.is_some() {
-            return Err(ConfigError(
-                "[input.knc.vertical].static_file cannot be combined with static_simulation".into(),
-            )
+            return Err(ConfigError(format!(
+                "{scope}.static_file cannot be combined with static_simulation"
+            ))
             .into());
         }
         if (static_file.is_some() || static_simulation.is_some()) && static_baseline.is_some() {
-            return Err(ConfigError(
-                "[input.knc.vertical] static input cannot be combined with [input.knc.static]"
-                    .into(),
-            )
+            return Err(ConfigError(format!(
+                "{scope} static input cannot be combined with [input.knc.static]"
+            ))
             .into());
         }
         let static_file = static_baseline.or(static_file).or(static_simulation);
@@ -882,67 +904,61 @@ fn function_vertical(
             && source_kind(static_file, Domain::Knc, Some("static"))? != SourceKind::Simulation
         {
             return Err(ConfigError(format!(
-                "vertical static_file '{}' source_kind must be simulation",
+                "{name} static_file '{}' source_kind must be simulation",
                 static_file.display()
             ))
             .into());
         }
         (input_kind, source, static_file)
     } else {
-        let measurement = function_input(test, "measurement", "[input.knc.vertical]")?;
-        let simulation = function_input(test, "simulation", "[input.knc.vertical]")?;
-        let static_simulation = function_input(test, "static_simulation", "[input.knc.vertical]")?;
+        let measurement = function_input(test, "measurement", &scope)?;
+        let simulation = function_input(test, "simulation", &scope)?;
+        let static_simulation = function_input(test, "static_simulation", &scope)?;
         let (source, source_kind) = match (simulation, measurement) {
             (Some(_), Some(_)) => {
-                return Err(ConfigError(
-                    "[input.knc.vertical] must define exactly one of simulation or measurement"
-                        .into(),
-                )
+                return Err(ConfigError(format!(
+                    "{scope} must define exactly one of simulation or measurement"
+                ))
                 .into());
             }
             (Some(path), None) => (path, SourceKind::Simulation),
             (None, Some(path)) => {
                 if static_simulation.is_some() {
-                    return Err(ConfigError(
-                        "[input.knc.vertical.static_simulation] requires simulation input".into(),
-                    )
+                    return Err(ConfigError(format!(
+                        "[input.knc.{name}.static_simulation] requires simulation input"
+                    ))
                     .into());
                 }
                 (path, SourceKind::Measurement)
             }
             (None, None) => {
-                return Err(ConfigError(
-                    "[input.knc.vertical] must define simulation or measurement".into(),
-                )
-                .into());
+                return Err(
+                    ConfigError(format!("{scope} must define simulation or measurement")).into(),
+                );
             }
         };
-        validate_vertical_hdf5_source(&source, source_kind, "vertical input", Some("vertical"))?;
+        validate_vertical_hdf5_source(&source, source_kind, &format!("{name} input"), Some(name))?;
         if static_simulation.is_some() && static_baseline.is_some() {
-            return Err(ConfigError(
-                "[input.knc.vertical.static_simulation] cannot be combined with [input.knc.static]"
-                    .into(),
-            )
+            return Err(ConfigError(format!(
+                "[input.knc.{name}.static_simulation] cannot be combined with [input.knc.static]"
+            ))
             .into());
         }
         (source_kind, source, static_baseline.or(static_simulation))
     };
     if has_static_baseline && source_kind != SourceKind::Simulation {
-        return Err(ConfigError(
-            "[input.knc.static] requires simulation [input.knc.vertical]".into(),
-        )
-        .into());
+        return Err(ConfigError(format!("[input.knc.static] requires simulation {scope}")).into());
     }
     if let Some(static_simulation) = &static_simulation {
         validate_vertical_hdf5_source(
             static_simulation,
             SourceKind::Simulation,
-            "vertical static_simulation input",
+            &format!("{name} static_simulation input"),
             Some("static"),
         )?;
     }
-    let mappings = merged_mapping(root, "simulation", "knc", Some("vertical"), path)?;
-    let measurement_mappings = merged_mapping(root, "measurement", "knc", Some("vertical"), path)?;
+    let mappings = merged_mapping(root, "simulation", "knc", Some(name), path)?;
+    let measurement_mappings = merged_mapping(root, "measurement", "knc", Some(name), path)?;
     let setup_root = table(
         root.get("setup")
             .ok_or_else(|| ConfigError("missing [setup] table".into()))?,
@@ -950,16 +966,27 @@ fn function_vertical(
     )?;
     let setup = if let Some(knc) = setup_root.get("knc") {
         let mut setup = table(knc, "[setup.knc]")?.clone();
-        if let Some(vertical) = setup.remove("vertical") {
-            merge_map(&mut setup, table(&vertical, "[setup.knc.vertical]")?);
+        let mut overrides = None;
+        for test in KNC_TESTS {
+            if let Some(raw) = setup.remove(test)
+                && test == name
+            {
+                overrides = Some(raw);
+            }
+        }
+        if let Some(overrides) = overrides {
+            merge_map(
+                &mut setup,
+                table(&overrides, &format!("[setup.knc.{name}]"))?,
+            );
         }
         setup
     } else {
         table(
             setup_root
-                .get("vertical")
-                .ok_or_else(|| ConfigError("missing [setup.knc.vertical] table".into()))?,
-            "[setup.knc.vertical]",
+                .get(name)
+                .ok_or_else(|| ConfigError(format!("missing [setup.knc.{name}] table")))?,
+            &format!("[setup.knc.{name}]"),
         )?
         .clone()
     };
@@ -1027,7 +1054,7 @@ fn function_vertical(
     }
     vertical.insert("setup".into(), Value::Table(setup_copy));
     vertical.insert("window".into(), window);
-    if let Some(validation) = knc_validation(root)? {
+    if let Some(validation) = knc_validation(root, name)? {
         vertical.insert("validation".into(), Value::Table(validation));
     }
     Ok(Some(parse_vertical(&Value::Table(vertical), path)?))
@@ -1035,6 +1062,7 @@ fn function_vertical(
 
 fn knc_validation(
     root: &toml::map::Map<String, Value>,
+    name: &str,
 ) -> Result<Option<Map<String, Value>>, Box<dyn std::error::Error>> {
     let Some(knc) = root
         .get("validation")
@@ -1050,16 +1078,16 @@ fn knc_validation(
         .transpose()?
         .cloned()
         .unwrap_or_default();
-    if let Some(vertical) = knc.get("vertical") {
-        let vertical = table(vertical, "[validation.knc.vertical]")?;
-        if let Some(tolerances) = vertical.get("tolerances") {
+    if let Some(test) = knc.get(name) {
+        let test = table(test, &format!("[validation.knc.{name}]"))?;
+        if let Some(tolerances) = test.get("tolerances") {
             let mut override_ = Map::new();
             override_.insert("tolerances".into(), tolerances.clone());
             merge_map(&mut validation, &override_);
-        } else if let Some(override_) = vertical.get("validation") {
+        } else if let Some(override_) = test.get("validation") {
             merge_map(
                 &mut validation,
-                table(override_, "[validation.knc.vertical.validation]")?,
+                table(override_, &format!("[validation.knc.{name}.validation]"))?,
             );
         }
     }
@@ -1424,7 +1452,7 @@ fn merge_mapping_source(
         }
     }
     for (key, value) in source {
-        if key != "file" && !matches!(key.as_str(), "vertical" | "svc" | "knc") {
+        if key != "file" && !matches!(key.as_str(), "vertical" | "roll" | "svc" | "knc") {
             merge_value(target, key, value);
         }
     }
@@ -1587,6 +1615,7 @@ fn parse_legacy(
         signals: signal_map.1,
         validation,
         vertical: None,
+        roll: None,
         svc_signal_map: signal_map.0,
         svc_measurement_signals: BTreeMap::new(),
     })
@@ -1691,6 +1720,7 @@ fn parse_unified(
         signals,
         validation,
         vertical,
+        roll: None,
         svc_signal_map,
         svc_measurement_signals: BTreeMap::new(),
     })
@@ -2814,7 +2844,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            load_config_with_input(&p, d.path().join("input.h5"), true)
+            load_config_with_input(&p, d.path().join("input.h5"), Some("vertical"))
                 .unwrap_err()
                 .to_string()
                 .contains("[compare] cannot be combined with [validation]")
@@ -3145,7 +3175,7 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = load_config_with_input(&config, &input, false).unwrap();
+        let loaded = load_config_with_input(&config, &input, None).unwrap();
 
         assert_eq!(loaded.name, "undefined");
         assert_eq!(loaded.loadcase, "undefined");
@@ -3155,7 +3185,7 @@ mod tests {
             "[meta]\nname='named'\n[physics]\ngravity=9.80665\n[signals.simulation.svc.signals.total]\nentity='vehicle'\ncomponent='mass'\nunit='kg'\n[signals.measurement.svc.signals.total]\nentity='vehicle'\nunit='kg'\n",
         )
         .unwrap();
-        let loaded = load_config_with_input(&config, &input, false).unwrap();
+        let loaded = load_config_with_input(&config, &input, None).unwrap();
         assert_eq!(loaded.name, "named");
         assert_eq!(loaded.loadcase, "undefined");
     }
@@ -3247,7 +3277,7 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = load_config_with_input(&config, &simulation, true).unwrap();
+        let loaded = load_config_with_input(&config, &simulation, Some("vertical")).unwrap();
         assert_eq!(
             loaded
                 .vertical
