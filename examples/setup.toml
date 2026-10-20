@@ -63,5 +63,9 @@ index = 2
 
 # Roll test setup
 # only keys that differ from [knc.*].
-# [knc.roll.metric]
-# gradient_points_deg = 1
+# The example roll measurement ran with brakes applied.
+[knc.roll.meta]
+brakes_applied = true
+
+[knc.roll.metric]
+gradient_points_deg = 1

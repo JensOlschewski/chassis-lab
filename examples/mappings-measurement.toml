@@ -298,3 +298,234 @@ unit = "mm"
 [knc.vertical.rear_right_contact_patch_y]
 entity = "rrcpy"
 unit = "mm"
+
+# KnC roll: same corner channels as vertical plus centre of pressure and
+# axle roll angles and moments. total_roll_angle (body roll) is required.
+
+[knc.roll.front_left_wheel_center_x]
+entity = "lfwcx"
+unit = "mm"
+
+[knc.roll.front_right_wheel_center_x]
+entity = "rfwcx"
+unit = "mm"
+
+[knc.roll.rear_left_wheel_center_x]
+entity = "lrwcx"
+unit = "mm"
+
+[knc.roll.rear_right_wheel_center_x]
+entity = "rrwcx"
+unit = "mm"
+
+[knc.roll.front_left_wheel_center_y]
+entity = "lfwcy"
+unit = "mm"
+
+[knc.roll.front_right_wheel_center_y]
+entity = "rfwcy"
+unit = "mm"
+
+[knc.roll.rear_left_wheel_center_y]
+entity = "lrwcy"
+unit = "mm"
+
+[knc.roll.rear_right_wheel_center_y]
+entity = "rrwcy"
+unit = "mm"
+
+[knc.roll.front_left_wheel_center_z]
+entity = "lfwcz"
+unit = "mm"
+
+[knc.roll.front_right_wheel_center_z]
+entity = "rfwcz"
+unit = "mm"
+
+[knc.roll.rear_left_wheel_center_z]
+entity = "lrwcz"
+unit = "mm"
+
+[knc.roll.rear_right_wheel_center_z]
+entity = "rrwcz"
+unit = "mm"
+
+[knc.roll.front_left_wheel_load]
+entity = "lffz"
+unit = "N"
+
+[knc.roll.front_right_wheel_load]
+entity = "rffz"
+unit = "N"
+
+[knc.roll.rear_left_wheel_load]
+entity = "lrfz"
+unit = "N"
+
+[knc.roll.rear_right_wheel_load]
+entity = "rrfz"
+unit = "N"
+
+[knc.roll.front_left_toe]
+entity = "lfsteer"
+unit = "deg"
+
+[knc.roll.front_right_toe]
+entity = "rfsteer"
+unit = "deg"
+
+[knc.roll.rear_left_toe]
+entity = "lrsteer"
+unit = "deg"
+
+[knc.roll.rear_right_toe]
+entity = "rrsteer"
+unit = "deg"
+
+[knc.roll.front_left_camber]
+entity = "lfcam"
+unit = "deg"
+
+[knc.roll.front_right_camber]
+entity = "rfcam"
+unit = "deg"
+
+[knc.roll.rear_left_camber]
+entity = "lrcam"
+unit = "deg"
+
+[knc.roll.rear_right_camber]
+entity = "rrcam"
+unit = "deg"
+
+[knc.roll.front_left_spin]
+entity = "lfcas"
+unit = "deg"
+
+[knc.roll.front_right_spin]
+entity = "rfcas"
+unit = "deg"
+
+[knc.roll.rear_left_spin]
+entity = "lrcas"
+unit = "deg"
+
+[knc.roll.rear_right_spin]
+entity = "rrcas"
+unit = "deg"
+
+[knc.roll.front_left_wheel_pad_z]
+entity = "lfpz"
+unit = "mm"
+
+[knc.roll.front_right_wheel_pad_z]
+entity = "rfpz"
+unit = "mm"
+
+[knc.roll.rear_left_wheel_pad_z]
+entity = "lrpz"
+unit = "mm"
+
+[knc.roll.rear_right_wheel_pad_z]
+entity = "rrpz"
+unit = "mm"
+
+[knc.roll.front_left_tire_deflection]
+entity = "lftdef"
+unit = "mm"
+
+[knc.roll.front_right_tire_deflection]
+entity = "rftdef"
+unit = "mm"
+
+[knc.roll.rear_left_tire_deflection]
+entity = "lrtdef"
+unit = "mm"
+
+[knc.roll.rear_right_tire_deflection]
+entity = "rrtdef"
+unit = "mm"
+
+[knc.roll.front_left_contact_patch_x]
+entity = "lfcpx"
+unit = "mm"
+
+[knc.roll.front_right_contact_patch_x]
+entity = "rfcpx"
+unit = "mm"
+
+[knc.roll.rear_left_contact_patch_x]
+entity = "lrcpx"
+unit = "mm"
+
+[knc.roll.rear_right_contact_patch_x]
+entity = "rrcpx"
+unit = "mm"
+
+[knc.roll.front_left_contact_patch_y]
+entity = "lfcpy"
+unit = "mm"
+
+[knc.roll.front_right_contact_patch_y]
+entity = "rfcpy"
+unit = "mm"
+
+[knc.roll.rear_left_contact_patch_y]
+entity = "lrcpy"
+unit = "mm"
+
+[knc.roll.rear_right_contact_patch_y]
+entity = "rrcpy"
+unit = "mm"
+
+[knc.roll.front_left_center_of_pressure_y]
+entity = "lfcopy"
+unit = "mm"
+
+[knc.roll.front_right_center_of_pressure_y]
+entity = "rfcopy"
+unit = "mm"
+
+[knc.roll.rear_left_center_of_pressure_y]
+entity = "lrcopy"
+unit = "mm"
+
+[knc.roll.rear_right_center_of_pressure_y]
+entity = "rrcopy"
+unit = "mm"
+
+[knc.roll.total_roll_angle]
+entity = "troll"
+unit = "deg"
+
+[knc.roll.front_suspension_roll_angle]
+entity = "fsuspensionroll"
+unit = "deg"
+
+[knc.roll.rear_suspension_roll_angle]
+entity = "rsuspensionroll"
+unit = "deg"
+
+[knc.roll.front_roll_moment]
+entity = "fmx"
+unit = "Nm"
+
+[knc.roll.rear_roll_moment]
+entity = "rmx"
+unit = "Nm"
+
+[knc.roll.total_roll_moment]
+entity = "tmx"
+unit = "Nm"
+
+[knc.roll.front_suspension_roll_moment]
+entity = "fmxs"
+unit = "Nm"
+
+[knc.roll.rear_suspension_roll_moment]
+entity = "rmxs"
+unit = "Nm"
+
+[knc.roll.total_suspension_roll_moment]
+entity = "tmxs"
+unit = "Nm"

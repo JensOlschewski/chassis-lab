@@ -112,6 +112,14 @@ Analyze one normalized input or run manifest to calculate metrics and curves.
  clab analyze examples/config.toml examples/run-simulation.toml
 ```
 
+KnC roll example (real Ford varb roll measurement, trimmed to mapped channels):
+
+```bash
+clab convert examples/input/example-measurement-knc-roll.acd -d knc -t roll \
+    -o examples/input/generated-measurement-knc-roll.h5
+clab analyze examples/config.toml examples/run-measurement-roll.toml
+```
+
 ### ⚖️ clab compare
 
 Compare compatible SVC or KnC baseline and candidate inputs.
