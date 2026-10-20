@@ -102,8 +102,8 @@ Analyze one normalized input or run manifest to calculate metrics and curves.
 
 - Use `--report PATH` to write a report bundle (SVC: JSON/CSV; KnC vertical:
   JSON/CSV/PDF; KnC roll: JSON/CSV, plots follow).
-- KnC roll runs from a direct HDF5 input or a run manifest with only
-  `[input.knc.roll]` (plus optional `[input.knc.static]`).
+- A run manifest may combine `[input.svc]`, `[input.knc.vertical]` and
+  `[input.knc.roll]`; each KnC test writes its own `knc-<test>.json`.
 - Use `--debug` for measurement branch detection diagnostics (needs `--report`).
 - Use `--verbose` (`-v`) to print default-value warnings.
 - Use `--force` to replace an existing report bundle.
@@ -112,12 +112,13 @@ Analyze one normalized input or run manifest to calculate metrics and curves.
  clab analyze examples/config.toml examples/run-simulation.toml
 ```
 
-KnC roll example (real Ford varb roll measurement, trimmed to mapped channels):
+The measurement example adds KnC roll (real Ford varb roll measurement,
+trimmed to mapped channels):
 
 ```bash
 clab convert examples/input/example-measurement-knc-roll.acd -d knc -t roll \
     -o examples/input/generated-measurement-knc-roll.h5
-clab analyze examples/config.toml examples/run-measurement-roll.toml
+clab analyze examples/config.toml examples/run-measurement.toml
 ```
 
 ### ⚖️ clab compare

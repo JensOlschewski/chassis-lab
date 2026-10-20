@@ -4,6 +4,7 @@
 # Convert committed raw results first:
 # SVC measurement values are provided in the committed JSON reference.
 # clab convert input/example-measurement-knc-vertical.acd -d knc -t vertical -o input/generated-measurement-knc-vertical.h5
+# clab convert input/example-measurement-knc-roll.acd -d knc -t roll -o input/generated-measurement-knc-roll.h5
 
 [meta]
 name = "example_run_measurement"
@@ -14,3 +15,6 @@ file = "input/generated-measurement-svc.json"
 
 [input.knc.vertical]
 file = "input/generated-measurement-knc-vertical.h5"
+
+[input.knc.roll]
+file = "input/generated-measurement-knc-roll.h5"

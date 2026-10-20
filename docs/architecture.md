@@ -185,9 +185,9 @@ and roll normalization. Roll axle signals (`total_roll_angle`,
 `front|rear_suspension_roll_angle`, `front|rear|total_roll_moment`,
 `front|rear|total_suspension_roll_moment`) keep absolute values; only corner
 signals are normalized. Every normalized curve records the subtracted
-`offset`, so absolute positions stay recoverable. Roll does not yet combine
-with SVC or vertical in one run manifest; `compare` accepts roll inputs on
-their own. Nested simulation/measurement role tables remain compatible.
+`offset`, so absolute positions stay recoverable. SVC, vertical and roll
+combine in one run manifest for `analyze` and `compare`; each KnC test is its
+own report domain with its own normalization. Nested simulation/measurement role tables remain compatible.
 External role files can replace inline sections, at any depth — a whole
 `source_kind` under `[mappings]`, one domain under it, or one test under that
 domain, can each point at its own file (`examples/` combines every domain

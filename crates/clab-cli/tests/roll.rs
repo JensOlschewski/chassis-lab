@@ -454,7 +454,7 @@ fn roll_run_subtracts_static_baseline_from_corner_signals_only() {
 }
 
 #[test]
-fn rejects_roll_combined_with_vertical_in_one_run() {
+fn analyzes_and_compares_roll_combined_with_vertical_in_one_run() {
     let directory = tempdir().unwrap();
     let simulation = directory.path().join("roll-simulation.h5");
     closed_fixture(&simulation, |path| roll_simulation(path, "roll"));
@@ -485,13 +485,52 @@ fn rejects_roll_combined_with_vertical_in_one_run() {
         "[input.knc.roll]\nfile=\"roll-simulation.h5\"\n[input.knc.vertical]\nfile=\"vertical-simulation.h5\"\n",
     )
     .unwrap();
-    let result = clab(&[&config_path, &run]);
-    assert_eq!(result.status.code(), Some(2));
+    let output = directory.path().join("report");
+    let result = clab(&[&config_path, &run, Path::new("-r"), &output]);
+    let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(
-        String::from_utf8_lossy(&result.stderr).contains("combines [input.knc.roll]"),
+        result.status.success(),
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+    assert!(stdout.contains("KnC Vertical"), "{stdout}");
+    assert!(stdout.contains("KnC Roll"), "{stdout}");
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    let tests = report["domains"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|domain| (domain["domain"].clone(), domain["test"].clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tests,
+        [
+            (Value::from("knc"), Value::from("vertical")),
+            (Value::from("knc"), Value::from("roll"))
+        ]
+    );
+    assert!(output.join("knc-vertical.json").is_file());
+    assert!(output.join("knc-roll.json").is_file());
+
+    let compared = directory.path().join("compare");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .arg("compare")
+        .args([&config_path, &run, &run])
+        .arg("-r")
+        .arg(&compared)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(stdout.contains("KnC Vertical"), "{stdout}");
+    assert!(stdout.contains("KnC Roll"), "{stdout}");
+    assert!(compared.join("knc-vertical.json").is_file());
+    assert!(compared.join("knc-roll.json").is_file());
 }
 
 #[test]

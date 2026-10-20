@@ -94,6 +94,21 @@ impl ComparedDomain {
     fn title(&self) -> &'static str {
         self.test().map_or("SVC", KncTest::title)
     }
+
+    /// Report domain name: `svc` or `knc`.
+    fn domain(&self) -> &'static str {
+        if self.test().is_some() { "knc" } else { "svc" }
+    }
+}
+
+/// Keys of `Input::domains` in console order; KnC tests compare separately.
+const DOMAIN_KEYS: [&str; 3] = ["svc", "knc-vertical", "knc-roll"];
+
+fn knc_key(test: KncTest) -> &'static str {
+    match test {
+        KncTest::Vertical => "knc-vertical",
+        KncTest::Roll => "knc-roll",
+    }
 }
 
 struct Input {
@@ -104,7 +119,8 @@ struct Input {
 
 struct ComparisonTolerances {
     svc: clab_core::config::ValidationTolerances,
-    knc: clab_core::config::ValidationTolerances,
+    /// Per KnC test, keyed like `Input::domains`.
+    knc: BTreeMap<&'static str, clab_core::config::ValidationTolerances>,
 }
 
 type GroupedMetrics<'a> = Vec<(Option<&'a str>, &'a str, Vec<(usize, &'a Metric)>)>;
@@ -118,9 +134,10 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             .as_ref()
             .map(|v| v.tolerances.clone())
             .unwrap_or_else(empty_tolerances),
-        knc: knc_config(&baseline.config)
-            .map(|(_, knc)| knc.tolerances.clone())
-            .unwrap_or_else(empty_tolerances),
+        knc: knc_configs(&baseline.config)
+            .into_iter()
+            .map(|(test, knc)| (knc_key(test), knc.tolerances.clone()))
+            .collect(),
     });
     let mut failed = false;
     let mut incomplete = false;
@@ -138,7 +155,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             let Some(candidate_domain) = candidate.domains.get(name) else {
                 incomplete = true;
                 unavailable_domains.push((index, *name));
-                domains.push(serde_json::json!({"domain": name, "test": base_domain.test().map(KncTest::name), "status": "not compared"}));
+                domains.push(serde_json::json!({"domain": base_domain.domain(), "test": base_domain.test().map(KncTest::name), "status": "not compared"}));
                 continue;
             };
             match (base_domain, candidate_domain) {
@@ -173,7 +190,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                         *test,
                         base_metrics,
                         candidate_metrics,
-                        tolerances.as_ref().map(|value| &value.knc),
+                        tolerances.as_ref().map(|value| &value.knc[name]),
                     );
                     failed |= compared.iter().any(|metric| metric.status == "failed");
                     incomplete |= compared.iter().any(|metric| metric.status == "missing");
@@ -235,7 +252,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             branch: base_branch,
             corner_mass_kg: base_mass,
             ..
-        }) = baseline.domains.get("knc")
+        }) = baseline.domains.get(knc_key(KncTest::Vertical))
     {
         let footer = baseline
             .config
@@ -296,9 +313,9 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     }
     let report = serde_json::json!({
         "schema_version": 1, "command": "compare",
-        "domain": baseline.domains.keys().next().copied().unwrap_or(""),
-        "domains": baseline.domains.iter().map(|(name, domain)| serde_json::json!({
-            "domain": name,
+        "domain": baseline.domains.values().next().map_or("", ComparedDomain::domain),
+        "domains": baseline.domains.values().map(|domain| serde_json::json!({
+            "domain": domain.domain(),
             "test": domain.test().map(KncTest::name),
         })).collect::<Vec<_>>(),
         "baseline": {"input": provenance(&args.baseline)?, "case": {"name": baseline.config.name, "loadcase": baseline.config.loadcase}},
@@ -306,11 +323,12 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     });
     if let Some(output) = &args.output {
         let csv = metrics_csv(&args.baseline, &rows)?;
-        let knc_detail = baseline
+        let knc_details = baseline
             .domains
-            .get("knc")
-            .and_then(ComparedDomain::test)
-            .map(|test| format!("knc-{}.json", test.name()));
+            .values()
+            .filter_map(ComparedDomain::test)
+            .map(|test| format!("knc-{}.json", test.name()))
+            .collect::<Vec<_>>();
         let detail = serde_json::to_string_pretty(&report)? + "\n";
         let mut files = vec![
             ("report.json", detail.clone().into_bytes()),
@@ -319,7 +337,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         if baseline.domains.contains_key("svc") {
             files.push(("svc.json", detail.into_bytes()));
         }
-        if let Some(knc_detail) = &knc_detail {
+        for knc_detail in &knc_details {
             files.push((
                 knc_detail,
                 (serde_json::to_string_pretty(&report)? + "\n").into_bytes(),
@@ -404,17 +422,15 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
     .map_err(|error| {
         anyhow::anyhow!("failed to load compare input '{}': {error}", path.display())
     })?;
-    if case.roll.is_some() && case.vertical.is_some() {
-        bail!(
-            "compare input '{}' combines [input.knc.roll] with [input.knc.vertical]; compare roll in its own run manifest for now",
-            path.display()
-        );
-    }
-    let knc = knc_config(&case).filter(|_| include_knc);
+    let knc_tests = if include_knc {
+        knc_configs(&case)
+    } else {
+        Vec::new()
+    };
     if include_svc && case.svc_source_kind.is_some() {
         validate_comparison_input(&case.simulation_json)?;
     }
-    if let Some((_, knc)) = knc {
+    for (_, knc) in &knc_tests {
         validate_comparison_input(knc_source(knc))?;
         if knc.source_kind == clab_core::config::SourceKind::Simulation
             && let Some(static_input) = &knc.static_simulation_hdf5
@@ -427,7 +443,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         if include_svc && is_hdf5(&case.simulation_json) {
             paths.push(case.simulation_json.as_path());
         }
-        if let Some((_, knc)) = knc {
+        for (_, knc) in &knc_tests {
             paths.push(knc_source(knc));
             if let Some(static_input) = &knc.static_simulation_hdf5 {
                 paths.push(static_input);
@@ -471,7 +487,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         sources.push(case.simulation_json.clone());
         domains.insert("svc", ComparedDomain::Svc(svc::canonical_metrics(&values)));
     }
-    if let Some((test, knc)) = knc {
+    for (test, knc) in knc_tests {
         let source = knc_source(knc);
         let report = knc::analyze_input(&case, test, source, svc_corner_mass_kg.as_ref(), None)?;
         let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
@@ -480,7 +496,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             sources.push(static_input.clone());
         }
         domains.insert(
-            "knc",
+            knc_key(test),
             ComparedDomain::Knc {
                 test,
                 curves: detail["curves"].clone(),
@@ -497,13 +513,14 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
     })
 }
 
-/// The one KnC test a compare input configures.
-fn knc_config(
+/// KnC tests a compare input configures.
+fn knc_configs(
     case: &clab_core::config::CaseConfig,
-) -> Option<(KncTest, &clab_core::config::VerticalConfig)> {
+) -> Vec<(KncTest, &clab_core::config::VerticalConfig)> {
     [KncTest::Vertical, KncTest::Roll]
         .into_iter()
-        .find_map(|test| test.config(case).map(|knc| (test, knc)))
+        .filter_map(|test| test.config(case).map(|knc| (test, knc)))
+        .collect()
 }
 
 fn knc_source(knc: &clab_core::config::VerticalConfig) -> &Path {
@@ -689,13 +706,16 @@ fn print_metrics(
     unavailable_domains: &[(usize, &'static str)],
     use_tolerances: bool,
 ) {
-    for domain in ["svc", "knc"] {
-        let Some(title) = domains.get(domain).map(ComparedDomain::title) else {
+    for key in DOMAIN_KEYS {
+        let Some(compared) = domains.get(key) else {
             continue;
         };
+        let (title, domain) = (compared.title(), compared.domain());
+        let domain_test = compared.test().map(KncTest::name);
+        let in_domain = |metric: &Metric| metric.domain == domain && metric.test == domain_test;
         println!();
         let mut grouped: GroupedMetrics<'_> = Vec::new();
-        for (candidate, metric) in rows.iter().filter(|(_, metric)| metric.domain == domain) {
+        for (candidate, metric) in rows.iter().filter(|(_, metric)| in_domain(metric)) {
             let index = candidates
                 .iter()
                 .position(|path| path == candidate)
@@ -728,7 +748,7 @@ fn print_metrics(
                 let metric = metric.filter(|_| {
                     !unavailable_domains
                         .iter()
-                        .any(|(unavailable, name)| *unavailable == index && *name == domain)
+                        .any(|(unavailable, name)| *unavailable == index && *name == key)
                 });
                 fields.push(format!(
                     "candidate_{} {}",
@@ -768,13 +788,13 @@ fn print_metrics(
         }
         for _ in unavailable_domains
             .iter()
-            .filter(|(_, unavailable)| *unavailable == domain)
+            .filter(|(_, unavailable)| *unavailable == key)
         {
-            println!("  {domain} ... {}", colored_status("not compared"));
+            println!("  {key} ... {}", colored_status("not compared"));
         }
         let domain_rows: Vec<_> = rows
             .iter()
-            .filter(|(_, metric)| metric.domain == domain)
+            .filter(|(_, metric)| in_domain(metric))
             .collect();
         let (passed, failed, missing, tolerance_missing) = outcome_counts(&domain_rows);
         if use_tolerances {
@@ -785,7 +805,7 @@ fn print_metrics(
                 } else if missing > 0
                     || unavailable_domains
                         .iter()
-                        .any(|(_, unavailable)| *unavailable == domain)
+                        .any(|(_, unavailable)| *unavailable == key)
                 {
                     "incomplete"
                 } else {
