@@ -174,8 +174,8 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     file.delete_attr("test").unwrap();
     file.close().unwrap();
     let result = inspect(&legacy);
-    assert!(result.status.success());
     let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(result.status.success(), "{stderr}");
     assert!(
         stderr.contains("warning:") && stderr.contains("schema version 1"),
         "{stderr}"
