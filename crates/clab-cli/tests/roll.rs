@@ -272,11 +272,9 @@ fn config(path: &Path, roll_angle: bool) {
              [mappings.simulation.knc.roll.signals.total_roll_angle]\nentity=\"body\"\ncomponent=\"roll\"\nunit=\"deg\"\n",
         );
     }
-    for (name, entity, unit) in [("front_suspension_roll_angle", "fsuspensionroll", "deg")] {
-        text.push_str(&format!(
-            "[mappings.measurement.knc.roll.signals.{name}]\nentity=\"{entity}\"\nunit=\"{unit}\"\n"
-        ));
-    }
+    text.push_str(
+        "[mappings.measurement.knc.roll.signals.front_suspension_roll_angle]\nentity=\"fsuspensionroll\"\nunit=\"deg\"\n",
+    );
     fs::write(path, text).unwrap();
 }
 
