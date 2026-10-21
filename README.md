@@ -73,9 +73,9 @@ Convert raw simulation or measurement data to HDF5. Default output is `INPUT.h5`
 - `--test` (`-t`) is required for `knc` > (`vertical`|`roll`|`static`)
 
 ```bash
-clab convert examples/input/example-measurement-knc-vertical.acd \
+clab convert examples/input/raw-measurement/example-measurement-knc-vertical.acd \
     -d knc -t vertical \
-    --output input/converted-measurement-knc-vertical.h5
+    --output examples/input/generated-measurement-knc-vertical.h5
 ```
 
 ### 🔍 clab inspect
@@ -87,7 +87,7 @@ clab convert examples/input/example-measurement-knc-vertical.acd \
 Inspect a measurement HDF5 file:
 
 ```bash
-clab inspect input/converted-measurement-knc-vertical.h5 --list
+clab inspect examples/input/generated-measurement-knc-vertical.h5 --list
 ```
 
 Create a mapping template for KnC vertical analysis:
@@ -109,16 +109,16 @@ Analyze one normalized input or run manifest to calculate metrics and curves.
 - Use `--force` to replace an existing report bundle.
 
 ```bash
- clab analyze examples/config.toml examples/run-simulation.toml
+clab analyze examples/config.toml examples/input/run-simulation.toml
 ```
 
 The measurement example adds KnC roll (real Ford varb roll measurement,
 trimmed to mapped channels):
 
 ```bash
-clab convert examples/input/example-measurement-knc-roll.acd -d knc -t roll \
+clab convert examples/input/raw-measurement/example-measurement-knc-roll.acd -d knc -t roll \
     -o examples/input/generated-measurement-knc-roll.h5
-clab analyze examples/config.toml examples/run-measurement.toml
+clab analyze examples/config.toml examples/input/run-measurement.toml
 ```
 
 ### ⚖️ clab compare

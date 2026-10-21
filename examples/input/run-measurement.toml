@@ -1,0 +1,20 @@
+# Run manifest. Input paths resolve relative to this file.
+
+# Convert raw results first (run from the repository root):
+# SVC measurement values are provided in the committed JSON reference.
+#
+# clab convert examples/input/raw-measurement/example-measurement-knc-vertical.acd -d knc -t vertical -o examples/input/generated-measurement-knc-vertical.h5
+# clab convert examples/input/raw-measurement/example-measurement-knc-roll.acd -d knc -t roll -o examples/input/generated-measurement-knc-roll.h5
+
+[meta]
+name = "example_run_measurement"
+loadcase = "example_loadcase"
+
+[input.svc]
+file = "generated-measurement-svc.json"
+
+[input.knc.vertical]
+file = "generated-measurement-knc-vertical.h5"
+
+[input.knc.roll]
+file = "generated-measurement-knc-roll.h5"

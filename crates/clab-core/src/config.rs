@@ -3306,7 +3306,7 @@ mod tests {
         assert!(
             load_config_and_run(
                 examples.join("config.toml"),
-                examples.join("run-simulation.toml")
+                examples.join("input/run-simulation.toml")
             )
             .is_ok()
         );

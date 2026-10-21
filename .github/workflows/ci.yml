@@ -98,15 +98,16 @@ jobs:
           tar -czf "$smoke_input" \
             dist/clab-runtime-linux-x86_64.tar.gz \
             examples/config.toml \
-            examples/run-simulation.toml \
+            examples/input/run-simulation.toml \
             examples/setup.toml \
             examples/mappings-simulation.toml \
             examples/mappings-measurement.toml \
             examples/tolerances.toml \
-            examples/input/example-simulation-svc.res \
-            examples/input/example-simulation-knc-vertical.res \
-            examples/input/example-simulation-knc-static.res \
-            examples/input/example-measurement-knc-vertical.acd
+            examples/input/raw-simulation/example-simulation-svc.res \
+            examples/input/raw-simulation/example-simulation-knc-vertical.res \
+            examples/input/raw-simulation/example-simulation-knc-static.res \
+            examples/input/raw-simulation/example-simulation-knc-roll.res \
+            examples/input/raw-measurement/example-measurement-knc-vertical.acd
           test -s "$smoke_input"
           docker run --rm --pull=missing -i \
             ubuntu:24.04 \
@@ -115,22 +116,26 @@ jobs:
               tar -xzf - -C /tmp/input
               tar -xzf /tmp/input/dist/clab-runtime-linux-x86_64.tar.gz -C /tmp/clab-runtime
               bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
-              cp /tmp/input/examples/config.toml /tmp/input/examples/run-simulation.toml /tmp/smoke/
+              cp /tmp/input/examples/config.toml /tmp/smoke/
               cp /tmp/input/examples/setup.toml /tmp/input/examples/mappings-simulation.toml /tmp/input/examples/mappings-measurement.toml /tmp/input/examples/tolerances.toml /tmp/smoke/
               mkdir /tmp/smoke/input
-              cp /tmp/input/examples/input/example-simulation-svc.res /tmp/smoke/
-              cp /tmp/input/examples/input/example-simulation-knc-vertical.res /tmp/smoke/
-              cp /tmp/input/examples/input/example-simulation-knc-static.res /tmp/smoke/
-              cp /tmp/input/examples/input/example-measurement-knc-vertical.acd /tmp/smoke/
+              cp /tmp/input/examples/input/run-simulation.toml /tmp/smoke/input/
+              cp /tmp/input/examples/input/raw-simulation/example-simulation-svc.res /tmp/smoke/
+              cp /tmp/input/examples/input/raw-simulation/example-simulation-knc-vertical.res /tmp/smoke/
+              cp /tmp/input/examples/input/raw-simulation/example-simulation-knc-static.res /tmp/smoke/
+              cp /tmp/input/examples/input/raw-simulation/example-simulation-knc-roll.res /tmp/smoke/
+              cp /tmp/input/examples/input/raw-measurement/example-measurement-knc-vertical.acd /tmp/smoke/
               cd /tmp/smoke
               env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
               env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-svc.res -d svc -o input/generated-simulation-svc.h5
               env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-vertical.res -d knc -t vertical -o input/generated-simulation-knc-vertical.h5
               env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-static.res -d knc -t static -o input/generated-simulation-knc-static.h5
-              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-knc-vertical.acd -d knc -t vertical -o input/example-measurement-knc-vertical.h5
-              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze config.toml run-simulation.toml -r reports
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-simulation-knc-roll.res -d knc -t roll -o input/generated-simulation-knc-roll.h5
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert example-measurement-knc-vertical.acd -d knc -t vertical -o input/generated-measurement-knc-vertical.h5
+              env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze config.toml input/run-simulation.toml -r reports
               test -s reports/report.json
               test -s reports/metrics.csv
               test -s reports/svc.json
               test -s reports/knc-vertical.json
+              test -s reports/knc-roll.json
             ' < "$smoke_input"

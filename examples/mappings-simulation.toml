@@ -1,11 +1,8 @@
-# SVC simulation signal mappings.
-#
-# Loaded by [mappings.simulation.svc] in config.toml, so this file is already
-# scoped to "svc, simulation" — canonical names sit at the top level, no
-# domain/source_kind prefix needed.
-#
-# Run `clab inspect --mapping svc` to list every canonical SVC signal.
+# Simulation signal mappings
+# Loaded by [mappings.simulation] in config.toml
 
+# SVC Mappings
+# Run `clab inspect --mapping svc` to list every canonical SVC signal
 [svc.front_left_wheel_load]
 entity = "example.wheel_loads"
 component = "front_left"
@@ -132,8 +129,8 @@ component = "rear_right_camber"
 unit = "deg"
 
 
-## KNC signal mappings.
-
+# KNC Mappings
+# Run `clab inspect --mapping knc` to list every canonical KNC signal
 [knc.front_left_travel]
 entity = "wheel_travel"
 component = "vertical_left_front"
@@ -353,6 +350,31 @@ unit = "mm"
 entity = "tir_wheel_contact_patch"
 component = "y_rear"
 unit = "mm"
+
+[knc.front_left_center_of_pressure_y]
+entity = "til_wheel_contact_patch"
+component = "y_front"
+unit = "mm"
+
+[knc.front_right_center_of_pressure_y]
+entity = "tir_wheel_contact_patch"
+component = "y_front"
+unit = "mm"
+
+[knc.rear_left_center_of_pressure_y]
+entity = "til_wheel_contact_patch"
+component = "y_rear"
+unit = "mm"
+
+[knc.rear_right_center_of_pressure_y]
+entity = "tir_wheel_contact_patch"
+component = "y_rear"
+unit = "mm"
+
+[knc.total_roll_angle]
+entity = "chassis_displacements"
+component = "roll"
+unit = "rad"
 
 # Absolute global wheel-center positions; the Python roll kernel derives
 # suspension roll as body roll minus the front-view axle-line tilt.

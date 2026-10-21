@@ -6,11 +6,11 @@
 gravity = 9.80665 # m/s²
 
 [setup]
-# test definitions and their setup values.
 file = "setup.toml"
 
 [mappings.simulation]
 file = "mappings-simulation.toml"
+
 [mappings.measurement]
 file = "mappings-measurement.toml"
 

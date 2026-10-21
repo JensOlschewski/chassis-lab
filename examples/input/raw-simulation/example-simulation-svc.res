@@ -1,4 +1,4 @@
-<!-- Synthetic example data for configs/example-config.toml. -->
+<!-- Synthetic example data for examples/config.toml. Values follow component IDs. -->
 <Result>
   <Entity type="request" name="wheel_loads" entity="example.wheel_loads">
     <Component name="front_left" unitsValue="newton" id="1" />
@@ -37,10 +37,10 @@
     <Component name="Q" id="26" />
   </Entity>
   <Step type="input">
-    4118.793 4020.7265 3726.527 3824.5935
-    2500.0 1500.0 1480.0 600.0 100000.0 200000.0 250000.0 0.0 0.0
+    4118.793 4020.7264999999998 3726.527 3824.5935
+    2500.0 1500.0 1480.0 600.0 100000.0 200000.0 250000.0 0.0
     350.0 349.0 340.0 339.0
     0.1 -0.1 0.2 -0.2 -1.0 -1.1 -1.2 -1.3
-    1
+    0.0 1
   </Step>
 </Result>

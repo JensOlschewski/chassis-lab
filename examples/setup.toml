@@ -1,7 +1,7 @@
-# This file is the [setup] table of config.toml.
+# This file is the [setup] table of config.toml
 #
-# [knc.*] applies to every KnC test
-# [knc.vertical.*] and [knc.roll.*] apply to that test only and override [knc.*]
+# [domain.*] applies to every domain test
+# [domain.test.*] and apply to that test only and override [domain.*]
 #
 # Optional keys that are left out fall back to their default, and clab warns
 # about each one (details with --verbose).
@@ -14,40 +14,21 @@ front_arb_connected = true
 rear_arb_connected = true
 
 # Plot range defined by wheel-center travel
-# The example data is the complete real KnC bounce-test time history, covering
-# the full ±80-90 mm rig travel.
 [knc.window]
 minimum_mm = -80
 maximum_mm = 80
 step_mm = 5
 plot_branches = "all"     # all | selected (only the sweep used by the metrics)
 
-# Metric computation
-# secants between -gradient_points_mm and +gradient_points_mm
-# gradient_points_mm: default 10 and limited to the travel window.
-# gradient_points_deg: roll-angle secants for KnC roll, default 1.
-#
-# ride_frequency = 1/(2*pi) * sqrt(1000 * suspension_rate / mass_kg).
-# mass_kg comes from this run's own SVC `<corner>_mass_kg` output when SVC
-# and KnC vertical run together (the normal case) -- no config needed. Set
-# sprung_mass_<corner>_kg below only for a KnC-vertical-only run, or to
-# override the SVC value; a configured value always wins.
-# sprung_mass_front_left_kg = 449.0
-# sprung_mass_front_right_kg = 427.0
-# sprung_mass_rear_left_kg = 384.0
-# sprung_mass_rear_right_kg = 383.0
-#
-# brake_support_angle = atan(-d(contact_patch_x)/d(wheel_pad_z)) at the
-# gradient points, same math as wheel_recession_angle but at the contact
-# patch instead of the wheel center (Stuetzwinkel, per Heissing/Matschinsky).
-# Needs front_left_contact_patch_x etc. mapped under [signals]; unavailable
-# otherwise, same as any other metric missing its canonical signal.
+# define where metric is calculated, and which sweep to use for the metric
+# use --debug option for more details
 [knc.metric]
 gradient_points_mm = 10
 direction = "rise"        # rise | fall | any
 index = 1                 # nth sweep of that direction, 1-based
 
-# The real ADAMS history starts with a short settling rise before the full sweep.
+# The ADAMS results starts with a short settling rise before the full sweep
+# Therefore use second index here!
 [knc.metric.simulation]
 index = 2
 
@@ -57,15 +38,14 @@ index = 2
 # minimum_mm = -0.8
 # maximum_mm = 0.8
 # plot_branches = "all"
-#
+
 # [knc.vertical.metric]
 # gradient_points_mm = 0.2
 
 # Roll test setup
 # only keys that differ from [knc.*].
-# The example roll measurement ran with brakes applied.
 [knc.roll.meta]
 brakes_applied = true
 
 [knc.roll.metric]
-gradient_points_deg = 1
+gradient_points_deg = 0.5

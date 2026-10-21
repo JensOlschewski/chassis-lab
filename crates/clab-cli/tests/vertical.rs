@@ -536,16 +536,20 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
         destination
     };
     let measurement = convert(
-        "example-measurement-knc-vertical.acd",
+        "raw-measurement/example-measurement-knc-vertical.acd",
         "measurement.h5",
         "vertical",
     );
     let simulation = convert(
-        "example-simulation-knc-vertical.res",
+        "raw-simulation/example-simulation-knc-vertical.res",
         "simulation.h5",
         "vertical",
     );
-    let static_input = convert("example-simulation-knc-static.res", "static.h5", "static");
+    let static_input = convert(
+        "raw-simulation/example-simulation-knc-static.res",
+        "static.h5",
+        "static",
+    );
     for (path, samples) in [(&simulation, 182), (&static_input, 106)] {
         let file = clab_core::canonical_hdf5::CanonicalFile::open(path).unwrap();
         assert_eq!(file.read_axis().unwrap().len(), samples);
