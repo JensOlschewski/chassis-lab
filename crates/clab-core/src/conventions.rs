@@ -472,17 +472,14 @@ pub const ROLL_AXLES: [&str; 3] = ["front", "rear", "total"];
 
 /// Axle-level roll signals as `(location, signal, unit)`; canonical names are
 /// `<location>_<signal>`. `total_roll_angle` is the body roll angle.
-pub const ROLL_AXLE_SIGNALS: [(&str, &str, Unit); 6] = [
+pub const ROLL_AXLE_SIGNALS: [(&str, &str, Unit); 3] = [
     ("total", "roll_angle", Unit::Degree),
     ("front", "suspension_roll_angle", Unit::Degree),
     ("rear", "suspension_roll_angle", Unit::Degree),
-    ("front", "suspension_roll_moment", Unit::NewtonMetre),
-    ("rear", "suspension_roll_moment", Unit::NewtonMetre),
-    ("total", "suspension_roll_moment", Unit::NewtonMetre),
 ];
 
-/// Vertical corner conventions plus roll-only signals. Axle signals keep their
-/// absolute source values: roll angle and roll moment have no static baseline.
+/// Vertical corner conventions plus roll-only signals. Axle angles keep their
+/// absolute source values; roll moments are derived from corner inputs.
 pub fn roll_conventions() -> BTreeMap<String, SignalConvention> {
     let mut conventions = vertical_conventions();
     for corner in Corner::all() {

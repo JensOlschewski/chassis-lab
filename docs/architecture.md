@@ -181,9 +181,8 @@ file = "measurement-mappings.toml"
 Source kind comes from required input metadata: HDF5 and SVC JSON `source_kind`
 must declare it. SVC and KnC tests must have same source
 kind. `[input.knc.static]` is run-relative simulation HDF5 baseline for vertical
-and roll normalization. Roll axle input signals (`total_roll_angle`,
-`front|rear_suspension_roll_angle`,
-`front|rear|total_suspension_roll_moment`) keep absolute values; only corner
+and roll normalization. Roll axle input signals (`total_roll_angle` and
+`front|rear_suspension_roll_angle`) keep absolute values; only corner
 signals are normalized. Every normalized curve records the subtracted
 `offset`, so absolute positions stay recoverable. SVC, vertical and roll
 combine in one run manifest for `analyze` and `compare`; each KnC test is its
@@ -197,8 +196,8 @@ with forces in N, positions in mm, and moments in Nm; total moment is front plus
 rear. The contact track is instantaneous, not taken from a separate static run.
 Center-of-pressure positions are not substituted for geometric contact positions.
 This defines a differential-load moment about the contact midpoint, not a full
-moment about a migrating roll center. The separately mapped suspension-moment
-channels remain distinct and are not used by these stiffness metrics.
+moment about a migrating roll center. Exported suspension-moment channels are
+not mapped or used by these stiffness metrics.
 
 External role files can replace inline sections, at any depth — a whole
 `source_kind` under `[mappings]`, one domain under it, or one test under that
