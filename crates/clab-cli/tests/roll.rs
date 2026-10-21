@@ -77,7 +77,7 @@ fn roll_measurement(path: &Path, roll: &[f64], front_moment: f64) {
     };
     for (corner, prefix) in CORNERS {
         let side = if corner.ends_with("left") { 1. } else { -1. };
-        let lateral = side * 750.;
+        let lateral = -side * 750.;
         channel(&signals, &format!("{prefix}wcx"), &scaled(0., 0.), "mm", 0.);
         channel(
             &signals,
@@ -102,13 +102,27 @@ fn roll_measurement(path: &Path, roll: &[f64], front_moment: f64) {
             "mm",
             lateral,
         );
+        channel(
+            &signals,
+            &format!("{prefix}cpy"),
+            &scaled(1., lateral),
+            "mm",
+            lateral,
+        );
+        let stiffness = if corner.starts_with("front") {
+            front_moment
+        } else {
+            400.
+        };
+        channel(
+            &signals,
+            &format!("{prefix}fz"),
+            &scaled(side * stiffness / 1.5, 4000.),
+            "N",
+            0.,
+        );
     }
-    for (name, unit, gain) in [
-        ("troll", "deg", 1.),
-        ("fsuspensionroll", "deg", 0.9),
-        ("fmx", "Nm", front_moment),
-        ("tmx", "Nm", 900.),
-    ] {
+    for (name, unit, gain) in [("troll", "deg", 1.), ("fsuspensionroll", "deg", 0.9)] {
         channel(&signals, name, &scaled(gain, 0.), unit, 0.);
     }
     scalar(
@@ -158,9 +172,34 @@ fn roll_simulation(path: &Path, test: &str) {
             "mm",
             [300., 300. + side * 10., 300. + side * 20.],
         );
+        let gain = if corner.starts_with("front") {
+            300.
+        } else {
+            400.
+        };
+        add(
+            corner,
+            "load",
+            "newton",
+            if test == "static" {
+                [6000., 7000., 8000.]
+            } else {
+                [4000., 4000. - side * gain, 4000. + side * gain]
+            },
+        );
+        add(
+            corner,
+            "cp_y",
+            "mm",
+            if test == "static" {
+                [side * 0.01; 3]
+            } else {
+                [-side * 750., -side * 750. + 1., -side * 750. + 2.]
+            },
+        );
     }
     if test == "roll" {
-        add("body", "roll", "deg", [0., 1., 2.]);
+        add("body", "roll", "deg", [0., -1., 1.]);
     }
     scalar(
         &file,
@@ -203,21 +242,29 @@ fn config(path: &Path, roll_angle: bool) {
             ("wheel_center_z", "wcz"),
             ("wheel_pad_z", "pz"),
             ("center_of_pressure_y", "copy"),
+            ("contact_patch_y", "cpy"),
         ] {
             text.push_str(&format!(
                 "[mappings.measurement.knc.roll.signals.{corner}_{name}]\nentity=\"{prefix}{channel}\"\nunit=\"mm\"\n"
             ));
         }
+        text.push_str(&format!(
+            "[mappings.measurement.knc.roll.signals.{corner}_wheel_load]\nentity=\"{prefix}fz\"\nunit=\"N\"\n"
+        ));
         for (name, component) in [
             ("travel", "travel"),
             ("wheel_center_x", "x"),
             ("wheel_center_y", "y"),
             ("wheel_center_z", "z"),
+            ("contact_patch_y", "cp_y"),
         ] {
             text.push_str(&format!(
                 "[mappings.simulation.knc.roll.signals.{corner}_{name}]\nentity=\"{corner}\"\ncomponent=\"{component}\"\nunit=\"mm\"\n"
             ));
         }
+        text.push_str(&format!(
+            "[mappings.simulation.knc.roll.signals.{corner}_wheel_load]\nentity=\"{corner}\"\ncomponent=\"load\"\nunit=\"newton\"\n"
+        ));
     }
     if roll_angle {
         text.push_str(
@@ -225,13 +272,7 @@ fn config(path: &Path, roll_angle: bool) {
              [mappings.simulation.knc.roll.signals.total_roll_angle]\nentity=\"body\"\ncomponent=\"roll\"\nunit=\"deg\"\n",
         );
     }
-    for (name, entity, unit) in [
-        ("front_suspension_roll_angle", "fsuspensionroll", "deg"),
-        ("front_roll_moment", "fmx", "Nm"),
-        ("total_roll_moment", "tmx", "Nm"),
-        // Mapped but absent from the file: skipped like any optional signal.
-        ("rear_roll_moment", "rmx", "Nm"),
-    ] {
+    for (name, entity, unit) in [("front_suspension_roll_angle", "fsuspensionroll", "deg")] {
         text.push_str(&format!(
             "[mappings.measurement.knc.roll.signals.{name}]\nentity=\"{entity}\"\nunit=\"{unit}\"\n"
         ));
@@ -304,23 +345,18 @@ fn analyzes_roll_measurement_as_curve_bundle() {
     // Relative channels keep the subtracted absolute offset.
     let cop = curve(&detail, "front_right", "center_of_pressure_y");
     assert_eq!(values(cop), [0., 1., 2.]);
-    assert_eq!(cop["offset"], -750.);
+    assert_eq!(cop["offset"], 750.);
     // Axle signals stay absolute.
     let roll = curve(&detail, "total", "roll_angle");
     assert_eq!(values(roll), [0., 1., 2.]);
     assert!(roll.get("offset").is_none());
-    assert_eq!(
-        values(curve(&detail, "front", "roll_moment")),
-        [0., 500., 1000.]
-    );
     curve(&detail, "front", "suspension_roll_angle");
-    curve(&detail, "total", "roll_moment");
     assert!(
         !detail["curves"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|curve| curve["corner"] == "rear" && curve["signal"] == "roll_moment")
+            .any(|curve| curve["signal"] == "roll_moment")
     );
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
@@ -381,7 +417,14 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
         "{height}"
     );
     assert_eq!(height["lateral_signal"], "center_of_pressure_y");
-    assert!(metric("roll_wheel_rate_without_arb_front_left_n_per_mm")["value"].is_null());
+    assert!(
+        (metric("roll_wheel_rate_without_arb_front_left_n_per_mm")["value"]
+            .as_f64()
+            .unwrap()
+            - 500. / 15.)
+            .abs()
+            < 1e-6
+    );
     assert!(
         fs::read_to_string(output.join("metrics.csv"))
             .unwrap()
@@ -415,6 +458,12 @@ fn roll_run_subtracts_static_baseline_from_corner_signals_only() {
     closed_fixture(&static_simulation, |path| roll_simulation(path, "static"));
     let config_path = directory.path().join("config.toml");
     config(&config_path, true);
+    let text = fs::read_to_string(&config_path).unwrap();
+    fs::write(
+        &config_path,
+        format!("{text}\n[setup.knc.roll.metric.simulation]\nindex=1\n"),
+    )
+    .unwrap();
     let run = directory.path().join("run.toml");
     fs::write(
         &run,
@@ -446,7 +495,24 @@ fn roll_run_subtracts_static_baseline_from_corner_signals_only() {
     assert_eq!(values(wcz), [-10., 0.]);
     assert_eq!(wcz["offset"], 320.);
     // The static file has no roll angle; roll angle needs no baseline.
-    assert_eq!(values(curve(&detail, "total", "roll_angle")), [1., 2.]);
+    assert_eq!(values(curve(&detail, "total", "roll_angle")), [-1., 1.]);
+    // Moment geometry and forces come from the roll run, not the static file.
+    for (name, expected) in [
+        ("roll_stiffness_front_nm_per_deg", 450.),
+        ("roll_stiffness_rear_nm_per_deg", 600.),
+        ("roll_stiffness_total_nm_per_deg", 1050.),
+    ] {
+        let metric = detail["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|metric| metric["metric"] == name)
+            .unwrap();
+        assert!(
+            (metric["value"].as_f64().unwrap() - expected).abs() < 1e-6,
+            "{metric}"
+        );
+    }
     assert_eq!(
         detail["normalization"]["method"],
         "drop_initial_sample_and_subtract_final_sample"

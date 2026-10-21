@@ -506,18 +506,6 @@ unit = "deg"
 entity = "rsuspensionroll"
 unit = "deg"
 
-[knc.roll.front_roll_moment]
-entity = "fmx"
-unit = "Nm"
-
-[knc.roll.rear_roll_moment]
-entity = "rmx"
-unit = "Nm"
-
-[knc.roll.total_roll_moment]
-entity = "tmx"
-unit = "Nm"
-
 [knc.roll.front_suspension_roll_moment]
 entity = "fmxs"
 unit = "Nm"

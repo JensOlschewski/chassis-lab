@@ -101,6 +101,8 @@ impl KncTest {
                 "contact_patch_x",
                 "contact_patch_y",
                 "center_of_pressure_y",
+                "wheel_center_global_y",
+                "wheel_center_global_z",
             ],
         }
     }

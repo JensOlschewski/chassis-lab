@@ -86,6 +86,8 @@ def metrics(request: dict[str, object]) -> str:
     )
     arb_connected = json.loads(str(request.get("arb_connected") or "{}"))
     warnings: list[str] = []
+    _derive_suspension_roll(curves, warnings)
+    _derive_roll_moments(curves, warnings)
     corner = gradient_metrics(
         curves, CORNER_METRICS, CORNERS, points, ROLL_ANGLE, options
     )
@@ -101,6 +103,118 @@ def metrics(request: dict[str, object]) -> str:
     ]
     results.sort(key=lambda item: str(item["metric"]))
     return json.dumps({"metrics": results, "warnings": warnings})
+
+
+def _derive_roll_moments(curves: CurveIndex, warnings: list[str]) -> None:
+    """Use the same differential-load moment for measurements and simulations.
+
+    Forces are N and absolute contact Y is mm. The instantaneous midpoint
+    lever arm is half the contact track; division by 1000 converts N mm to Nm.
+    Source/rig moment channels are intentionally not used in this calculation.
+    """
+    for location in (*AXLES, "total"):
+        curves.pop((location, "roll_moment"), None)
+    for location in AXLES:
+        key = (location, "roll_moment")
+        try:
+            left, right = f"{location}_left", f"{location}_right"
+            loads = [
+                absolute(curves, side, "wheel_load") for side in (left, right)
+            ]
+            positions = [
+                absolute(curves, side, "contact_patch_y")
+                for side in (left, right)
+            ]
+            lengths = {len(v) for v in (*loads, *positions)} | {
+                len(signal_values(curves, "total", "roll_angle"))
+            }
+            if len(lengths) != 1:
+                raise KncKernelError(
+                    "wheel-load, contact-position and roll-angle lengths differ"
+                )
+            track = positions[1] - positions[0]
+            if not (np.isfinite(track).all() and (track > 0.0).all()):
+                raise KncKernelError(
+                    "instantaneous contact track must be positive and finite"
+                )
+            if not all(np.isfinite(load).all() for load in loads):
+                raise KncKernelError("wheel loads must be finite")
+        except KncKernelError as error:
+            warnings.append(f"{location} roll moment unavailable: {error}")
+            continue
+        curves[key] = {
+            "corner": location,
+            "signal": "roll_moment",
+            "unit": "Nm",
+            "values": (loads[0] - loads[1]) * track / 2000.0,
+        }
+    if all((location, "roll_moment") in curves for location in AXLES):
+        curves[("total", "roll_moment")] = {
+            "corner": "total",
+            "signal": "roll_moment",
+            "unit": "Nm",
+            "values": sum(
+                signal_values(curves, location, "roll_moment")
+                for location in AXLES
+            ),
+        }
+
+
+def _derive_suspension_roll(curves: CurveIndex, warnings: list[str]) -> None:
+    """Fill absent axle angles from absolute global wheel-center geometry.
+
+    In the front-view convention (right Y positive, Z up), axle-line tilt is
+    atan2(z_right - z_left, y_right - y_left). Suspension roll is body roll
+    minus this tilt, in degrees. Common heave/lateral translation cancels.
+    This is a front-view angle, not a full 3-D relative Euler rotation.
+    Explicit mapped suspension-roll signals always take precedence.
+    """
+    for axle in AXLES:
+        key = (axle, "suspension_roll_angle")
+        if key in curves:
+            continue
+        try:
+            body = signal_values(curves, "total", "roll_angle")
+            positions = [
+                absolute(
+                    curves, f"{axle}_{side}", f"wheel_center_global_{axis}"
+                )
+                for side in ("left", "right")
+                for axis in ("y", "z")
+            ]
+        except KncKernelError:
+            continue
+        if len({len(body), *(len(v) for v in positions)}) != 1:
+            warnings.append(
+                f"{axle} suspension roll: wheel-center signal lengths differ"
+            )
+            continue
+        yl, zl, yr, zr = positions
+        track = yr - yl
+        valid = (
+            np.isfinite(body)
+            & np.logical_and.reduce([np.isfinite(v) for v in positions])
+            & (track > 0.0)
+        )
+        angle = np.full_like(body, np.nan)
+        angle[valid] = body[valid] - np.rad2deg(
+            np.arctan2(zr[valid] - zl[valid], track[valid])
+        )
+        if not valid.all():
+            warnings.append(
+                f"{axle} suspension roll: "
+                "invalid wheel-center geometry excluded"
+            )
+        curves[key] = {
+            "corner": axle,
+            "signal": "suspension_roll_angle",
+            "unit": "deg",
+            "values": angle,
+        }
+        warnings.append(
+            f"{axle} suspension roll derived from body roll "
+            "and global wheel-center Y/Z"
+        )
 
 
 def _wheel_rates_without_arb(

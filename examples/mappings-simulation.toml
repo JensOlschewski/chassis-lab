@@ -353,3 +353,46 @@ unit = "mm"
 entity = "tir_wheel_contact_patch"
 component = "y_rear"
 unit = "mm"
+
+# Absolute global wheel-center positions; the Python roll kernel derives
+# suspension roll as body roll minus the front-view axle-line tilt.
+# These part coordinates are distinct from wheel_center_rise_* displacements.
+[knc.front_left_wheel_center_global_y]
+entity = "B479_FDJ3_16z_front_whl.whl_wheel"
+component = "Y"
+unit = "mm"
+
+[knc.front_left_wheel_center_global_z]
+entity = "B479_FDJ3_16z_front_whl.whl_wheel"
+component = "Z"
+unit = "mm"
+
+[knc.front_right_wheel_center_global_y]
+entity = "B479_FDJ3_16z_front_whl.whr_wheel"
+component = "Y"
+unit = "mm"
+
+[knc.front_right_wheel_center_global_z]
+entity = "B479_FDJ3_16z_front_whl.whr_wheel"
+component = "Z"
+unit = "mm"
+
+[knc.rear_left_wheel_center_global_y]
+entity = "B479_FDJ3_16z_rear_whl.whl_wheel"
+component = "Y"
+unit = "mm"
+
+[knc.rear_left_wheel_center_global_z]
+entity = "B479_FDJ3_16z_rear_whl.whl_wheel"
+component = "Z"
+unit = "mm"
+
+[knc.rear_right_wheel_center_global_y]
+entity = "B479_FDJ3_16z_rear_whl.whr_wheel"
+component = "Y"
+unit = "mm"
+
+[knc.rear_right_wheel_center_global_z]
+entity = "B479_FDJ3_16z_rear_whl.whr_wheel"
+component = "Z"
+unit = "mm"
