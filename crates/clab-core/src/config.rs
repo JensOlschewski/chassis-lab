@@ -1369,6 +1369,7 @@ fn merged_mapping(
                 shared_table.get("signals").unwrap_or(shared),
                 path,
                 &format!("[signals.{source_kind}.{domain}.signals]"),
+                domain,
             )?;
         }
         if let Some(test) = test
@@ -1385,6 +1386,7 @@ fn merged_mapping(
                 specific_table.get("signals").unwrap_or(specific),
                 path,
                 &format!("[signals.{source_kind}.{domain}.{test}.signals]"),
+                domain,
             )?;
         }
     }
@@ -1414,7 +1416,12 @@ fn resolve_mapping_file(
         return Ok(t.clone());
     };
     let file = resolve(file, path, &format!("{where_}.file"))?;
-    let text = fs::read_to_string(&file)?;
+    let text = fs::read_to_string(&file).map_err(|error| {
+        ConfigError(format!(
+            "failed to read mapping file '{}': {error}",
+            file.display()
+        ))
+    })?;
     let external: toml::Table = text
         .parse()
         .map_err(|e| ConfigError(format!("invalid mapping TOML in {}: {e}", file.display())))?;
@@ -1433,11 +1440,17 @@ fn merge_mapping_source(
     source: &Value,
     path: &Path,
     where_: &str,
+    domain: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = table(source, where_)?;
     if let Some(file) = source.get("file") {
         let file = resolve(file, path, &format!("{where_}.file"))?;
-        let text = fs::read_to_string(&file)?;
+        let text = fs::read_to_string(&file).map_err(|error| {
+            ConfigError(format!(
+                "failed to read mapping file '{}': {error}",
+                file.display()
+            ))
+        })?;
         let external: toml::Table = text
             .parse()
             .map_err(|e| ConfigError(format!("invalid mapping TOML in {}: {e}", file.display())))?;
@@ -1445,14 +1458,23 @@ fn merge_mapping_source(
             .get("mappings")
             .or_else(|| external.get("signal_mappings"))
             .or_else(|| external.get("signals"));
-        if let Some(values) = values {
-            merge_map(
-                target,
-                table(values, &format!("mapping file {}", file.display()))?,
-            );
-        } else {
-            merge_map(target, &external);
-        }
+        let values = values
+            .map(|value| table(value, &format!("mapping file {}", file.display())))
+            .transpose()?
+            .unwrap_or(&external);
+        // A domain-level file may retain its original [svc.*] or [knc.*]
+        // headers after splitting a source-kind mapping file.
+        let values = values
+            .get(domain)
+            .map(|value| {
+                table(
+                    value,
+                    &format!("mapping file {} [{domain}]", file.display()),
+                )
+            })
+            .transpose()?
+            .unwrap_or(values);
+        merge_map(target, values);
     }
     for (key, value) in source {
         if key != "file" && !matches!(key.as_str(), "vertical" | "roll" | "svc" | "knc") {
@@ -2645,7 +2667,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         fs::write(
             d.path().join("svc-simulation-mappings.toml"),
-            "[front_left_wheel_load]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+            "[svc.front_left_wheel_load]\nentity='e'\ncomponent='c'\nunit='kg'\n",
         )
         .unwrap();
         fs::write(
@@ -2676,7 +2698,7 @@ mod tests {
         // Domain-shared (every knc test, not just vertical).
         fs::write(
             d.path().join("knc-simulation-mappings.toml"),
-            "[front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n",
+            "[knc.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n",
         )
         .unwrap();
         // Vertical-test-specific.
@@ -2718,6 +2740,26 @@ mod tests {
         assert_eq!(
             vertical.measurement_signals["front_left_wheel_center_x"].entity,
             "lfwcx"
+        );
+    }
+
+    #[test]
+    fn missing_domain_mapping_file_names_the_reference() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        fs::write(
+            &p,
+            "[input.svc.simulation]\nfile='simulation.json'\n\
+             [mappings.simulation.svc]\nfile='mappings/missing.toml'\n",
+        )
+        .unwrap();
+        let error = load_config(&p).err().unwrap().to_string();
+        assert!(
+            error.contains(&format!(
+                "failed to read mapping file '{}'",
+                d.path().join("mappings/missing.toml").display()
+            )),
+            "{error}"
         );
     }
 

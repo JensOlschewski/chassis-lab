@@ -79,7 +79,8 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
     let config =
         clab_core::config::load_config_and_run(&args.config, &args.input).map_err(|error| {
             anyhow::anyhow!(
-                "failed to load config/run '{}': {error}",
+                "failed to load config '{}' with run '{}': {error}",
+                args.config.display(),
                 args.input.display()
             )
         })?;
