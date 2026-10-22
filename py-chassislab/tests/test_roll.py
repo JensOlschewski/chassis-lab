@@ -245,6 +245,50 @@ def test_roll_center_falls_back_to_contact_patch_with_warning() -> None:
     ]
 
 
+def test_raw_roll_center_uses_actual_sample_angles_and_span() -> None:
+    values, _ = _metrics(_curves())
+    row = values["roll_center_height_change_front_mm_per_deg"]
+    lower_angle, zero_angle, upper_angle = row["sampled_roll_angle_deg"]
+    assert lower_angle in ROLL
+    assert zero_angle in ROLL
+    assert upper_angle in ROLL
+    assert upper_angle != 1.0
+    assert row["value"] == pytest.approx(
+        (row["upper"] - row["lower"]) / (upper_angle - lower_angle)
+    )
+
+
+def test_raw_roll_center_does_not_average_opposite_sweep() -> None:
+    from chassis_lab.knc_kernel import BranchOptions, metric_sweep
+
+    curves = _curves()
+    original, _ = _metrics(curves)
+    selected = metric_sweep(ROLL, "total_roll_angle", BranchOptions(index=2))
+    for curve in curves:
+        if curve["signal"] == "center_of_pressure_y":
+            samples = np.asarray(curve["values"])
+            # Change every other sweep while keeping the selected one intact.
+            outside = np.ones(len(ROLL), dtype=bool)
+            outside[selected] = False
+            samples[outside] *= 3.0
+            curve["values"] = samples.tolist()
+    changed, _ = _metrics(curves)
+    for name, row in original.items():
+        if name.startswith("roll_center_"):
+            assert changed[name] == row
+
+
+def test_raw_roll_center_rejects_nonfinite_selected_input() -> None:
+    curves = _curves()
+    for curve in curves:
+        if curve["signal"] == "center_of_pressure_y":
+            curve["values"][200] = float("nan")
+    values, _ = _metrics(curves)
+    row = values["roll_center_height_front_mm"]
+    assert row["value"] is None
+    assert "nonfinite input" in row["reason"]
+
+
 def test_roll_metrics_report_unavailable_reasons() -> None:
     curves = [
         item

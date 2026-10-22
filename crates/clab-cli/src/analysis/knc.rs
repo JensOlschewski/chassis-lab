@@ -361,12 +361,17 @@ fn vertical_branch(config: &CaseConfig, measurement: bool) -> &VerticalBranch {
         .for_measurement(measurement)
 }
 
-/// Calculate the test kernel's secant metrics at configured symmetric points.
+/// Rust/Python interface for test-specific scalar metrics.
 ///
 /// Wheel-travel points default to 10 mm, limited to the travel window; roll
 /// angle points default to 1 deg. Wheel-center Z must be relative travel:
 /// measurement offsets or a static simulation baseline. Unavailable metrics
-/// keep `value: null` and add one warning with reason.
+/// keep `value: null` and add one warning with reason. Rust serializes canonical
+/// curves (including offsets), branch options, secant half-widths and optional
+/// test inputs into a PyDict. `with_kernel` loads the shared Python
+/// `knc_kernel.py` and the test module; it calls that module's `metrics(request)`.
+/// Python returns a JSON string of metric rows and warnings. Rust adds domain
+/// and test, tags warnings, and leaves report writing to the caller.
 fn gradient_metrics(
     test: KncTest,
     knc: &VerticalConfig,
