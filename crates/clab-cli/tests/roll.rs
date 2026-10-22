@@ -438,11 +438,28 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
             .join("plots/knc/roll/debug/measurement_knc_roll_suspension_rate.pdf")
             .is_file()
     );
+    for axle in ["front", "rear"] {
+        assert!(
+            output
+                .join(format!(
+                    "plots/knc/roll/debug/measurement_knc_roll_roll_center_{axle}.pdf"
+                ))
+                .is_file()
+        );
+    }
     assert!(
         output
             .join("plots/knc/roll/knc_roll_ride_rate.pdf")
             .is_file()
     );
+    for name in [
+        "knc_roll_roll_moment_vs_roll_angle.pdf",
+        "knc_roll_roll_stiffness_vs_roll_angle.pdf",
+        "knc_roll_roll_center_front.pdf",
+        "knc_roll_roll_center_rear.pdf",
+    ] {
+        assert!(output.join("plots/knc/roll").join(name).is_file(), "{name}");
+    }
 }
 
 #[test]
@@ -690,4 +707,27 @@ fn compares_roll_metrics_between_measurements() {
             .join("plots/knc/roll/comparison/debug/series_1_knc_roll_ride_rate.pdf")
             .is_file()
     );
+    for series in 0..2 {
+        for axle in ["front", "rear"] {
+            assert!(
+                output
+                    .join(format!("plots/knc/roll/comparison/debug/series_{series}_knc_roll_roll_center_{axle}.pdf"))
+                    .is_file()
+            );
+        }
+    }
+    for name in [
+        "knc_roll_roll_moment_vs_roll_angle.pdf",
+        "knc_roll_roll_stiffness_vs_roll_angle.pdf",
+        "knc_roll_roll_center_front.pdf",
+        "knc_roll_roll_center_rear.pdf",
+    ] {
+        assert!(
+            output
+                .join("plots/knc/roll/comparison")
+                .join(name)
+                .is_file(),
+            "{name}"
+        );
+    }
 }

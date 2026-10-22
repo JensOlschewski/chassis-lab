@@ -8,10 +8,14 @@ import pytest
 from pypdf import PdfReader
 
 from chassis_lab.knc_kernel import BranchOptions, index_curves, signal_values
-from chassis_lab.knc_plot_kernel import _curve_xy
+from chassis_lab.knc_plot_kernel import _curve_xy, _new_axle_figure
 from chassis_lab.knc_roll_kernel import (
+    AXLE_PLOT_SPECS,
     PLOT_SPECS,
+    _branch_roll_center,
     _derive_roll_moments,
+    _plot_curves,
+    _roll_center_inputs,
     metrics,
     plot,
     plot_compare,
@@ -142,6 +146,12 @@ def test_roll_corner_plot_catalog_and_secant_axes() -> None:
             "wcz_vs_wcy",
             "wpz_vs_cpx",
             "wpz_vs_cpy",
+            "roll_moment_vs_roll_angle",
+            "roll_moment_vs_suspension_roll_angle",
+            "roll_stiffness_vs_roll_angle",
+            "roll_stiffness_vs_suspension_roll_angle",
+            "roll_center_front",
+            "roll_center_rear",
         )
     }
     assert all(report.startswith(b"%PDF") for report in reports.values())
@@ -167,6 +177,139 @@ def test_roll_corner_plot_catalog_and_secant_axes() -> None:
     assert "Roll ride rate [newton/mm]" in _pdf_text(
         reports["plots/knc/roll/knc_roll_ride_rate.pdf"]
     )
+    moment = _pdf_text(
+        reports[
+            "plots/knc/roll/knc_roll_roll_moment_vs_suspension_roll_angle.pdf"
+        ]
+    )
+    assert "Mean front/rear suspension roll angle [deg]" in moment
+    assert "Roll moment [Nm]" in moment
+    assert moment.count("Roll moment [Nm]") == 3
+    center = _pdf_text(reports["plots/knc/roll/knc_roll_roll_center_front.pdf"])
+    assert "Absolute lateral position [mm]" in center
+    assert "Y relative to vehicle center [mm]" in center
+
+
+def test_axle_plot_curves_use_derived_moments_and_body_roll_gradient() -> None:
+    curves = index_curves(_plot_curves(_curves(), BranchOptions(index=2)))
+    for location, stiffness, quadratic in (
+        ("front", 450.0, 0.6),
+        ("rear", 600.0, 1.6),
+        ("total", 1050.0, 2.2),
+    ):
+        moment = signal_values(curves, location, "roll_moment")
+        assert moment == pytest.approx(stiffness * ROLL - quadratic * ROLL**2)
+        rate = signal_values(curves, location, "roll_stiffness")
+        finite = np.isfinite(rate)
+        assert rate[finite] == pytest.approx(
+            stiffness - 2 * quadratic * ROLL[finite], abs=0.25
+        )
+    mean = signal_values(curves, "total", "mean_suspension_roll_angle")
+    assert mean == pytest.approx(0.85 * ROLL)
+    assert len(AXLE_PLOT_SPECS) == 6
+    height = signal_values(curves, "front", "roll_center_height")
+    at_zero = np.flatnonzero(np.isfinite(height) & (np.abs(ROLL) < 1e-10))
+    assert height[at_zero] == pytest.approx(
+        HALF_TRACK * CONTACT_SLOPE["front"], rel=1e-2
+    )
+    sweep = BranchOptions(index=2).metric_sweep(ROLL)
+    assert sweep is not None
+    z, y, _ = _branch_roll_center(
+        _roll_center_inputs(curves, "front", "center_of_pressure_y"),
+        sweep,
+        BranchOptions(index=2),
+    )
+    finite = np.isfinite(height[sweep])
+    assert height[sweep][finite] == pytest.approx(z[finite])
+    assert signal_values(curves, "front", "roll_center_y")[sweep][
+        finite
+    ] == pytest.approx(y[finite])
+
+
+def test_three_panel_layout_spans_first_row() -> None:
+    from matplotlib import pyplot as plt
+
+    figure, (total, front, rear) = _new_axle_figure("Config: fixture")
+    figure.canvas.draw()
+    assert total.get_position().width > front.get_position().width
+    assert front.get_position().width == pytest.approx(
+        rear.get_position().width
+    )
+    assert total.get_position().y0 > front.get_position().y1
+    plt.close(figure)
+
+
+def test_axle_compare_overlays_and_skips_missing_geometry() -> None:
+    curves = _plot_fixture()
+    candidate = json.loads(json.dumps(curves))
+    for item in candidate:
+        if item["signal"] == "wheel_load":
+            item["values"] = (
+                4000.0 + 1.2 * (np.asarray(item["values"]) - 4000.0)
+            ).tolist()
+    logo = (
+        Path(__file__).resolve().parents[2]
+        / "crates/clab-cli/assets/flb-logo.pdf"
+    ).read_bytes()
+    reports = plot_compare(
+        json.dumps(curves),
+        json.dumps([{"label": "Candidate", "curves": candidate}]),
+        "Baseline",
+        "Config: fixture",
+        logo,
+        branches_json=json.dumps([{"index": 2}, {"index": 2}]),
+    )
+    for spec in AXLE_PLOT_SPECS:
+        text = _pdf_text(reports[f"{spec.name}.pdf"])
+        assert "Baseline" in text and "Candidate" in text
+
+    incomplete = [
+        item
+        for item in candidate
+        if not (
+            item["corner"] == "front_left" and item["signal"] == "wheel_pad_z"
+        )
+    ]
+    with pytest.warns(UserWarning) as caught:
+        reports = plot_compare(
+            json.dumps(curves),
+            json.dumps([{"label": "Candidate", "curves": incomplete}]),
+            "Baseline",
+            "Config: fixture",
+            logo,
+        )
+    assert any(
+        "knc_roll_roll_center_front" in str(item.message) for item in caught
+    )
+    assert "knc_roll_roll_center_front.pdf" not in reports
+    assert "knc_roll_roll_center_rear.pdf" in reports
+    assert "knc_roll_roll_moment_vs_roll_angle.pdf" in reports
+
+
+def test_axle_suspension_axis_requires_both_angles() -> None:
+    curves = [
+        item
+        for item in _plot_fixture()
+        if not (
+            item["corner"] == "rear"
+            and item["signal"] == "suspension_roll_angle"
+        )
+    ]
+    with pytest.warns(UserWarning) as caught:
+        reports = plot(json.dumps(curves))
+    assert any(
+        "knc_roll_roll_moment_vs_suspension_roll_angle" in str(item.message)
+        for item in caught
+    )
+    assert (
+        "plots/knc/roll/knc_roll_roll_moment_vs_suspension_roll_angle.pdf"
+        not in reports
+    )
+    assert (
+        "plots/knc/roll/knc_roll_roll_stiffness_vs_suspension_roll_angle.pdf"
+        not in reports
+    )
+    assert "plots/knc/roll/knc_roll_roll_moment_vs_roll_angle.pdf" in reports
 
 
 def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
@@ -190,6 +333,17 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
         text = _pdf_text(reports[path])
         assert "roll_angle [deg]" in text
         assert "roll.h5" in text
+    for axle in ("front", "rear"):
+        path = (
+            f"plots/knc/roll/debug/measurement_knc_roll_roll_center_{axle}.pdf"
+        )
+        text = _pdf_text(reports[path])
+        assert "branch detection" in text
+        assert "Second derivative" in text
+        assert "Final contact slope (both paths)" in text
+        assert "roll_angle [deg]" in text
+        assert "wheel_pad_z [mm]" in text
+        assert "roll.h5" in text
 
     compared = plot_compare(
         json.dumps(curves),
@@ -207,6 +361,11 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
     )
     for index in (0, 1):
         assert f"debug/series_{index}_knc_roll_ride_rate.pdf" in compared
+        for axle in ("front", "rear"):
+            assert (
+                f"debug/series_{index}_knc_roll_roll_center_{axle}.pdf"
+                in compared
+            )
     assert "knc_roll_ride_rate.pdf" in compared
 
 
@@ -474,6 +633,71 @@ def test_raw_roll_center_rejects_nonfinite_selected_input() -> None:
     row = values["roll_center_height_front_mm"]
     assert row["value"] is None
     assert "nonfinite input" in row["reason"]
+
+
+def test_measured_roll_center_masks_both_contact_path_turnarounds() -> None:
+    curves = _curves()
+    options = BranchOptions(
+        measurement=True,
+        index=1,
+        plot_branches="selected",
+        edge_width=8,
+        edge_percentile=0.9,
+    )
+    sweep = options.metric_sweep(ROLL)
+    assert sweep is not None
+    for curve in curves:
+        if (
+            curve["corner"] == "front_left"
+            and curve["signal"] == "center_of_pressure_y"
+        ):
+            curve["values"][sweep.start + 2] += 50.0
+        if (
+            curve["corner"] == "front_right"
+            and curve["signal"] == "center_of_pressure_y"
+        ):
+            curve["values"][sweep.stop - 3] -= 50.0
+
+    samples = _roll_center_inputs(
+        index_curves(curves), "front", "center_of_pressure_y"
+    )
+    height, position, roll = _branch_roll_center(samples, sweep, options)
+    assert np.isnan(height[:5]).all() and np.isnan(position[-5:]).all()
+    assert np.isfinite(height[8:-8]).all()
+    simulated, _, _ = _branch_roll_center(samples, sweep, BranchOptions())
+    assert np.isfinite(simulated[[0, 2, -3, -1]]).all()
+
+    plotted = index_curves(_plot_curves(curves, options))
+    plot_height = signal_values(plotted, "front", "roll_center_height")
+    assert np.isnan(plot_height[sweep][:5]).all()
+    assert np.isnan(plot_height[sweep][-5:]).all()
+    assert plot_height[sweep][8:-8] == pytest.approx(height[8:-8])
+
+    values, _ = _metrics(curves, branch=vars(options), gradient_deg=2.8)
+    row = values["roll_center_height_front_mm"]
+    assert row["value"] is not None
+    sampled = row["sampled_roll_angle_deg"]
+    retained = np.flatnonzero(np.isfinite(height) & np.isfinite(position))
+    assert sampled == pytest.approx(
+        [
+            roll[retained[np.argmin(np.abs(roll[retained] - target))]]
+            for target in (-2.8, 0.0, 2.8)
+        ]
+    )
+    assert row["lower"] == pytest.approx(
+        height[retained[np.argmin(np.abs(roll[retained] + 2.8))]]
+    )
+
+    values, _ = _metrics(curves, branch=vars(options), gradient_deg=2.99)
+    row = values["roll_center_height_front_mm"]
+    assert row["value"] is None
+    assert "does not cover roll_angle" in row["reason"]
+    simulated_values, _ = _metrics(
+        curves,
+        branch={**vars(options), "measurement": False, "direction": "fall"},
+        gradient_deg=2.99,
+    )
+    assert simulated_values["roll_center_height_front_mm"]["value"] is not None
 
 
 def test_roll_metrics_report_unavailable_reasons() -> None:
