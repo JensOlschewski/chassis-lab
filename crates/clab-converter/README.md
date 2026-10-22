@@ -56,7 +56,7 @@ Non-finite sample values are preserved.
 Only synthetic examples belong in Git. Put private or large `.res`, `.acd`,
 `.h5`, and `.hdf5` files under repository-root `local-test-data/`; it is
 ignored. Tests generate their small RES fixture in temporary directories.
-`examples/input/example-measurement-knc-vertical.acd` demonstrates the measurement
+`examples/input/raw-measurement/example-measurement-knc-vertical.acd` demonstrates the measurement
 schema without vehicle data; convert it to generate HDF5 output.
 
 ## Build on Ubuntu or WSL

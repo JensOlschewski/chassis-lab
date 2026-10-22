@@ -1,12 +1,8 @@
-# Measurement signal mappings for every domain. Loaded by [mappings.measurement]
-# in config.toml, so top-level keys here are domain names (svc, knc) — no
-# "measurement" prefix needed, the pointer already scoped that. Measurement
-# sources are flat names (DAQ channel, JSON key), so entries carry only
-# `entity` + `unit`, no `component`. SVC entries map a canonical metric name
-# to its reviewed-reference JSON key (identity here; rename `entity` to match
-# a file using different key names). KnC `*_wheel_center_x/y/z` are required;
-# every other KnC entry is optional — missing it just skips that curve.
+# Measurement signal mappings
+# Loaded by [mappings.measurement] in config.toml
 
+# SVC Mappings
+# Run `clab inspect --mapping svc` to list every canonical SVC signal
 [svc.front_left_mass_kg]
 entity = "front_left_mass_kg"
 unit = "kg"
@@ -123,178 +119,208 @@ unit = "kg*mm^2"
 entity = "inertia_zz_kg_mm2"
 unit = "kg*mm^2"
 
-[knc.vertical.front_left_wheel_center_x]
+# KNC Mappings
+# Run `clab inspect --mapping knc` to list every canonical KNC signal
+[knc.front_left_wheel_center_x]
 entity = "lfwcx"
 unit = "mm"
 
-[knc.vertical.front_left_wheel_center_y]
+[knc.front_left_wheel_center_y]
 entity = "lfwcy"
 unit = "mm"
 
-[knc.vertical.front_left_wheel_center_z]
+[knc.front_left_wheel_center_z]
 entity = "lfwcz"
 unit = "mm"
 
-[knc.vertical.front_right_wheel_center_x]
+[knc.front_right_wheel_center_x]
 entity = "rfwcx"
 unit = "mm"
 
-[knc.vertical.front_right_wheel_center_y]
+[knc.front_right_wheel_center_y]
 entity = "rfwcy"
 unit = "mm"
 
-[knc.vertical.front_right_wheel_center_z]
+[knc.front_right_wheel_center_z]
 entity = "rfwcz"
 unit = "mm"
 
-[knc.vertical.rear_left_wheel_center_x]
+[knc.rear_left_wheel_center_x]
 entity = "lrwcx"
 unit = "mm"
 
-[knc.vertical.rear_left_wheel_center_y]
+[knc.rear_left_wheel_center_y]
 entity = "lrwcy"
 unit = "mm"
 
-[knc.vertical.rear_left_wheel_center_z]
+[knc.rear_left_wheel_center_z]
 entity = "lrwcz"
 unit = "mm"
 
-[knc.vertical.rear_right_wheel_center_x]
+[knc.rear_right_wheel_center_x]
 entity = "rrwcx"
 unit = "mm"
 
-[knc.vertical.rear_right_wheel_center_y]
+[knc.rear_right_wheel_center_y]
 entity = "rrwcy"
 unit = "mm"
 
-[knc.vertical.rear_right_wheel_center_z]
+[knc.rear_right_wheel_center_z]
 entity = "rrwcz"
 unit = "mm"
 
-[knc.vertical.front_left_wheel_load]
+[knc.front_left_wheel_load]
 entity = "lffz"
 unit = "N"
 
-[knc.vertical.front_right_wheel_load]
+[knc.front_right_wheel_load]
 entity = "rffz"
 unit = "N"
 
-[knc.vertical.rear_left_wheel_load]
+[knc.rear_left_wheel_load]
 entity = "lrfz"
 unit = "N"
 
-[knc.vertical.rear_right_wheel_load]
+[knc.rear_right_wheel_load]
 entity = "rrfz"
 unit = "N"
 
-[knc.vertical.front_left_toe]
+[knc.front_left_toe]
 entity = "lfsteer"
 unit = "deg"
 
-[knc.vertical.front_right_toe]
+[knc.front_right_toe]
 entity = "rfsteer"
 unit = "deg"
 
-[knc.vertical.rear_left_toe]
+[knc.rear_left_toe]
 entity = "lrsteer"
 unit = "deg"
 
-[knc.vertical.rear_right_toe]
+[knc.rear_right_toe]
 entity = "rrsteer"
 unit = "deg"
 
-[knc.vertical.front_left_camber]
+[knc.front_left_camber]
 entity = "lfcam"
 unit = "deg"
 
-[knc.vertical.front_right_camber]
+[knc.front_right_camber]
 entity = "rfcam"
 unit = "deg"
 
-[knc.vertical.rear_left_camber]
+[knc.rear_left_camber]
 entity = "lrcam"
 unit = "deg"
 
-[knc.vertical.rear_right_camber]
+[knc.rear_right_camber]
 entity = "rrcam"
 unit = "deg"
 
-[knc.vertical.front_left_spin]
+[knc.front_left_spin]
 entity = "lfcas"
 unit = "deg"
 
-[knc.vertical.front_right_spin]
+[knc.front_right_spin]
 entity = "rfcas"
 unit = "deg"
 
-[knc.vertical.rear_left_spin]
+[knc.rear_left_spin]
 entity = "lrcas"
 unit = "deg"
 
-[knc.vertical.rear_right_spin]
+[knc.rear_right_spin]
 entity = "rrcas"
 unit = "deg"
 
-[knc.vertical.front_left_wheel_pad_z]
+[knc.front_left_wheel_pad_z]
 entity = "lfpz"
 unit = "mm"
 
-[knc.vertical.front_right_wheel_pad_z]
+[knc.front_right_wheel_pad_z]
 entity = "rfpz"
 unit = "mm"
 
-[knc.vertical.rear_left_wheel_pad_z]
+[knc.rear_left_wheel_pad_z]
 entity = "lrpz"
 unit = "mm"
 
-[knc.vertical.rear_right_wheel_pad_z]
+[knc.rear_right_wheel_pad_z]
 entity = "rrpz"
 unit = "mm"
 
-[knc.vertical.front_left_tire_deflection]
+[knc.front_left_tire_deflection]
 entity = "lftdef"
 unit = "mm"
 
-[knc.vertical.front_right_tire_deflection]
+[knc.front_right_tire_deflection]
 entity = "rftdef"
 unit = "mm"
 
-[knc.vertical.rear_left_tire_deflection]
+[knc.rear_left_tire_deflection]
 entity = "lrtdef"
 unit = "mm"
 
-[knc.vertical.rear_right_tire_deflection]
+[knc.rear_right_tire_deflection]
 entity = "rrtdef"
 unit = "mm"
 
-[knc.vertical.front_left_contact_patch_x]
+[knc.front_left_contact_patch_x]
 entity = "lfcpx"
 unit = "mm"
 
-[knc.vertical.front_right_contact_patch_x]
+[knc.front_right_contact_patch_x]
 entity = "rfcpx"
 unit = "mm"
 
-[knc.vertical.rear_left_contact_patch_x]
+[knc.rear_left_contact_patch_x]
 entity = "lrcpx"
 unit = "mm"
 
-[knc.vertical.rear_right_contact_patch_x]
+[knc.rear_right_contact_patch_x]
 entity = "rrcpx"
 unit = "mm"
 
-[knc.vertical.front_left_contact_patch_y]
+[knc.front_left_contact_patch_y]
 entity = "lfcpy"
 unit = "mm"
 
-[knc.vertical.front_right_contact_patch_y]
+[knc.front_right_contact_patch_y]
 entity = "rfcpy"
 unit = "mm"
 
-[knc.vertical.rear_left_contact_patch_y]
+[knc.rear_left_contact_patch_y]
 entity = "lrcpy"
 unit = "mm"
 
-[knc.vertical.rear_right_contact_patch_y]
+[knc.rear_right_contact_patch_y]
 entity = "rrcpy"
 unit = "mm"
+
+[knc.front_left_center_of_pressure_y]
+entity = "lfcopy"
+unit = "mm"
+
+[knc.front_right_center_of_pressure_y]
+entity = "rfcopy"
+unit = "mm"
+
+[knc.rear_left_center_of_pressure_y]
+entity = "lrcopy"
+unit = "mm"
+
+[knc.rear_right_center_of_pressure_y]
+entity = "rrcopy"
+unit = "mm"
+
+[knc.total_roll_angle]
+entity = "troll"
+unit = "deg"
+
+[knc.front_suspension_roll_angle]
+entity = "fsuspensionroll"
+unit = "deg"
+
+[knc.rear_suspension_roll_angle]
+entity = "rsuspensionroll"
+unit = "deg"

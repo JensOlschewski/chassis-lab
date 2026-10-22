@@ -73,9 +73,9 @@ Convert raw simulation or measurement data to HDF5. Default output is `INPUT.h5`
 - `--test` (`-t`) is required for `knc` > (`vertical`|`roll`|`static`)
 
 ```bash
-clab convert examples/input/example-measurement-knc-vertical.acd \
+clab convert examples/input/raw-measurement/example-measurement-knc-vertical.acd \
     -d knc -t vertical \
-    --output input/converted-measurement-knc-vertical.h5
+    --output examples/input/generated-measurement-knc-vertical.h5
 ```
 
 ### 🔍 clab inspect
@@ -87,7 +87,7 @@ clab convert examples/input/example-measurement-knc-vertical.acd \
 Inspect a measurement HDF5 file:
 
 ```bash
-clab inspect input/converted-measurement-knc-vertical.h5 --list
+clab inspect examples/input/generated-measurement-knc-vertical.h5 --list
 ```
 
 Create a mapping template for KnC vertical analysis:
@@ -101,15 +101,24 @@ clab inspect --mapping knc --test vertical --template
 Analyze one normalized input or run manifest to calculate metrics and curves.
 
 - Use `--report PATH` to write a report bundle (SVC: JSON/CSV; KnC vertical:
-  JSON/CSV/PDF; KnC roll: curves JSON only until roll metrics and plots land).
-- KnC roll runs from a direct HDF5 input or a run manifest with only
-  `[input.knc.roll]` (plus optional `[input.knc.static]`).
+  JSON/CSV/PDF; KnC roll: JSON/CSV, plots follow).
+- A run manifest may combine `[input.svc]`, `[input.knc.vertical]` and
+  `[input.knc.roll]`; each KnC test writes its own `knc-<test>.json`.
 - Use `--debug` for measurement branch detection diagnostics (needs `--report`).
 - Use `--verbose` (`-v`) to print default-value warnings.
 - Use `--force` to replace an existing report bundle.
 
 ```bash
- clab analyze examples/config.toml examples/run-simulation.toml
+clab analyze examples/config.toml examples/input/run-simulation.toml
+```
+
+The measurement example adds KnC roll (real Ford varb roll measurement,
+trimmed to mapped channels):
+
+```bash
+clab convert examples/input/raw-measurement/example-measurement-knc-roll.acd -d knc -t roll \
+    -o examples/input/generated-measurement-knc-roll.h5
+clab analyze examples/config.toml examples/input/run-measurement.toml
 ```
 
 ### ⚖️ clab compare

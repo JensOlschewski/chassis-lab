@@ -40,7 +40,7 @@ fn inspects_svc_json_and_filters_signals() {
 #[test]
 fn inspects_measurement_hdf5_and_lists_channels() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/input");
-    let source = examples.join("example-measurement-knc-vertical.acd");
+    let source = examples.join("raw-measurement/example-measurement-knc-vertical.acd");
     assert!(source.is_file(), "missing {}", source.display());
     let directory = tempdir().unwrap();
     let path = directory.path().join("measurement.h5");
@@ -133,7 +133,7 @@ fn rejects_raw_and_unsupported_extensions() {
 #[test]
 fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/input");
-    let source = examples.join("example-measurement-knc-vertical.acd");
+    let source = examples.join("raw-measurement/example-measurement-knc-vertical.acd");
     let directory = tempdir().unwrap();
     let path = directory.path().join("measurement.h5");
     let converted = Command::new(env!("CARGO_BIN_EXE_clab"))
@@ -174,8 +174,8 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     file.delete_attr("test").unwrap();
     file.close().unwrap();
     let result = inspect(&legacy);
-    assert!(result.status.success());
     let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(result.status.success(), "{stderr}");
     assert!(
         stderr.contains("warning:") && stderr.contains("schema version 1"),
         "{stderr}"

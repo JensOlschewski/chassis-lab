@@ -115,8 +115,12 @@ remain compatible until an explicitly versioned contract change.
 - `crates/clab-converter/` provides Rust `.res` and `.acd` parsers and HDF5
   writers for the `clab` frontend.
 - Rust workspace crates own the unified `clab` frontend and application core.
-- `py-chassislab/src/chassis_lab/` currently owns validation; after migration it contains only
-  embedded scientific analysis and plotting modules.
+- `py-chassislab/src/chassis_lab/` contains the embedded KnC kernels:
+  `knc_kernel.py` (branch detection, sweep gradients, interpolation, secant
+  metric catalog evaluation), `knc_plot_kernel.py` (report plotting), and one
+  thin test kernel each, `knc_vertical_kernel.py` and `knc_roll_kernel.py`,
+  holding that test's metric and plot catalog. Rust loads the core, the plot
+  kernel when the test plots, and the test kernel.
 - `examples/` stores synthetic inputs, reference values, configuration, and
   signal-map TOML files; real engineering data stays local.
 - `py-chassislab/tests/` contains Python and cross-language tests; Rust tests
@@ -177,12 +181,24 @@ file = "measurement-mappings.toml"
 Source kind comes from required input metadata: HDF5 and SVC JSON `source_kind`
 must declare it. SVC and KnC tests must have same source
 kind. `[input.knc.static]` is run-relative simulation HDF5 baseline for vertical
-and roll normalization. Roll axle signals (`total_roll_angle`,
-`front|rear_suspension_roll_angle`, `front|rear|total_roll_moment`,
-`front|rear|total_suspension_roll_moment`) keep absolute values; only corner
+and roll normalization. Roll axle input signals (`total_roll_angle` and
+`front|rear_suspension_roll_angle`) keep absolute values; only corner
 signals are normalized. Every normalized curve records the subtracted
-`offset`, so absolute positions stay recoverable. Roll does not yet combine
-with SVC or vertical in one run manifest. Nested simulation/measurement role tables remain compatible.
+`offset`, so absolute positions stay recoverable. SVC, vertical and roll
+combine in one run manifest for `analyze` and `compare`; each KnC test is its
+own report domain with its own normalization. Nested simulation/measurement role tables remain compatible.
+
+Roll moments are calculated by the shared Python kernel for both source kinds,
+not read from mapped axle or rig moment channels. The kernel restores absolute
+wheel loads and geometric contact-patch Y positions using the retained offsets.
+For each sample, `M_axle = (Fz_left - Fz_right) * (y_right - y_left) / 2000`,
+with forces in N, positions in mm, and moments in Nm; total moment is front plus
+rear. The contact track is instantaneous, not taken from a separate static run.
+Center-of-pressure positions are not substituted for geometric contact positions.
+This defines a differential-load moment about the contact midpoint, not a full
+moment about a migrating roll center. Exported suspension-moment channels are
+not mapped or used by these stiffness metrics.
+
 External role files can replace inline sections, at any depth — a whole
 `source_kind` under `[mappings]`, one domain under it, or one test under that
 domain, can each point at its own file (`examples/` combines every domain
@@ -205,7 +221,7 @@ report footer. `[window]` defines the plot range (`minimum_mm`, `maximum_mm`,
 `step_mm`; legacy `travel_minimum_mm` and `travel_maximum_mm` remain accepted) and
 `plot_branches` (`all` or `selected`). `[metric]` defines the metric computation:
 `gradient_points_mm` (default 10, limited to the travel window and required to lie
-inside it when set), `direction` (`rise`, `fall`, `any`) and `index` (default 2).
+inside it when set), `gradient_points_deg` (roll only, default 1), `direction` (`rise`, `fall`, `any`) and `index` (default 2).
 `[metric.measurement]` and `[metric.simulation]` override `direction` and `index`
 per source kind; `[window.measurement]` and `[window.simulation]` do the same for
 `plot_branches`. Setting flags directly under `[setup.knc]`, the `[branch]` table
@@ -260,6 +276,26 @@ simulation files through `CanonicalFile`; it does not initialize Python.
 Vertical evaluation compares
 measurement-offset and static-simulation X/Y/Z trajectories for all four corners
 on the configured travel grid. Incomplete coverage and setup mismatches fail.
+
+KnC metrics are secants between symmetric points on the configured branch
+sweep: vertical selects the sweep on each corner's wheel-center travel, roll on
+`total_roll_angle`. Roll wheel-travel metrics use `gradient_points_mm`,
+roll-angle metrics `gradient_points_deg` (default 1 deg). Roll metrics:
+`roll_steer|roll_camber_<corner>_deg_per_mm` (over wheel-center Z) and
+`_deg_per_deg` (over the axle's `suspension_roll_angle`),
+`roll_wheel_rate_<corner>_n_per_mm`, `roll_wheel_rate_without_arb_<corner>_n_per_mm`
+(only for an axle whose `<axle>_arb_connected` is false),
+`roll_stiffness_<axle>_nm_per_deg` (front, rear, total; roll moment over
+`total_roll_angle`), `roll_stiffness_distribution_front_pct` (total falls back
+to front + rear), and per axle `roll_center_height_<axle>_mm`,
+`roll_center_height_change_<axle>_mm_per_deg` and
+`roll_center_lateral_migration_<axle>_mm_per_deg`. The roll center follows the
+legacy dissertation method: contact-path angles from d(lateral contact
+position)/d(wheel pad Z) per side, corrected by roll angle, close a triangle
+over the absolute contact points (law of sines). The lateral position is
+`center_of_pressure_y`, else `contact_patch_y` with a warning. The configured
+sweep and its adjacent opposite sweep are each smoothed by a cubic
+least-squares fit over roll angle and averaged into the hysteresis mid line.
 
 ## Provenance and outputs
 

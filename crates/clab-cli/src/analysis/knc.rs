@@ -1,31 +1,27 @@
-use std::{
-    collections::BTreeMap,
-    env,
-    ffi::CStr,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::collections::BTreeMap;
+use std::env;
+use std::ffi::CStr;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use clab_core::{
-    canonical_hdf5::{CanonicalFile, SourceKind},
-    config::{CaseConfig, SignalRef, VerticalBranch, VerticalConfig},
-    conventions::{
-        BaselinePolicy, ROLL_AXLE_SIGNALS, SignalConvention, apply_convention, roll_conventions,
-        vertical_conventions,
-    },
-};
-use pyo3::{
-    prelude::*,
-    types::{PyBytes, PyDict, PyModule},
-};
+use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyDict, PyModule};
 use serde::{Deserialize, Serialize};
+
+use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
+use clab_core::config::{CaseConfig, SignalRef, VerticalBranch, VerticalConfig};
+use clab_core::conventions::{
+    BaselinePolicy, ROLL_AXLE_SIGNALS, SignalConvention, apply_convention, roll_conventions,
+    vertical_conventions,
+};
 
 use super::display::{mapping_missing, missing_unit_warning, tag_warnings};
 
 const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
 const AXES: [&str; 3] = ["x", "y", "z"];
 const DEFAULT_GRADIENT_POINTS_MM: f64 = 10.0;
+const DEFAULT_GRADIENT_POINTS_DEG: f64 = 1.0;
 
 /// KnC test analyzed through the shared four-corner pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +73,6 @@ impl KncTest {
         }
     }
 
-    /// Optional per-corner signals beyond wheel-center x/y/z.
     fn corner_signals(self) -> &'static [&'static str] {
         match self {
             Self::Vertical => &[
@@ -100,6 +95,8 @@ impl KncTest {
                 "contact_patch_x",
                 "contact_patch_y",
                 "center_of_pressure_y",
+                "wheel_center_global_y",
+                "wheel_center_global_z",
             ],
         }
     }
@@ -115,12 +112,50 @@ impl KncTest {
         }
     }
 
-    /// Roll metrics and plots arrive with #142-#144; until then roll reports
-    /// curves only.
-    pub(crate) const fn has_metrics(self) -> bool {
-        matches!(self, Self::Vertical)
+    /// Embedded Python modules in load order; the last one is the test kernel.
+    fn kernels(self) -> &'static [Kernel] {
+        match self {
+            Self::Vertical => &[CORE_KERNEL, PLOT_KERNEL, VERTICAL_KERNEL],
+            Self::Roll => &[CORE_KERNEL, ROLL_KERNEL],
+        }
     }
 }
+
+/// Embedded Python module: NUL-terminated source, file name, module name.
+struct Kernel(&'static str, &'static CStr, &'static CStr);
+
+const CORE_KERNEL: Kernel = Kernel(
+    concat!(
+        include_str!("../../../../py-chassislab/src/chassis_lab/knc_kernel.py"),
+        "\0"
+    ),
+    c"knc_kernel.py",
+    c"chassis_lab.knc_kernel",
+);
+const PLOT_KERNEL: Kernel = Kernel(
+    concat!(
+        include_str!("../../../../py-chassislab/src/chassis_lab/knc_plot_kernel.py"),
+        "\0"
+    ),
+    c"knc_plot_kernel.py",
+    c"chassis_lab.knc_plot_kernel",
+);
+const VERTICAL_KERNEL: Kernel = Kernel(
+    concat!(
+        include_str!("../../../../py-chassislab/src/chassis_lab/knc_vertical_kernel.py"),
+        "\0"
+    ),
+    c"knc_vertical_kernel.py",
+    c"chassis_lab.knc_vertical_kernel",
+);
+const ROLL_KERNEL: Kernel = Kernel(
+    concat!(
+        include_str!("../../../../py-chassislab/src/chassis_lab/knc_roll_kernel.py"),
+        "\0"
+    ),
+    c"knc_roll_kernel.py",
+    c"chassis_lab.knc_roll_kernel",
+);
 
 /// One sampled signal. `corner` is a corner (`front_left`, ...) or, for roll
 /// axle signals, an axle location (`front`, `rear`, `total`). `offset` is the
@@ -216,20 +251,19 @@ pub(crate) fn analyze_input(
         .config(config)
         .map(|knc| corner_mass(&knc.window, svc_corner_mass_kg))
         .unwrap_or_default();
-    let metrics = if test.has_metrics() {
-        warnings.extend(default_warnings(config, measurement));
-        gradient_metrics(
-            config,
-            &curves,
-            relative_travel,
-            measurement,
-            &corner_mass_kg,
-            &corner_mass_source,
-            &mut warnings,
-        )?
-    } else {
-        Vec::new()
-    };
+    let knc = test.required_config(config)?;
+    warnings.extend(default_warnings(test, knc, measurement));
+
+    let metrics = gradient_metrics(
+        test,
+        knc,
+        &curves,
+        relative_travel,
+        measurement,
+        (&corner_mass_kg, &corner_mass_source),
+        &mut warnings,
+    )?;
+
     warnings.sort();
     warnings.dedup();
     let warnings = tag_warnings("knc", Some(test.name()), warnings);
@@ -255,11 +289,7 @@ pub(crate) fn analyze_input(
             .filter_map(|v| v.as_str().map(str::to_owned))
             .collect(),
         normalization: detail["normalization"].clone(),
-        branch: test
-            .required_config(config)?
-            .branch
-            .for_measurement(measurement)
-            .clone(),
+        branch: knc.branch.for_measurement(measurement).clone(),
         measurement,
         corner_mass_kg,
     })
@@ -274,20 +304,17 @@ pub(crate) fn source_label(measurement: bool) -> &'static str {
     }
 }
 
-/// Warn about every optional vertical setting the configuration leaves unset.
-fn default_warnings(config: &CaseConfig, measurement: bool) -> Vec<String> {
-    let Some(vertical) = &config.vertical else {
-        return Vec::new();
-    };
-    let branch = vertical.branch.for_measurement(measurement);
+/// Warn about every optional metric setting the configuration leaves unset.
+fn default_warnings(test: KncTest, knc: &VerticalConfig, measurement: bool) -> Vec<String> {
+    let branch = knc.branch.for_measurement(measurement);
     let mut warnings = Vec::new();
     let mut warn = |key: &str, table: &str, default: String| {
         warnings.push(format!(
             "config key '{key}' missing in [{table}]; using default {default}"
         ));
     };
-    if vertical.window.gradient_points_mm.is_none() {
-        let effective = effective_gradient_points(&vertical.window);
+    if knc.window.gradient_points_mm.is_none() {
+        let effective = effective_gradient_points(&knc.window);
         let limited = if effective < DEFAULT_GRADIENT_POINTS_MM {
             format!(" (limited to travel window: {effective} mm)")
         } else {
@@ -297,6 +324,13 @@ fn default_warnings(config: &CaseConfig, measurement: bool) -> Vec<String> {
             "gradient_points_mm",
             "setup.knc.metric",
             format!("{DEFAULT_GRADIENT_POINTS_MM} mm{limited}"),
+        );
+    }
+    if test == KncTest::Roll && knc.window.gradient_points_deg.is_none() {
+        warn(
+            "gradient_points_deg",
+            "setup.knc.metric",
+            format!("{DEFAULT_GRADIENT_POINTS_DEG} deg"),
         );
     }
     for key in &branch.defaulted {
@@ -314,7 +348,7 @@ fn default_warnings(config: &CaseConfig, measurement: bool) -> Vec<String> {
     warnings
 }
 
-fn branch_options(config: &CaseConfig, measurement: bool) -> &VerticalBranch {
+fn vertical_branch(config: &CaseConfig, measurement: bool) -> &VerticalBranch {
     config
         .vertical
         .as_ref()
@@ -323,24 +357,27 @@ fn branch_options(config: &CaseConfig, measurement: bool) -> &VerticalBranch {
         .for_measurement(measurement)
 }
 
-/// Calculate secant metrics at configured symmetric wheel-center travel.
+/// Rust/Python interface for test-specific scalar metrics.
 ///
-/// Gradient points default to 10 mm, limited to the travel window. Wheel-center
-/// Z must be relative travel: measurement offsets or a static simulation
-/// baseline. Unavailable metrics keep `value: null` and add one warning with
-/// reason.
+/// Wheel-travel points default to 10 mm, limited to the travel window; roll
+/// angle points default to 1 deg. Wheel-center Z must be relative travel:
+/// measurement offsets or a static simulation baseline. Unavailable metrics
+/// keep `value: null` and add one warning with reason. Rust serializes canonical
+/// curves (including offsets), branch options, secant half-widths and optional
+/// test inputs into a PyDict. `with_kernel` loads the shared Python
+/// `knc_kernel.py` and the test module; it calls that module's `metrics(request)`.
+/// Python returns a JSON string of metric rows and warnings. Rust adds domain
+/// and test, tags warnings, and leaves report writing to the caller.
 fn gradient_metrics(
-    config: &CaseConfig,
+    test: KncTest,
+    knc: &VerticalConfig,
     curves: &[Curve],
     relative_travel: bool,
     measurement: bool,
-    corner_mass_kg: &BTreeMap<String, f64>,
-    corner_mass_source: &BTreeMap<String, &'static str>,
+    (corner_mass_kg, corner_mass_source): (&BTreeMap<String, f64>, &BTreeMap<String, &'static str>),
     warnings: &mut Vec<String>,
 ) -> Result<Vec<serde_json::Value>> {
-    let Some(window) = config.vertical.as_ref().map(|vertical| &vertical.window) else {
-        return Ok(Vec::new());
-    };
+    let window = &knc.window;
     let gradient = effective_gradient_points(window);
     if gradient <= 0.0 {
         warnings.push(format!(
@@ -353,28 +390,64 @@ fn gradient_metrics(
         warnings.push("metrics require static_simulation normalization; metrics skipped".into());
         return Ok(Vec::new());
     }
-    let corner_mass_kg = serde_json::to_string(corner_mass_kg)?;
-    let corner_mass_source = serde_json::to_string(corner_mass_source)?;
     let curves = serde_json::to_string(curves)?;
-    let branch = serde_json::to_string(branch_options(config, measurement))?;
-    let response: String = with_kernel(|py, module| {
+    let branch = serde_json::to_string(knc.branch.for_measurement(measurement))?;
+    let extras = match test {
+        KncTest::Vertical => [
+            ("corner_mass_kg", serde_json::to_string(corner_mass_kg)?),
+            (
+                "corner_mass_source",
+                serde_json::to_string(corner_mass_source)?,
+            ),
+        ],
+        KncTest::Roll => [
+            (
+                "arb_connected",
+                serde_json::to_string(&serde_json::json!({
+                    "front": knc.setup.front_arb_connected,
+                    "rear": knc.setup.rear_arb_connected,
+                }))?,
+            ),
+            (
+                "gradient_deg",
+                window
+                    .gradient_points_deg
+                    .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG)
+                    .to_string(),
+            ),
+        ],
+    };
+    let response: String = with_kernel(test, |py, module| {
         let request = PyDict::new(py);
         request.set_item("gradient_mm", gradient)?;
         request.set_item("curves", &curves)?;
         request.set_item("branch", &branch)?;
-        request.set_item("corner_mass_kg", &corner_mass_kg)?;
-        request.set_item("corner_mass_source", &corner_mass_source)?;
+        for (key, value) in &extras {
+            request.set_item(key, value)?;
+        }
         module.getattr("metrics")?.call1((request,))?.extract()
     })
-    .context("failed to calculate vertical metrics with embedded Python")?;
+    .with_context(|| {
+        format!(
+            "failed to calculate {} metrics with embedded Python",
+            test.name()
+        )
+    })?;
     let response: serde_json::Value = serde_json::from_str(&response)
-        .context("embedded Python returned invalid vertical metrics")?;
-    let metrics = response["metrics"]
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("embedded Python returned incomplete vertical metrics"))?;
-    const KNOWN_FIELDS: [&str; 7] = [
-        "corner", "metric", "unit", "value", "lower", "upper", "reason",
-    ];
+        .with_context(|| format!("embedded Python returned invalid {} metrics", test.name()))?;
+    let metrics = response["metrics"].as_array().ok_or_else(|| {
+        anyhow::anyhow!(
+            "embedded Python returned incomplete {} metrics",
+            test.name()
+        )
+    })?;
+    warnings.extend(
+        response["warnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|warning| warning.as_str().map(str::to_owned)),
+    );
     Ok(metrics
         .iter()
         .map(|metric| {
@@ -384,24 +457,14 @@ fn gradient_metrics(
                     metric["metric"].as_str().unwrap_or_default()
                 ));
             }
-            let mut row = serde_json::json!({
-                "domain": "knc",
-                "test": "vertical",
-                "metric": metric["metric"],
-                "unit": metric["unit"],
-                "value": metric["value"],
-                "interval_mm": [-gradient, gradient],
-                "lower": metric["lower"],
-                "upper": metric["upper"],
-            });
-            // Forward derived metrics' extra calc-input fields (e.g. ride_frequency's
-            // suspension_rate_n_per_mm/corner_mass_kg/corner_mass_source) generically,
-            // without the base row shape knowing every metric's own provenance fields.
-            if let Some(object) = metric.as_object() {
-                for (key, value) in object {
-                    if !KNOWN_FIELDS.contains(&key.as_str()) {
-                        row[key] = value.clone();
-                    }
+            // Kernel rows carry the metric, its secant window
+            // (`interval_mm`/`interval_deg`), endpoints and any calc-input
+            // fields (e.g. ride_frequency's corner mass); only the location
+            // and reason stay internal.
+            let mut row = serde_json::json!({"domain": "knc", "test": test.name()});
+            for (key, value) in metric.as_object().into_iter().flatten() {
+                if !matches!(key.as_str(), "corner" | "reason") {
+                    row[key] = value.clone();
                 }
             }
             row
@@ -480,7 +543,7 @@ pub(crate) fn compare_plots(
             .chain(candidates.iter().map(|(_, _, _, mass)| mass))
             .collect::<Vec<_>>(),
     )?;
-    let reports: BTreeMap<String, Vec<u8>> = with_kernel(|py, module| {
+    let reports: BTreeMap<String, Vec<u8>> = with_kernel(KncTest::Vertical, |py, module| {
         module
             .getattr("plot_compare")?
             .call1((
@@ -914,9 +977,9 @@ pub(crate) fn curve_plots(
         .vertical
         .as_ref()
         .map(|vertical| effective_gradient_points(&vertical.window));
-    let branch = serde_json::to_string(branch_options(config, measurement))?;
+    let branch = serde_json::to_string(vertical_branch(config, measurement))?;
     let corner_mass_kg = serde_json::to_string(corner_mass_kg)?;
-    with_kernel(|py, module| {
+    with_kernel(KncTest::Vertical, |py, module| {
         module
             .getattr("plot")?
             .call1((
@@ -934,40 +997,23 @@ pub(crate) fn curve_plots(
     .context("failed to generate vertical PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'")
 }
 
-/// Load embedded vertical kernel and run `call` with it.
-fn with_kernel<T>(call: impl FnOnce(Python<'_>, &Bound<'_, PyModule>) -> PyResult<T>) -> Result<T> {
-    let plot_source = CStr::from_bytes_with_nul(
-        concat!(
-            include_str!("../../../../py-chassislab/src/chassis_lab/knc_plot_kernel.py"),
-            "\0"
-        )
-        .as_bytes(),
-    )?;
-    let source = CStr::from_bytes_with_nul(
-        concat!(
-            include_str!("../../../../py-chassislab/src/chassis_lab/knc_vertical_kernel.py"),
-            "\0"
-        )
-        .as_bytes(),
-    )?;
+/// Load the embedded kernels of `test` and run `call` with its test kernel.
+fn with_kernel<T>(
+    test: KncTest,
+    call: impl FnOnce(Python<'_>, &Bound<'_, PyModule>) -> PyResult<T>,
+) -> Result<T> {
     Ok(Python::attach(|py| -> PyResult<T> {
         add_venv_site_packages(py)?;
-        let plot_module = PyModule::from_code(
-            py,
-            plot_source,
-            c"knc_plot_kernel.py",
-            c"chassis_lab.knc_plot_kernel",
-        )?;
-        PyModule::import(py, "sys")?
-            .getattr("modules")?
-            .set_item("chassis_lab.knc_plot_kernel", plot_module)?;
-        let module = PyModule::from_code(
-            py,
-            source,
-            c"knc_vertical_kernel.py",
-            c"chassis_lab.knc_vertical_kernel",
-        )?;
-        call(py, &module)
+        let modules = PyModule::import(py, "sys")?.getattr("modules")?;
+        let mut module = None;
+        for Kernel(source, file, name) in test.kernels() {
+            let source = CStr::from_bytes_with_nul(source.as_bytes())
+                .expect("embedded kernel source is NUL-terminated");
+            let loaded = PyModule::from_code(py, source, file, name)?;
+            modules.set_item(name.to_str().expect("module name is UTF-8"), &loaded)?;
+            module = Some(loaded);
+        }
+        call(py, &module.expect("every test has a kernel"))
     })?)
 }
 

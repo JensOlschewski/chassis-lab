@@ -70,6 +70,9 @@ pub struct VerticalWindow {
     /// Symmetric wheel-center travel offset for secant gradient metrics;
     /// `None` when the configuration does not set it.
     pub gradient_points_mm: Option<f64>,
+    /// Symmetric roll-angle offset for roll-angle secant metrics (roll only);
+    /// `None` when the configuration does not set it.
+    pub gradient_points_deg: Option<f64>,
     /// Per-corner fallback mass for `ride_frequency`, keyed by corner name
     /// (`"front_left"` etc.). Only used when SVC's `<corner>_mass_kg` is not
     /// available in the same run; a configured value always overrides it.
@@ -1794,6 +1797,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
         &metric,
         &[
             "gradient_points_mm",
+            "gradient_points_deg",
             "direction",
             "index",
             "measurement",
@@ -1885,6 +1889,10 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
         ))
         .into());
     }
+    let gradient_deg = metric
+        .get("gradient_points_deg")
+        .map(|value| positive(value, "gradient_points_deg"))
+        .transpose()?;
     let mut window_branch = window_table;
     for (key, value) in window_extra {
         window_branch.entry(key).or_insert(value);
@@ -1938,6 +1946,7 @@ fn parse_vertical(raw: &Value, path: &Path) -> Result<VerticalConfig, Box<dyn st
             maximum_mm: max,
             step_mm: step,
             gradient_points_mm: gradient,
+            gradient_points_deg: gradient_deg,
             sprung_mass_kg,
         },
         branch,
@@ -3297,7 +3306,7 @@ mod tests {
         assert!(
             load_config_and_run(
                 examples.join("config.toml"),
-                examples.join("run-simulation.toml")
+                examples.join("input/run-simulation.toml")
             )
             .is_ok()
         );

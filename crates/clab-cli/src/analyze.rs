@@ -84,8 +84,6 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
             )
         })?;
     let has_svc = !config.simulation_json.as_os_str().is_empty();
-    let vertical_path = knc_input(&config, KncTest::Vertical);
-    let roll_path = knc_input(&config, KncTest::Roll);
     let mut sources = Vec::new();
     if has_svc && is_hdf5(&config.simulation_json) {
         sources.push(config.simulation_json.as_path());
@@ -103,17 +101,14 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
             eprintln!("warning: {warning}");
         }
     }
-    if let Some(roll_path) = roll_path {
-        if has_svc || vertical_path.is_some() {
-            bail!(
-                "run manifest combines [input.knc.roll] with other inputs; analyze roll in its own run manifest for now"
-            );
-        }
-        return write_knc(&config, KncTest::Roll, roll_path, args, Some(&args.input));
-    }
-    match (has_svc, vertical_path) {
-        (true, Some(vertical_path)) => write_combined_run(&config, vertical_path, args),
-        (true, None) if is_hdf5(&config.simulation_json) => {
+    let knc_tests = [KncTest::Vertical, KncTest::Roll]
+        .into_iter()
+        .filter_map(|test| knc_input(&config, test).map(|path| (test, path)))
+        .collect::<Vec<_>>();
+    match (has_svc, knc_tests.as_slice()) {
+        (false, []) => Ok(()),
+        (false, [(test, path)]) => write_knc(&config, *test, path, args, Some(&args.input)),
+        (true, []) if is_hdf5(&config.simulation_json) => {
             if config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement) {
                 bail!(
                     "SVC analysis does not support measurement HDF5 input '{}'; provide an SVC measurement JSON reference or a simulation HDF5 input",
@@ -122,7 +117,7 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
             }
             write_svc_hdf5_run(&config, args, &args.input)
         }
-        (true, None) => match config.svc_source_kind {
+        (true, []) => match config.svc_source_kind {
             Some(clab_core::config::SourceKind::Simulation) => {
                 write_svc(&config, args, Some(&args.input))
             }
@@ -134,14 +129,7 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
             }
             None => unreachable!(),
         },
-        (false, Some(vertical_path)) => write_knc(
-            &config,
-            KncTest::Vertical,
-            vertical_path,
-            args,
-            Some(&args.input),
-        ),
-        (false, None) => Ok(()),
+        _ => write_combined_run(&config, has_svc, &knc_tests, args),
     }
 }
 
@@ -160,149 +148,202 @@ fn validate_input_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Run manifest with more than one domain: optional SVC plus any KnC tests.
 fn write_combined_run(
     config: &clab_core::config::CaseConfig,
-    vertical_path: &Path,
+    has_svc: bool,
+    knc_tests: &[(KncTest, &Path)],
     args: &AnalyzeArgs,
 ) -> Result<()> {
-    let (svc_report, svc_detail, svc_csv, svc_metrics, svc_warnings) = if is_hdf5(
-        &config.simulation_json,
-    ) {
+    let svc_reports = if has_svc {
+        Some(svc_run_reports(config, args)?)
+    } else {
+        None
+    };
+    // SVC masses back the vertical `ride_frequency` metric.
+    let svc_corner_mass_kg = svc_reports
+        .as_ref()
+        .map(|reports| svc_corner_mass_kg(&reports.report));
+    let mut warnings = svc_reports
+        .as_ref()
+        .map(|reports| reports.warnings.clone())
+        .unwrap_or_default();
+    let mut knc_reports = Vec::new();
+    for &(test, path) in knc_tests {
+        let debug = debug_info(args.debug, &args.config, &[path])?;
+        let report = knc::analyze_input(
+            config,
+            test,
+            path,
+            svc_corner_mass_kg.as_ref(),
+            debug.as_deref(),
+        )?;
+        warnings.extend(report.warnings.iter().cloned());
+        knc_reports.push((test, path, report, debug));
+    }
+    warnings.sort();
+    warnings.dedup();
+    if let Some(reports) = &svc_reports {
+        print_header("SVC", reports.metric_count);
+        print_metrics(reports.report["metrics"].as_array().unwrap());
+    }
+    for (test, _, report, _) in &knc_reports {
+        print_header(test.title(), report.metrics.len());
+        print_metrics(&report.metrics);
+    }
+    print_warnings(&warnings, args);
+    let Some(output) = &args.output else {
+        return Ok(());
+    };
+    let mut domains = Vec::new();
+    let mut metrics = Vec::new();
+    let mut csv = "run,domain,test,metric,unit,value\n".to_owned();
+    if let Some(reports) = &svc_reports {
+        domains.push(serde_json::json!({"domain": "svc", "metric_count": reports.metric_count}));
+        metrics.extend(
+            reports.report["metrics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .cloned(),
+        );
+        csv = reports.csv.clone();
+    }
+    for (test, _, report, _) in &knc_reports {
+        domains.push(knc_domain(*test, report));
+        metrics.extend(report.metrics.iter().cloned());
+        csv += &knc_csv_rows(&config.name, *test, &report.metrics)?;
+    }
+    let bundle = serde_json::json!({
+        "schema_version": 1,
+        "command": "analyze",
+        "case": {"name": config.name, "loadcase": config.loadcase},
+        "inputs": {"config": provenance(&args.config)?, "run": provenance(&args.input)?},
+        "domains": domains,
+        "metrics": metrics,
+        "warnings": warnings,
+    });
+    let mut files = vec![
+        (
+            "report.json".to_owned(),
+            (serde_json::to_string_pretty(&bundle)? + "\n").into_bytes(),
+        ),
+        ("metrics.csv".to_owned(), csv.into_bytes()),
+    ];
+    if let Some(reports) = &svc_reports {
+        let mut svc_detail: serde_json::Value = serde_json::from_str(&reports.detail)?;
+        svc_detail["case"] = bundle["case"].clone();
+        svc_detail["inputs"]["run"] = bundle["inputs"]["run"].clone();
+        files.push((
+            "svc.json".to_owned(),
+            (serde_json::to_string_pretty(&svc_detail)? + "\n").into_bytes(),
+        ));
+    }
+    let mut inputs = vec![args.config.as_path(), args.input.as_path()];
+    if has_svc {
+        inputs.push(config.simulation_json.as_path());
+    }
+    for (test, path, report, debug) in &knc_reports {
+        let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
+        let plots = knc_plots(
+            config,
+            *test,
+            &detail,
+            report,
+            &analysis_footer(&args.config, config, *test, path, Some(&args.input))?,
+            debug.as_deref(),
+        )?;
+        detail["case"] = bundle["case"].clone();
+        let mut knc_inputs = bundle["inputs"].clone();
+        knc_inputs["input"] = provenance(path)?;
+        if let Some(static_input) = test
+            .config(config)
+            .and_then(|knc| knc.static_simulation_hdf5.as_ref())
+        {
+            knc_inputs["static_simulation"] = provenance(static_input)?;
+        }
+        detail["inputs"] = knc_inputs;
+        files.push((
+            format!("knc-{}.json", test.name()),
+            (serde_json::to_string_pretty(&detail)? + "\n").into_bytes(),
+        ));
+        files.extend(plots);
+        inputs.push(path);
+        add_knc_inputs(&mut inputs, config, *test);
+    }
+    let files = files
+        .iter()
+        .map(|(name, contents)| (name.as_str(), contents.clone()))
+        .collect::<Vec<_>>();
+    write_bundle(output, &files, args.force, &inputs)?;
+    println!("report: {}", output.display());
+    Ok(())
+}
+
+/// SVC reports of a run manifest from its simulation input or measurement reference.
+fn svc_run_reports(
+    config: &clab_core::config::CaseConfig,
+    args: &AnalyzeArgs,
+) -> Result<svc::Reports> {
+    if is_hdf5(&config.simulation_json) {
         if config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement) {
             bail!(
                 "SVC analysis does not support measurement HDF5 input '{}'; provide an SVC measurement JSON reference or a simulation HDF5 input",
                 config.simulation_json.display()
             );
         }
-        let report = svc::analyze_hdf5(config)?;
-        (
-            report.report,
-            report.detail,
-            report.csv,
-            report.metric_count,
-            report.warnings,
-        )
-    } else {
-        match config.svc_source_kind {
-            Some(clab_core::config::SourceKind::Simulation) => {
-                let report = svc::analyze(config)?;
-                (
-                    report.report,
-                    report.detail,
-                    report.csv,
-                    report.metric_count,
-                    report.warnings,
-                )
-            }
-            Some(clab_core::config::SourceKind::Measurement) => {
-                let reference =
-                    load_svc_reference(&config.simulation_json, &config.svc_measurement_signals)
-                        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                let reports = svc_reference_reports(&reference, &args.config, config)?;
-                let metrics = reports.report["metrics"].as_array().unwrap().len();
-                (
-                    reports.report,
-                    reports.detail,
-                    reports.csv,
-                    metrics,
-                    reports.warnings,
-                )
-            }
-            None => unreachable!(),
-        }
-    };
-    let footer = analysis_footer(&args.config, config, vertical_path, Some(&args.input))?;
-    let debug = debug_info(args.debug, &args.config, &[vertical_path])?;
-    let svc_corner_mass_kg = svc_corner_mass_kg(&svc_report);
-    let vertical_report = knc::analyze_input(
-        config,
-        KncTest::Vertical,
-        vertical_path,
-        Some(&svc_corner_mass_kg),
-        debug.as_deref(),
-    )?;
-    print_header("SVC", svc_metrics);
-    let mut warnings = svc_warnings;
-    warnings.extend(vertical_report.warnings.iter().cloned());
-    warnings.sort();
-    warnings.dedup();
-    print_metrics(svc_report["metrics"].as_array().unwrap());
-    print_header("KnC Vertical", vertical_report.metrics.len());
-    print_metrics(&vertical_report.metrics);
-    print_warnings(&warnings, args);
-    let Some(output) = &args.output else {
-        return Ok(());
-    };
-    let bundle = serde_json::json!({
-        "schema_version": 1,
-        "command": "analyze",
-        "case": {"name": config.name, "loadcase": config.loadcase},
-        "inputs": {"config": provenance(&args.config)?, "run": provenance(&args.input)?},
-        "domains": [
-            {"domain": "svc", "metric_count": svc_metrics},
-            {"domain": "knc", "test": "vertical", "metric_count": vertical_report.metrics.len(), "curve_count": vertical_report.curve_count}
-        ],
-        "metrics": svc_report["metrics"].as_array().unwrap().iter().chain(&vertical_report.metrics).collect::<Vec<_>>(),
-        "warnings": warnings,
-        "normalization": vertical_report.normalization,
-    });
-    let mut svc_detail: serde_json::Value = serde_json::from_str(&svc_detail)?;
-    svc_detail["case"] = bundle["case"].clone();
-    svc_detail["inputs"]["run"] = bundle["inputs"]["run"].clone();
-    let mut vertical_detail: serde_json::Value = serde_json::from_str(&vertical_report.detail)?;
-    let plots = knc::curve_plots(
-        config,
-        &vertical_detail["curves"],
-        &footer,
-        vertical_report.measurement,
-        &vertical_report.corner_mass_kg,
-        debug.as_deref(),
-    )?;
-    vertical_detail["case"] = bundle["case"].clone();
-    let mut vertical_inputs = bundle["inputs"].clone();
-    vertical_inputs["input"] = provenance(vertical_path)?;
-    if let Some(static_input) = config
-        .vertical
-        .as_ref()
-        .and_then(|vertical| vertical.static_simulation_hdf5.as_ref())
-    {
-        vertical_inputs["static_simulation"] = provenance(static_input)?;
+        return svc::analyze_hdf5(config);
     }
-    vertical_detail["inputs"] = vertical_inputs;
-    let mut files = vec![
-        (
-            "report.json",
-            (serde_json::to_string_pretty(&bundle)? + "\n").into_bytes(),
-        ),
-        (
-            "metrics.csv",
-            (svc_csv + &knc_csv_rows(&config.name, KncTest::Vertical, &vertical_report.metrics)?)
-                .into_bytes(),
-        ),
-        (
-            "svc.json",
-            (serde_json::to_string_pretty(&svc_detail)? + "\n").into_bytes(),
-        ),
-        (
-            "knc-vertical.json",
-            (serde_json::to_string_pretty(&vertical_detail)? + "\n").into_bytes(),
-        ),
-    ];
-    files.extend(
-        plots
-            .iter()
-            .map(|(name, contents)| (name.as_str(), contents.clone())),
-    );
-    let mut inputs = vec![
-        args.config.as_path(),
-        args.input.as_path(),
-        config.simulation_json.as_path(),
-        vertical_path,
-    ];
-    add_knc_inputs(&mut inputs, config, KncTest::Vertical);
-    write_bundle(output, &files, args.force, &inputs)?;
-    println!("report: {}", output.display());
-    Ok(())
+    match config.svc_source_kind {
+        Some(clab_core::config::SourceKind::Simulation) => svc::analyze(config),
+        Some(clab_core::config::SourceKind::Measurement) => {
+            let reference =
+                load_svc_reference(&config.simulation_json, &config.svc_measurement_signals)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            let reports = svc_reference_reports(&reference, &args.config, config)?;
+            Ok(svc::Reports {
+                metric_count: reports.report["metrics"].as_array().unwrap().len(),
+                report: reports.report,
+                detail: reports.detail,
+                csv: reports.csv,
+                warnings: reports.warnings,
+            })
+        }
+        None => unreachable!(),
+    }
+}
+
+/// `domains` entry of one KnC test in `report.json`.
+fn knc_domain(test: KncTest, report: &knc::Reports) -> serde_json::Value {
+    serde_json::json!({
+        "domain": "knc",
+        "test": test.name(),
+        "metric_count": report.metrics.len(),
+        "curve_count": report.curve_count,
+        "normalization": report.normalization,
+    })
+}
+
+/// PDF plots of one KnC test; roll plots arrive with #143/#144.
+fn knc_plots(
+    config: &clab_core::config::CaseConfig,
+    test: KncTest,
+    detail: &serde_json::Value,
+    report: &knc::Reports,
+    footer: &str,
+    debug: Option<&str>,
+) -> Result<BTreeMap<String, Vec<u8>>> {
+    if test != KncTest::Vertical {
+        return Ok(BTreeMap::new());
+    }
+    knc::curve_plots(
+        config,
+        &detail["curves"],
+        footer,
+        report.measurement,
+        &report.corner_mass_kg,
+        debug,
+    )
 }
 
 /// SVC's `<corner>_mass_kg` metrics, keyed by corner — the `ride_frequency`
@@ -632,7 +673,7 @@ fn write_knc(
     args: &AnalyzeArgs,
     run: Option<&Path>,
 ) -> Result<()> {
-    let footer = analysis_footer(&args.config, config, input, run)?;
+    let footer = analysis_footer(&args.config, config, test, input, run)?;
     let debug = debug_info(args.debug, &args.config, &[input])?;
     let report = knc::analyze_input(config, test, input, None, debug.as_deref())?;
     print_header(test.title(), report.metrics.len());
@@ -646,28 +687,15 @@ fn write_knc(
         "command": "analyze",
         "case": {"name": config.name, "loadcase": config.loadcase},
         "inputs": {"config": provenance(&args.config)?, "input": provenance(input)?},
-        "domains": [{"domain": "knc", "test": test.name(), "metric_count": report.metrics.len(), "curve_count": report.curve_count}],
+        "domains": [knc_domain(test, &report)],
         "metrics": report.metrics,
         "warnings": report.warnings,
-        "normalization": report.normalization,
     });
     if let Some(run) = run {
         bundle["inputs"]["run"] = provenance(run)?;
     }
     let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
-    // Roll plots arrive with #143/#144.
-    let plots = if test == KncTest::Vertical {
-        knc::curve_plots(
-            config,
-            &detail["curves"],
-            &footer,
-            report.measurement,
-            &report.corner_mass_kg,
-            debug.as_deref(),
-        )?
-    } else {
-        BTreeMap::new()
-    };
+    let plots = knc_plots(config, test, &detail, &report, &footer, debug.as_deref())?;
     detail["case"] = bundle["case"].clone();
     detail["inputs"] = bundle["inputs"].clone();
     let detail = serde_json::to_string_pretty(&detail)? + "\n";
@@ -739,11 +767,12 @@ fn add_knc_inputs<'a>(
 fn analysis_footer(
     config_path: &Path,
     config: &clab_core::config::CaseConfig,
+    test: KncTest,
     input: &Path,
     run: Option<&Path>,
 ) -> Result<String> {
     let mut lines = Vec::new();
-    if let Some(knc) = config.vertical.as_ref().or(config.roll.as_ref()) {
+    if let Some(knc) = test.config(config) {
         lines.push(format!("KnC setup: {}", knc.setup.summary()));
     }
     lines.push(format!("Config: {}", absolute_path(config_path)?.display()));

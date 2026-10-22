@@ -472,23 +472,33 @@ pub const ROLL_AXLES: [&str; 3] = ["front", "rear", "total"];
 
 /// Axle-level roll signals as `(location, signal, unit)`; canonical names are
 /// `<location>_<signal>`. `total_roll_angle` is the body roll angle.
-pub const ROLL_AXLE_SIGNALS: [(&str, &str, Unit); 9] = [
+pub const ROLL_AXLE_SIGNALS: [(&str, &str, Unit); 3] = [
     ("total", "roll_angle", Unit::Degree),
     ("front", "suspension_roll_angle", Unit::Degree),
     ("rear", "suspension_roll_angle", Unit::Degree),
-    ("front", "roll_moment", Unit::NewtonMetre),
-    ("rear", "roll_moment", Unit::NewtonMetre),
-    ("total", "roll_moment", Unit::NewtonMetre),
-    ("front", "suspension_roll_moment", Unit::NewtonMetre),
-    ("rear", "suspension_roll_moment", Unit::NewtonMetre),
-    ("total", "suspension_roll_moment", Unit::NewtonMetre),
 ];
 
-/// Vertical corner conventions plus roll-only signals. Axle signals keep their
-/// absolute source values: roll angle and roll moment have no static baseline.
+/// Vertical corner conventions plus roll-only signals. Axle angles keep their
+/// absolute source values; roll moments are derived from corner inputs.
 pub fn roll_conventions() -> BTreeMap<String, SignalConvention> {
     let mut conventions = vertical_conventions();
     for corner in Corner::all() {
+        // Global wheel-center positions define the axle line used to derive
+        // suspension roll. Keep absolute coordinates, not static-relative travel.
+        for suffix in ["wheel_center_global_y", "wheel_center_global_z"] {
+            conventions.insert(
+                format!("{}_{}", corner.as_str(), suffix),
+                SignalConvention::new(
+                    Unit::Millimetre,
+                    "mm",
+                    1.0,
+                    1,
+                    Some(corner),
+                    BaselinePolicy::Absolute,
+                )
+                .expect("canonical convention is valid"),
+            );
+        }
         conventions.insert(
             format!("{}_center_of_pressure_y", corner.as_str()),
             SignalConvention::new(

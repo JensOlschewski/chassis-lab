@@ -82,7 +82,7 @@ fn rejects_acd_without_exact_time_channel() {
 #[test]
 fn committed_vertical_measurement_example_imports() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/input/example-measurement-knc-vertical.acd");
+        .join("../../examples/input/raw-measurement/example-measurement-knc-vertical.acd");
     assert!(source.is_file(), "missing {}", source.display());
     let directory = tempdir().unwrap();
     let output = directory.path().join("example-vertical.h5");

@@ -46,7 +46,7 @@ fn clear_simulation_units(path: &Path) {
 fn analyzes_svc_with_report_bundle() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let source = examples.join("input/example-simulation-svc.res");
+    let source = examples.join("input/raw-simulation/example-simulation-svc.res");
     assert!(config.is_file(), "missing {}", config.display());
     assert!(source.is_file(), "missing {}", source.display());
     let directory = tempdir().unwrap();
@@ -113,7 +113,7 @@ fn warns_when_run_manifest_uses_schema_version_one() {
         .args([
             "convert",
             examples
-                .join("input/example-simulation-svc.res")
+                .join("input/raw-simulation/example-simulation-svc.res")
                 .to_str()
                 .unwrap(),
             "-d",
@@ -373,7 +373,7 @@ fn rejects_missing_normalized_input_without_hdf5_diagnostics() {
 fn analyzes_knc_measurement_hdf5_when_config_also_defines_svc() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let source = examples.join("input/example-measurement-knc-vertical.acd");
+    let source = examples.join("input/raw-measurement/example-measurement-knc-vertical.acd");
     assert!(config.is_file(), "missing {}", config.display());
     assert!(source.is_file(), "missing {}", source.display());
 
@@ -418,7 +418,7 @@ fn analyzes_knc_measurement_hdf5_when_config_also_defines_svc() {
 fn analyzes_svc_hdf5_with_report_bundle() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let source = examples.join("input/example-simulation-svc.res");
+    let source = examples.join("input/raw-simulation/example-simulation-svc.res");
     if !config.is_file() || !source.is_file() {
         return;
     }
@@ -474,7 +474,7 @@ fn analyzes_svc_hdf5_with_report_bundle() {
 fn analyzes_svc_hdf5_run_with_hdf5_analyzer() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let source = examples.join("input/example-simulation-svc.res");
+    let source = examples.join("input/raw-simulation/example-simulation-svc.res");
     if !config.is_file() || !source.is_file() {
         return;
     }
@@ -520,7 +520,7 @@ fn analyzes_svc_hdf5_run_with_hdf5_analyzer() {
 fn analyzes_svc_hdf5_with_missing_units_and_warns() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let source = examples.join("input/example-simulation-svc.res");
+    let source = examples.join("input/raw-simulation/example-simulation-svc.res");
     if !config.is_file() || !source.is_file() {
         return;
     }
@@ -596,7 +596,7 @@ fn analyzes_svc_hdf5_with_missing_units_and_warns() {
 fn analyze_force_rejects_output_containing_input() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let source = examples.join("input/example-simulation-svc.res");
+    let source = examples.join("input/raw-simulation/example-simulation-svc.res");
     assert!(config.is_file(), "missing {}", config.display());
     assert!(source.is_file(), "missing {}", source.display());
     let directory = tempdir().unwrap();
@@ -637,9 +637,9 @@ fn analyze_force_rejects_output_containing_input() {
 fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let svc = examples.join("input/example-simulation-svc.res");
-    let vertical = examples.join("input/example-simulation-knc-vertical.res");
-    let static_input = examples.join("input/example-simulation-knc-static.res");
+    let svc = examples.join("input/raw-simulation/example-simulation-svc.res");
+    let vertical = examples.join("input/raw-simulation/example-simulation-knc-vertical.res");
+    let static_input = examples.join("input/raw-simulation/example-simulation-knc-static.res");
     if !config.is_file() || !svc.is_file() || !vertical.is_file() || !static_input.is_file() {
         return;
     }
@@ -756,7 +756,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
 fn analyze_routes_hdf5_by_declared_domain() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let source = examples.join("input/example-measurement-knc-vertical.acd");
+    let source = examples.join("input/raw-measurement/example-measurement-knc-vertical.acd");
     let directory = tempdir().unwrap();
     let declared = directory.path().join("declared.h5");
     let converted = clab()
