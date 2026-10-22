@@ -32,13 +32,18 @@ from chassis_lab.knc_kernel import (
     metric_row,
     metric_sweep,
     signal_values,
+    sweep_gradient,
     with_pad_travel,
 )
 from chassis_lab.knc_plot_kernel import (
+    AxlePanel,
+    AxlePlotSpec,
     GradientDisplay,
     PlotSpec,
     SignalStyle,
+    render_axle_reports,
     render_comparison_reports,
+    render_contact_path_debug,
     render_rate_debug,
     render_reports,
 )
@@ -219,10 +224,181 @@ PLOT_SPECS = (
 )
 
 
-def _plot_curves(raw: list[dict[str, object]]) -> list[dict[str, object]]:
+def _axle_plot(
+    name: str, signal: str, unit: str, suspension: bool
+) -> AxlePlotSpec:
+    axis = "suspension_roll_angle" if suspension else "roll_angle"
+    panels = []
+    for location in ("total", *AXLES):
+        x = (
+            "mean_suspension_roll_angle"
+            if suspension and location == "total"
+            else axis
+        )
+        x_label = (
+            "Mean front/rear suspension roll angle [deg]"
+            if suspension and location == "total"
+            else "Suspension roll angle [deg]"
+            if suspension
+            else "Body roll angle [deg]"
+        )
+        panels.append(
+            AxlePanel(
+                location,
+                x,
+                signal,
+                location.capitalize(),
+                x_label,
+                f"{name} [{unit}]",
+                "total" if not suspension else None,
+            )
+        )
+    return AxlePlotSpec(
+        f"knc_roll_{signal}_vs_{axis}",
+        f"Roll - {name} / {x_label}",
+        tuple(panels),
+    )
+
+
+def _center_plot(axle: str) -> AxlePlotSpec:
+    return AxlePlotSpec(
+        f"knc_roll_roll_center_{axle}",
+        f"Roll - {axle.capitalize()} roll center",
+        (
+            AxlePanel(
+                axle,
+                "roll_center_y",
+                "roll_center_height",
+                "Position",
+                "Absolute lateral position [mm]",
+                "Height above ground [mm]",
+            ),
+            AxlePanel(
+                axle,
+                "roll_angle",
+                "roll_center_height",
+                "Height",
+                "Body roll angle [deg]",
+                "Height above ground [mm]",
+                "total",
+            ),
+            AxlePanel(
+                axle,
+                "roll_angle",
+                "roll_center_y",
+                "Lateral migration",
+                "Body roll angle [deg]",
+                "Y relative to vehicle center [mm]",
+                "total",
+            ),
+        ),
+    )
+
+
+AXLE_PLOT_SPECS = (
+    _axle_plot("Roll moment", "roll_moment", "Nm", False),
+    _axle_plot("Roll moment", "roll_moment", "Nm", True),
+    _axle_plot("Roll stiffness", "roll_stiffness", "Nm/deg", False),
+    _axle_plot("Roll stiffness", "roll_stiffness", "Nm/deg", True),
+    *(_center_plot(axle) for axle in AXLES),
+)
+
+
+def _plot_curves(
+    raw: list[dict[str, object]], options: BranchOptions
+) -> list[dict[str, object]]:
     curves = index_curves(with_pad_travel(raw))
     _derive_suspension_roll(curves, [])
+    _derive_roll_moments(curves, [])
+    _plot_axle_curves(curves, options)
     return list(curves.values())
+
+
+def _put_curve(
+    curves: CurveIndex,
+    location: str,
+    signal: str,
+    values: np.ndarray,
+    unit: str,
+) -> None:
+    curves[(location, signal)] = {
+        "corner": location,
+        "signal": signal,
+        "values": values,
+        "unit": unit,
+    }
+
+
+def _plot_axle_curves(curves: CurveIndex, options: BranchOptions) -> None:
+    """Prepare axle plots without changing the secant scalar metrics.
+
+    Stiffness is the local d(derived moment)/d(body roll), separately on each
+    body-roll sweep. The total suspension-angle axis is the front/rear mean;
+    it is an x-axis only, not the stiffness denominator. Roll-center geometry
+    uses raw contact-path slopes on each plotted sweep, without fitting.
+    """
+    roll = signal_values(curves, "total", "roll_angle")
+    angles = [curves.get((axle, "suspension_roll_angle")) for axle in AXLES]
+    if all(angle is not None for angle in angles):
+        front, rear = (
+            signal_values(curves, axle, "suspension_roll_angle")
+            for axle in AXLES
+        )
+        if len(front) == len(rear) == len(roll):
+            _put_curve(
+                curves,
+                "total",
+                "mean_suspension_roll_angle",
+                (front + rear) / 2.0,
+                "deg",
+            )
+
+    for location in (*AXLES, "total"):
+        moment = curves.get((location, "roll_moment"))
+        if moment is None:
+            continue
+        values = signal_values(curves, location, "roll_moment")
+        if len(values) != len(roll):
+            continue
+        rate = np.full_like(roll, np.nan)
+        for sweep in options.plot_sweeps(roll):
+            result = sweep_gradient(roll, values, None, sweep, options)
+            if result is None:
+                continue
+            _, slope, _, _, masked = result
+            finite = np.isfinite(roll[sweep]) & np.isfinite(values[sweep])
+            segment = np.full(len(finite), np.nan)
+            segment[finite] = np.where(masked, np.nan, slope)
+            rate[sweep] = segment
+            # Do not draw a line across the reversal into another sweep.
+            if sweep.start:
+                rate[sweep.start] = np.nan
+        if np.isfinite(rate).any():
+            _put_curve(curves, location, "roll_stiffness", rate, "Nm/deg")
+
+    for axle in AXLES:
+        try:
+            lateral = _lateral_signal(curves, axle, [])
+            samples = _roll_center_inputs(curves, axle, lateral)
+        except KncKernelError:
+            continue
+        height = np.full_like(roll, np.nan)
+        position = np.full_like(roll, np.nan)
+        for sweep in options.plot_sweeps(roll):
+            if not all(
+                np.isfinite(values[sweep]).all() for values in samples.values()
+            ):
+                continue
+            try:
+                z, y, _ = _branch_roll_center(samples, sweep, options)
+            except KncKernelError:
+                continue
+            height[sweep], position[sweep] = z, y
+            if sweep.start:
+                height[sweep.start] = position[sweep.start] = np.nan
+        if (np.isfinite(height) & np.isfinite(position)).any():
+            _put_curve(curves, axle, "roll_center_height", height, "mm")
+            _put_curve(curves, axle, "roll_center_y", position, "mm")
 
 
 def plot(
@@ -235,8 +411,8 @@ def plot(
     gradient_points_deg: float | None = None,
     debug: str | None = None,
 ) -> dict[str, bytes]:
-    curves = _plot_curves(json.loads(curves_json))
     options = BranchOptions.from_json(branch)
+    curves = _plot_curves(json.loads(curves_json), options)
     reports = render_reports(
         curves,
         PLOT_SPECS,
@@ -250,6 +426,17 @@ def plot(
         gradient_points_deg,
         warn_missing=True,
     )
+    reports.update(
+        render_axle_reports(
+            curves,
+            [],
+            AXLE_PLOT_SPECS,
+            source_label,
+            footer,
+            logo,
+            "plots/knc/roll",
+        )
+    )
     if debug:
         info = json.loads(debug)
         reports.update(
@@ -261,6 +448,17 @@ def plot(
                 info,
                 info["inputs"][0],
                 logo,
+            )
+        )
+        reports.update(
+            _roll_center_debug(
+                curves,
+                options,
+                info,
+                info["inputs"][0],
+                logo,
+                "plots/knc/roll",
+                "measurement",
             )
         )
     return reports
@@ -283,9 +481,10 @@ def plot_compare(
         if branches_json
         else [BranchOptions()] * (len(candidates) + 1)
     )
-    baseline = _plot_curves(json.loads(baseline_json))
+    baseline = _plot_curves(json.loads(baseline_json), branches[0])
     candidates = [
-        {**item, "curves": _plot_curves(item["curves"])} for item in candidates
+        {**item, "curves": _plot_curves(item["curves"], options)}
+        for item, options in zip(candidates, branches[1:], strict=True)
     ]
     reports = render_comparison_reports(
         baseline,
@@ -299,6 +498,16 @@ def plot_compare(
         branches,
         gradient_points_deg,
         warn_missing=True,
+    )
+    reports.update(
+        render_axle_reports(
+            baseline,
+            candidates,
+            AXLE_PLOT_SPECS,
+            baseline_label,
+            footer,
+            logo,
+        )
     )
     if debug:
         info = json.loads(debug)
@@ -321,6 +530,44 @@ def plot_compare(
                     f"series_{index}",
                 )
             )
+            reports.update(
+                _roll_center_debug(
+                    curves,
+                    options,
+                    info,
+                    info["inputs"][index],
+                    logo,
+                    "",
+                    f"series_{index}",
+                )
+            )
+    return reports
+
+
+def _roll_center_debug(
+    curves: list[dict[str, object]],
+    options: BranchOptions,
+    info: dict[str, Any],
+    input_path: str,
+    logo: bytes | None,
+    prefix: str,
+    source: str,
+) -> dict[str, bytes]:
+    if not options.measurement:
+        return {}
+    indexed = index_curves(curves)
+    reports = {}
+    for axle in AXLES:
+        try:
+            lateral = _lateral_signal(indexed, axle, [])
+            samples = _roll_center_inputs(indexed, axle, lateral)
+        except KncKernelError:
+            continue
+        name = f"debug/{source}_knc_roll_roll_center_{axle}.pdf"
+        path = f"{prefix}/{name}" if prefix else name
+        reports[path] = render_contact_path_debug(
+            samples, axle, options, info, input_path, logo
+        )
     return reports
 
 
@@ -551,8 +798,9 @@ def _roll_center_metrics(
 ) -> list[dict[str, object]]:
     """Raw height near 0 deg and secants between samples near ±half deg.
 
-    No interpolation, fit, edge trimming, or hysteresis averaging is applied.
-    Secants use the actual sampled angle span, recorded with every row.
+    No interpolation, fit, or hysteresis averaging is applied. Measured
+    turnaround edges use the shared curvature mask; secants use the actual
+    retained sample angles, recorded with every row.
     """
     results = []
     for axle in AXLES:
@@ -630,30 +878,29 @@ def _roll_center_samples(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Raw geometry at the selected sweep's nearest samples to -half, 0, +half.
 
-    Require finite input throughout the sweep and finite geometry at all
-    three chosen samples. Do not bridge invalid samples or extrapolate.
+    Require finite input throughout the sweep and retained finite geometry
+    covering the interval. Do not bridge invalid samples or extrapolate.
     """
-    left, right = f"{axle}_left", f"{axle}_right"
-    samples = {
-        "roll": signal_values(curves, "total", "roll_angle"),
-        "y_left": absolute(curves, left, lateral),
-        "z_left": absolute(curves, left, "wheel_pad_z"),
-        "y_right": absolute(curves, right, lateral),
-        "z_right": absolute(curves, right, "wheel_pad_z"),
-    }
-    if len({len(values) for values in samples.values()}) != 1:
-        raise KncKernelError(f"{axle} roll-center signal lengths differ")
+    samples = _roll_center_inputs(curves, axle, lateral)
     sweep = metric_sweep(samples["roll"], "total_roll_angle", options)
     if not all(np.isfinite(values[sweep]).all() for values in samples.values()):
         raise KncKernelError(f"{axle} roll-center sweep has nonfinite input")
-    height, position, roll = _branch_roll_center(samples, sweep)
-    if roll.min() > -half or roll.max() < half:
+    height, position, roll = _branch_roll_center(samples, sweep, options)
+    retained = np.flatnonzero(np.isfinite(height) & np.isfinite(position))
+    if (
+        not retained.size
+        or roll[retained].min() > -half
+        or roll[retained].max() < half
+    ):
         raise KncKernelError(
             f"{axle} roll center does not cover roll_angle "
             f"{-half:g}..{half:g} deg"
         )
     indices = np.array(
-        [np.argmin(np.abs(roll - target)) for target in (-half, 0.0, half)]
+        [
+            retained[np.argmin(np.abs(roll[retained] - target))]
+            for target in (-half, 0.0, half)
+        ]
     )
     sampled_roll = roll[indices]
     if sampled_roll[2] <= sampled_roll[0]:
@@ -668,18 +915,38 @@ def _roll_center_samples(
     return height[indices], position[indices], sampled_roll
 
 
+def _roll_center_inputs(
+    curves: CurveIndex, axle: str, lateral: str
+) -> dict[str, np.ndarray]:
+    left, right = f"{axle}_left", f"{axle}_right"
+    samples = {
+        "roll": signal_values(curves, "total", "roll_angle"),
+        "y_left": absolute(curves, left, lateral),
+        "z_left": absolute(curves, left, "wheel_pad_z"),
+        "y_right": absolute(curves, right, lateral),
+        "z_right": absolute(curves, right, "wheel_pad_z"),
+    }
+    if len({len(values) for values in samples.values()}) != 1:
+        raise KncKernelError(f"{axle} roll-center signal lengths differ")
+    return samples
+
+
 def _branch_roll_center(
-    samples: dict[str, np.ndarray], sweep: slice
+    samples: dict[str, np.ndarray], sweep: slice, options: BranchOptions
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Differentiate raw contact paths and solve geometry without smoothing."""
+    """Differentiate raw paths and mask measured turnaround edges."""
     if len(samples["roll"][sweep]) < 2:
         raise KncKernelError("roll-center sweep has too few samples")
     contact_slopes = {}
+    masked = np.zeros(len(samples["roll"][sweep]), dtype=bool)
     for side in ("left", "right"):
-        with np.errstate(divide="ignore", invalid="ignore"):
-            contact_slopes[side] = np.gradient(
-                samples[f"y_{side}"][sweep], samples[f"z_{side}"][sweep]
-            )
+        result = sweep_gradient(
+            samples[f"z_{side}"], samples[f"y_{side}"], None, sweep, options
+        )
+        if result is None or len(result[1]) != len(masked):
+            raise KncKernelError("roll-center sweep has nonfinite contact path")
+        contact_slopes[side] = result[1]
+        masked |= result[4] | ~np.isfinite(result[1])
     height, position = roll_center(
         contact_slopes["left"],
         contact_slopes["right"],
@@ -689,6 +956,8 @@ def _branch_roll_center(
         samples["z_right"][sweep],
         np.radians(samples["roll"][sweep]),
     )
+    height[masked] = np.nan
+    position[masked] = np.nan
     return height, position, samples["roll"][sweep]
 
 

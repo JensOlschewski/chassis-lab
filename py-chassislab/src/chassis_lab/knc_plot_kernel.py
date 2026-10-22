@@ -204,6 +204,24 @@ class PlotSpec:
         return self.output_signal or self.y_signal
 
 
+@dataclass(frozen=True)
+class AxlePanel:
+    location: str
+    x_signal: str
+    y_signal: str
+    title: str
+    x_label: str
+    y_label: str
+    x_location: str | None = None
+
+
+@dataclass(frozen=True)
+class AxlePlotSpec:
+    name: str
+    title: str
+    panels: tuple[AxlePanel, AxlePanel, AxlePanel]
+
+
 # ---------------------------------------------------------------------------
 # Report plots
 # ---------------------------------------------------------------------------
@@ -284,6 +302,101 @@ def render_comparison_reports(
         branches or [BranchOptions()] * len(series),
         gradient_points_deg,
         warn_missing,
+    )
+
+
+def render_axle_reports(
+    baseline: list[dict[str, object]],
+    candidates: list[dict[str, object]],
+    specs: tuple[AxlePlotSpec, ...],
+    baseline_label: str,
+    footer: str,
+    logo: bytes | None,
+    output_prefix: str = "",
+) -> dict[str, bytes]:
+    """Three-panel axle reports from already derived canonical curves."""
+    series = [Source(baseline_label, _index(baseline), BASELINE_COLOR)]
+    series.extend(
+        Source(
+            str(item["label"]),
+            _index(cast("list[dict[str, object]]", item["curves"])),
+            CANDIDATE_COLORS[index % len(CANDIDATE_COLORS)],
+        )
+        for index, item in enumerate(candidates)
+    )
+    reports = {}
+    skipped = []
+    for spec in specs:
+        if not all(
+            (location, signal) in source.curves
+            for source in series
+            for panel in spec.panels
+            for location, signal in (
+                (panel.x_location or panel.location, panel.x_signal),
+                (panel.location, panel.y_signal),
+            )
+        ):
+            skipped.append(spec.name)
+            continue
+        figure, panels = _new_axle_figure(footer)
+        figure.suptitle(spec.title, fontsize=16)
+        for axes, panel in zip(panels, spec.panels, strict=True):
+            for source in series:
+                x = _values(
+                    source.curves,
+                    panel.x_location or panel.location,
+                    panel.x_signal,
+                )
+                y = _values(source.curves, panel.location, panel.y_signal)
+                if len(x) != len(y):
+                    raise ValueError(
+                        f"{panel.location} {panel.x_signal} and "
+                        f"{panel.y_signal} lengths differ"
+                    )
+                axes.plot(
+                    x, y, color=source.color, linewidth=1.8, label=source.label
+                )
+            axes.set_title(panel.title, loc="left", fontweight="bold")
+            axes.set_xlabel(panel.x_label)
+            axes.set_ylabel(panel.y_label)
+            axes.legend(loc="best", frameon=False)
+        if footer:
+            _add_footer(figure, footer)
+        filename = f"{spec.name}.pdf"
+        path = f"{output_prefix}/{filename}" if output_prefix else filename
+        reports[path] = _save_pdf(figure, _pyplot(), footer, logo)
+    if skipped:
+        warnings.warn(
+            "KnC axle plots skipped because signals or geometry are missing: "
+            + ", ".join(skipped),
+            stacklevel=2,
+        )
+    return reports
+
+
+def _new_axle_figure(footer: str) -> tuple[Any, tuple[Any, Any, Any]]:
+    """One wide top panel and two equal lower panels, with footer room."""
+    plt = _pyplot()
+    figure = plt.figure(
+        figsize=REPORT_FIGSIZE, layout="constrained" if not footer else None
+    )
+    if footer:
+        grid = figure.add_gridspec(
+            2,
+            2,
+            left=PAGE_LEFT,
+            right=PAGE_RIGHT,
+            top=PAGE_TOP,
+            bottom=_metric_layout(footer, REPORT_FIGSIZE[1], 0)[2],
+            wspace=PAGE_WSPACE,
+            hspace=PAGE_HSPACE,
+        )
+    else:
+        grid = figure.add_gridspec(2, 2)
+    return figure, (
+        figure.add_subplot(grid[0, :]),
+        figure.add_subplot(grid[1, 0]),
+        figure.add_subplot(grid[1, 1]),
     )
 
 
@@ -517,6 +630,95 @@ def render_rate_debug(
             indexed, spec, spec_options, footer, logo
         )
     return reports
+
+
+def render_contact_path_debug(
+    samples: dict[str, np.ndarray],
+    axle: str,
+    options: BranchOptions,
+    info: dict[str, Any],
+    input_path: str,
+    logo: bytes | None,
+) -> bytes:
+    """Show body-roll branches and both contact slopes used by roll center.
+
+    Each final panel excludes the union of both sides' turnaround cuts, just
+    as the geometric roll-center calculation does.
+    """
+    footer = _debug_footer(info, input_path, options)
+    plt = _pyplot()
+    figure, panels = _new_figure(plt, 2, 4, (DEBUG_FIGSIZE[0], 8), footer)
+    figure.suptitle(
+        f"Roll - {axle.capitalize()} roll center - debug", fontsize=16
+    )
+    roll = samples["roll"]
+    plotted = options.plot_sweeps(roll)
+    for row, side in zip(panels, ("left", "right"), strict=True):
+        branch, curvature_panel, raw_panel, final_panel = row
+        branch.set_title(f"{side.capitalize()}: branch detection", loc="left")
+        curvature_panel.set_title("Second derivative |d²y/dz²|", loc="left")
+        raw_panel.set_title("Raw contact slope", loc="left")
+        final_panel.set_title("Final contact slope (both paths)", loc="left")
+        _draw_branches(branch, roll, plotted, options.metric_sweep(roll))
+        for sweep in plotted:
+            if not all(
+                np.isfinite(values[sweep]).all() for values in samples.values()
+            ):
+                continue
+            results = {
+                name: sweep_gradient(
+                    samples[f"z_{name}"],
+                    samples[f"y_{name}"],
+                    None,
+                    sweep,
+                    options,
+                )
+                for name in ("left", "right")
+            }
+            if any(result is None for result in results.values()):
+                continue
+            own = results[side]
+            assert own is not None
+            combined = np.zeros(len(own[1]), dtype=bool)
+            for result in results.values():
+                assert result is not None
+                combined |= result[4] | ~np.isfinite(result[1])
+            axis, slope, curvature, _, _ = own
+            curvature_panel.plot(axis, curvature, color=RAW_COLOR, alpha=0.5)
+            curvature_panel.scatter(
+                axis[combined],
+                curvature[combined],
+                s=8,
+                color=CUT_COLOR,
+                label="removed",
+            )
+            raw_panel.plot(axis, slope, color=RAW_COLOR, alpha=0.5)
+            raw_panel.scatter(
+                axis[combined],
+                slope[combined],
+                s=8,
+                color=CUT_COLOR,
+                label="removed",
+            )
+            final_panel.plot(
+                axis,
+                np.where(combined, np.nan, slope),
+                color=USED_COLOR,
+                linewidth=1.2,
+                label="used",
+            )
+        branch.set_xlabel("sample")
+        branch.set_ylabel("roll_angle [deg]")
+        for panel in (curvature_panel, raw_panel, final_panel):
+            panel.set_xlabel("wheel_pad_z [mm]")
+        curvature_panel.set_ylabel("|d²y/dz²|")
+        curvature_panel.set_yscale("symlog")
+        raw_panel.set_ylabel("d(lateral)/d(wheel_pad_z)")
+        final_panel.set_ylabel("d(lateral)/d(wheel_pad_z)")
+        for panel in row:
+            _legend_unique(panel)
+    _add_footer(figure, footer)
+    return _save_pdf(figure, plt, footer, logo)
 
 
 def _debug_footer(
