@@ -1,25 +1,20 @@
-use std::{
-    collections::BTreeMap,
-    env,
-    ffi::CStr,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::collections::BTreeMap;
+use std::env;
+use std::ffi::CStr;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use clab_core::{
-    canonical_hdf5::{CanonicalFile, SourceKind},
-    config::{CaseConfig, SignalRef, VerticalBranch, VerticalConfig},
-    conventions::{
-        BaselinePolicy, ROLL_AXLE_SIGNALS, SignalConvention, apply_convention, roll_conventions,
-        vertical_conventions,
-    },
-};
-use pyo3::{
-    prelude::*,
-    types::{PyBytes, PyDict, PyModule},
-};
+use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyDict, PyModule};
 use serde::{Deserialize, Serialize};
+
+use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
+use clab_core::config::{CaseConfig, SignalRef, VerticalBranch, VerticalConfig};
+use clab_core::conventions::{
+    BaselinePolicy, ROLL_AXLE_SIGNALS, SignalConvention, apply_convention, roll_conventions,
+    vertical_conventions,
+};
 
 use super::display::{mapping_missing, missing_unit_warning, tag_warnings};
 
@@ -78,7 +73,6 @@ impl KncTest {
         }
     }
 
-    /// Optional per-corner signals beyond wheel-center x/y/z.
     fn corner_signals(self) -> &'static [&'static str] {
         match self {
             Self::Vertical => &[
@@ -259,6 +253,7 @@ pub(crate) fn analyze_input(
         .unwrap_or_default();
     let knc = test.required_config(config)?;
     warnings.extend(default_warnings(test, knc, measurement));
+
     let metrics = gradient_metrics(
         test,
         knc,
@@ -268,6 +263,7 @@ pub(crate) fn analyze_input(
         (&corner_mass_kg, &corner_mass_source),
         &mut warnings,
     )?;
+
     warnings.sort();
     warnings.dedup();
     let warnings = tag_warnings("knc", Some(test.name()), warnings);
