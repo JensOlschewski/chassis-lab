@@ -101,8 +101,7 @@ jobs:
             examples/config.toml \
             examples/input/run-simulation.toml \
             examples/setup.toml \
-            examples/mappings-simulation.toml \
-            examples/mappings-measurement.toml \
+            examples/mappings \
             examples/tolerances.toml \
             examples/input/raw-simulation/example-simulation-svc.res \
             examples/input/raw-simulation/example-simulation-knc-vertical.res \
@@ -114,7 +113,8 @@ jobs:
             tar -xzf /tmp/input/dist/embed-bundle-linux-x86_64.tar.gz -C /tmp/bundle
             bundle=/tmp/bundle/embed-bundle-linux-x86_64
             cp /tmp/input/examples/config.toml /tmp/smoke/
-            cp /tmp/input/examples/setup.toml /tmp/input/examples/mappings-simulation.toml /tmp/input/examples/mappings-measurement.toml /tmp/input/examples/tolerances.toml /tmp/smoke/
+            cp /tmp/input/examples/setup.toml /tmp/input/examples/tolerances.toml /tmp/smoke/
+            cp -R /tmp/input/examples/mappings /tmp/smoke/
             mkdir /tmp/smoke/input
             cp /tmp/input/examples/input/run-simulation.toml /tmp/smoke/input/
             cp /tmp/input/examples/input/raw-simulation/example-simulation-svc.res /tmp/smoke/
@@ -148,8 +148,7 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $smoke "input") | Out-Null
           Copy-Item examples\input\run-simulation.toml (Join-Path $smoke "input")
           Copy-Item examples\setup.toml $smoke
-          Copy-Item examples\mappings-simulation.toml $smoke
-          Copy-Item examples\mappings-measurement.toml $smoke
+          Copy-Item examples\mappings $smoke -Recurse
           Copy-Item examples\tolerances.toml $smoke
           Copy-Item examples\input\raw-simulation\example-simulation-svc.res $smoke
           Copy-Item examples\input\raw-simulation\example-simulation-knc-vertical.res $smoke
@@ -178,7 +177,8 @@ jobs:
           clean_env=(env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned DYLD_LIBRARY_PATH=/poisoned)
           "${clean_env[@]}" "$bundle/bin/clab" --version
           cp examples/config.toml "$smoke/"
-          cp examples/setup.toml examples/mappings-simulation.toml examples/mappings-measurement.toml examples/tolerances.toml "$smoke/"
+          cp examples/setup.toml examples/tolerances.toml "$smoke/"
+          cp -R examples/mappings "$smoke/"
           mkdir "$smoke/input"
           cp examples/input/run-simulation.toml "$smoke/input/"
           cp examples/input/raw-simulation/example-simulation-svc.res "$smoke/"

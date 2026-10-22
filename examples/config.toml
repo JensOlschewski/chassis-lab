@@ -8,11 +8,18 @@ gravity = 9.80665 # m/s²
 [setup]
 file = "setup.toml"
 
-[mappings.simulation]
-file = "mappings-simulation.toml"
+[mappings.simulation.svc]
+file = "mappings/mappings-simulation-svc.toml"
 
-[mappings.measurement]
-file = "mappings-measurement.toml"
+[mappings.simulation.knc]
+file = "mappings/mappings-simulation-knc.toml"
+
+[mappings.measurement.svc]
+file = "mappings/mappings-measurement-svc.toml"
+
+[mappings.measurement.knc]
+file = "mappings/mappings-measurement-knc.toml"
+
 
 [compare]
 # Tolerances used for acceptance checks by `clab compare --tolerances`.

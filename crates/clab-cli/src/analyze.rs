@@ -79,7 +79,8 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
     let config =
         clab_core::config::load_config_and_run(&args.config, &args.input).map_err(|error| {
             anyhow::anyhow!(
-                "failed to load config/run '{}': {error}",
+                "failed to load config '{}' with run '{}': {error}",
+                args.config.display(),
                 args.input.display()
             )
         })?;
@@ -324,7 +325,7 @@ fn knc_domain(test: KncTest, report: &knc::Reports) -> serde_json::Value {
     })
 }
 
-/// PDF plots of one KnC test; roll plots arrive with #143/#144.
+/// Corner PDF plots of one KnC test; roll axle plots arrive with #144.
 fn knc_plots(
     config: &clab_core::config::CaseConfig,
     test: KncTest,
@@ -333,11 +334,9 @@ fn knc_plots(
     footer: &str,
     debug: Option<&str>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
-    if test != KncTest::Vertical {
-        return Ok(BTreeMap::new());
-    }
     knc::curve_plots(
         config,
+        test,
         &detail["curves"],
         footer,
         report.measurement,

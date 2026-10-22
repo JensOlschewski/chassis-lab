@@ -3,7 +3,7 @@
 Rust maps source signals, applies conventions and static/measurement offsets,
 then calls ``metrics(request)`` through embedded PyO3. Python restores absolute
 geometry where needed, derives missing signals, and calculates scalar metrics.
-Rust writes reports; roll plots are not implemented here.
+Rust writes reports. Corner plots reuse the vertical plot renderer.
 
 Shared with vertical in ``knc_kernel.py``: branch selection, restoring offsets,
 and ``gradient_metrics``. Each gradient is the secant
@@ -26,12 +26,21 @@ from chassis_lab.knc_kernel import (
     KncKernelError,
     Signal,
     absolute,
+    gradient_curve,
     gradient_metrics,
     index_curves,
     metric_row,
     metric_sweep,
     signal_values,
     with_pad_travel,
+)
+from chassis_lab.knc_plot_kernel import (
+    GradientDisplay,
+    PlotSpec,
+    SignalStyle,
+    render_comparison_reports,
+    render_rate_debug,
+    render_reports,
 )
 
 # Every metric selects samples from the configured body-roll sweep. Its secant
@@ -90,6 +99,229 @@ AXLE_METRICS = (
 
 # Preferred lateral contact position for the roll center, then the fallback.
 ROLL_CENTER_LATERAL = ("center_of_pressure_y", "contact_patch_y")
+
+PLOT_SIGNALS = {
+    "wheel_center_z": SignalStyle("Wheel center Z", "mm"),
+    "wheel_center_x": SignalStyle("Wheel center X", "mm"),
+    "wheel_center_y": SignalStyle("Wheel center Y", "mm"),
+    "wheel_pad_z": SignalStyle("Wheel pad Z", "mm"),
+    "contact_patch_x": SignalStyle("Contact patch X", "mm"),
+    "contact_patch_y": SignalStyle("Contact patch Y", "mm"),
+    "roll_angle": SignalStyle("Body roll angle", "deg"),
+    "suspension_roll_angle": SignalStyle("Suspension roll angle", "deg"),
+    "toe": SignalStyle("Toe", "deg"),
+    "camber": SignalStyle("Camber", "deg"),
+    "wheel_load": SignalStyle("Wheel load", "newton"),
+    "suspension_rate": SignalStyle("Roll suspension rate", "newton/mm"),
+    "ride_rate": SignalStyle("Roll ride rate", "newton/mm"),
+}
+
+
+def _plot_spec(
+    name: str,
+    x: str,
+    y: str,
+    gradient: GradientDisplay | None = None,
+    x_at: str = "self",
+) -> PlotSpec:
+    return PlotSpec(
+        f"knc_roll_{name}",
+        f"Roll - {PLOT_SIGNALS[x].label} / {PLOT_SIGNALS[y].label}",
+        x,
+        y,
+        optional=True,
+        gradient=gradient,
+        x_at=x_at,
+        sweep=ROLL_ANGLE,
+        gradient_unit=(
+            "deg" if x in ("roll_angle", "suspension_roll_angle") else "mm"
+        ),
+    )
+
+
+PLOT_SPECS = (
+    _plot_spec(
+        "toe", "wheel_center_z", "toe", GradientDisplay("roll steer", "deg/mm")
+    ),
+    _plot_spec(
+        "toe_vs_roll_angle",
+        "roll_angle",
+        "toe",
+        GradientDisplay("body-roll steer", "deg/deg"),
+        "total",
+    ),
+    _plot_spec(
+        "toe_vs_suspension_roll_angle",
+        "suspension_roll_angle",
+        "toe",
+        GradientDisplay("roll steer", "deg/deg"),
+        "axle",
+    ),
+    _plot_spec(
+        "camber",
+        "wheel_center_z",
+        "camber",
+        GradientDisplay("roll camber", "deg/mm"),
+    ),
+    _plot_spec(
+        "camber_vs_roll_angle",
+        "roll_angle",
+        "camber",
+        GradientDisplay("body-roll camber", "deg/deg"),
+        "total",
+    ),
+    _plot_spec(
+        "camber_vs_suspension_roll_angle",
+        "suspension_roll_angle",
+        "camber",
+        GradientDisplay("roll camber", "deg/deg"),
+        "axle",
+    ),
+    _plot_spec(
+        "wheel_load",
+        "wheel_center_z",
+        "wheel_load",
+        GradientDisplay("roll wheel rate", "N/mm"),
+    ),
+    PlotSpec(
+        "knc_roll_suspension_rate",
+        "Roll - Wheel center Z / Suspension rate",
+        "wheel_center_z",
+        "wheel_load",
+        "suspension_rate",
+        transform=gradient_curve,
+        optional=True,
+        sweep=ROLL_ANGLE,
+    ),
+    PlotSpec(
+        "knc_roll_ride_rate",
+        "Roll - Wheel pad Z / Ride rate",
+        "wheel_pad_z",
+        "wheel_load",
+        "ride_rate",
+        transform=gradient_curve,
+        optional=True,
+        sweep=ROLL_ANGLE,
+    ),
+    _plot_spec(
+        "wheel_load_vs_roll_angle", "roll_angle", "wheel_load", x_at="total"
+    ),
+    _plot_spec(
+        "wheel_load_vs_suspension_roll_angle",
+        "suspension_roll_angle",
+        "wheel_load",
+        x_at="axle",
+    ),
+    _plot_spec("wcz_vs_wcx", "wheel_center_z", "wheel_center_x"),
+    _plot_spec("wcz_vs_wcy", "wheel_center_z", "wheel_center_y"),
+    _plot_spec("wpz_vs_cpx", "wheel_pad_z", "contact_patch_x"),
+    _plot_spec("wpz_vs_cpy", "wheel_pad_z", "contact_patch_y"),
+)
+
+
+def _plot_curves(raw: list[dict[str, object]]) -> list[dict[str, object]]:
+    curves = index_curves(with_pad_travel(raw))
+    _derive_suspension_roll(curves, [])
+    return list(curves.values())
+
+
+def plot(
+    curves_json: str,
+    source_label: str = "Simulation",
+    footer: str = "",
+    logo: bytes | None = None,
+    gradient_points_mm: float | None = None,
+    branch: str | None = None,
+    gradient_points_deg: float | None = None,
+    debug: str | None = None,
+) -> dict[str, bytes]:
+    curves = _plot_curves(json.loads(curves_json))
+    options = BranchOptions.from_json(branch)
+    reports = render_reports(
+        curves,
+        PLOT_SPECS,
+        PLOT_SIGNALS,
+        source_label,
+        "plots/knc/roll",
+        footer,
+        logo,
+        gradient_points_mm,
+        options,
+        gradient_points_deg,
+        warn_missing=True,
+    )
+    if debug:
+        info = json.loads(debug)
+        reports.update(
+            render_rate_debug(
+                curves,
+                PLOT_SPECS,
+                options,
+                "plots/knc/roll",
+                info,
+                info["inputs"][0],
+                logo,
+            )
+        )
+    return reports
+
+
+def plot_compare(
+    baseline_json: str,
+    candidates_json: str,
+    baseline_label: str,
+    footer: str,
+    logo: bytes,
+    gradient_points_mm: float | None = None,
+    branches_json: str | None = None,
+    gradient_points_deg: float | None = None,
+    debug: str | None = None,
+) -> dict[str, bytes]:
+    candidates = json.loads(candidates_json)
+    branches = (
+        [BranchOptions.from_json(item) for item in json.loads(branches_json)]
+        if branches_json
+        else [BranchOptions()] * (len(candidates) + 1)
+    )
+    baseline = _plot_curves(json.loads(baseline_json))
+    candidates = [
+        {**item, "curves": _plot_curves(item["curves"])} for item in candidates
+    ]
+    reports = render_comparison_reports(
+        baseline,
+        candidates,
+        PLOT_SPECS,
+        PLOT_SIGNALS,
+        baseline_label,
+        footer,
+        logo,
+        gradient_points_mm,
+        branches,
+        gradient_points_deg,
+        warn_missing=True,
+    )
+    if debug:
+        info = json.loads(debug)
+        for index, (curves, options) in enumerate(
+            zip(
+                [baseline, *(item["curves"] for item in candidates)],
+                branches,
+                strict=True,
+            )
+        ):
+            reports.update(
+                render_rate_debug(
+                    curves,
+                    PLOT_SPECS,
+                    options,
+                    "",
+                    info,
+                    info["inputs"][index],
+                    logo,
+                    f"series_{index}",
+                )
+            )
+    return reports
 
 
 def metrics(request: dict[str, object]) -> str:

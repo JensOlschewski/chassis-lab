@@ -100,8 +100,7 @@ jobs:
             examples/config.toml \
             examples/input/run-simulation.toml \
             examples/setup.toml \
-            examples/mappings-simulation.toml \
-            examples/mappings-measurement.toml \
+            examples/mappings \
             examples/tolerances.toml \
             examples/input/raw-simulation/example-simulation-svc.res \
             examples/input/raw-simulation/example-simulation-knc-vertical.res \
@@ -117,7 +116,8 @@ jobs:
               tar -xzf /tmp/input/dist/clab-runtime-linux-x86_64.tar.gz -C /tmp/clab-runtime
               bundle=/tmp/clab-runtime/clab-runtime-linux-x86_64
               cp /tmp/input/examples/config.toml /tmp/smoke/
-              cp /tmp/input/examples/setup.toml /tmp/input/examples/mappings-simulation.toml /tmp/input/examples/mappings-measurement.toml /tmp/input/examples/tolerances.toml /tmp/smoke/
+              cp /tmp/input/examples/setup.toml /tmp/input/examples/tolerances.toml /tmp/smoke/
+              cp -R /tmp/input/examples/mappings /tmp/smoke/
               mkdir /tmp/smoke/input
               cp /tmp/input/examples/input/run-simulation.toml /tmp/smoke/input/
               cp /tmp/input/examples/input/raw-simulation/example-simulation-svc.res /tmp/smoke/

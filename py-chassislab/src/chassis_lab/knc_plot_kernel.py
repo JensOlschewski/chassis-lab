@@ -1,5 +1,6 @@
 """Reusable, path-free plotting primitives for KnC report kernels."""
 
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -13,7 +14,10 @@ from pypdf import PdfReader, PdfWriter, Transformation
 from chassis_lab.knc_kernel import (
     BranchOptions,
     CurveIndex,
+    KncKernelError,
+    Signal,
     gradient_curve,
+    secant_points,
     sweep_gradient,
 )
 
@@ -179,6 +183,11 @@ class PlotSpec:
     # trimming for this plot only. `measurement` is never overridden.
     # Example: {"edge_width": 100, "edge_percentile": 0.9}
     branch: dict[str, Any] = field(default_factory=dict)
+    # Roll uses a body-roll sweep even when the displayed x is wheel travel
+    # or an axle-level suspension angle. Vertical keeps the travel defaults.
+    x_at: str = "self"
+    sweep: Signal = Signal("wheel_center_z")
+    gradient_unit: str = "mm"
 
     def branch_options(self, options: BranchOptions) -> BranchOptions:
         return replace(options, **self.branch)
@@ -193,15 +202,6 @@ class PlotSpec:
     @property
     def plotted_signal(self) -> str:
         return self.output_signal or self.y_signal
-
-    @property
-    def signals(self) -> tuple[str, ...]:
-        """Canonical signals the plot reads."""
-        return (
-            self.x_signal,
-            self.y_signal,
-            *([self.denominator_signal] if self.denominator_signal else []),
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +219,8 @@ def render_reports(
     logo: bytes | None = None,
     gradient_points_mm: float | None = None,
     branches: BranchOptions | None = None,
+    gradient_points_deg: float | None = None,
+    warn_missing: bool = False,
 ) -> dict[str, bytes]:
     """Render one source using same catalog as comparison reports."""
     series = [
@@ -237,6 +239,8 @@ def render_reports(
         logo,
         gradient_points_mm,
         [branches or BranchOptions()],
+        gradient_points_deg,
+        warn_missing,
     )
 
 
@@ -250,6 +254,8 @@ def render_comparison_reports(
     logo: bytes,
     gradient_points_mm: float | None = None,
     branches: list[BranchOptions] | None = None,
+    gradient_points_deg: float | None = None,
+    warn_missing: bool = False,
 ) -> dict[str, bytes]:
     """Render baseline and candidates using one declarative plot catalog."""
     series = [
@@ -276,6 +282,8 @@ def render_comparison_reports(
         logo,
         gradient_points_mm,
         branches or [BranchOptions()] * len(series),
+        gradient_points_deg,
+        warn_missing,
     )
 
 
@@ -288,11 +296,15 @@ def _render_catalog(
     logo: bytes | None,
     gradient_points_mm: float | None,
     branches: list[BranchOptions],
+    gradient_points_deg: float | None,
+    warn_missing: bool,
 ) -> dict[str, bytes]:
     reports = {}
+    skipped = []
     for spec in specs:
         if not _available(spec, [source.curves for source in series]):
             if spec.optional:
+                skipped.append(spec.name)
                 continue
             raise ValueError(
                 "plot requires canonical signals "
@@ -308,6 +320,13 @@ def _render_catalog(
             logo,
             gradient_points_mm,
             branches,
+            gradient_points_deg,
+        )
+    if skipped and warn_missing:
+        warnings.warn(
+            "KnC plots skipped because canonical signals are missing: "
+            + ", ".join(skipped),
+            stacklevel=2,
         )
     return reports
 
@@ -320,13 +339,15 @@ def _render_plot(
     logo: bytes | None,
     gradient_points_mm: float | None,
     branches: list[BranchOptions],
+    gradient_points_deg: float | None,
 ) -> bytes:
     plt = _pyplot()
-    gradient = (
-        spec.gradient
-        if gradient_points_mm is not None and gradient_points_mm > 0
-        else None
+    half = (
+        gradient_points_deg
+        if spec.gradient_unit == "deg"
+        else gradient_points_mm
     )
+    gradient = spec.gradient if half is not None and half > 0 else None
     figure, panels = _new_figure(
         plt,
         2,
@@ -346,10 +367,8 @@ def _render_plot(
         ):
             x, y = _curve_xy(spec, curves, corner, spec.branch_options(options))
             panel.plot(x, y, color=color, linewidth=1.8, label=source_label)
-            if gradient and gradient_points_mm is not None:
-                secant = _secant(
-                    spec, curves, corner, options, gradient_points_mm
-                )
+            if gradient and half is not None:
+                secant = _secant(spec, curves, corner, options, half)
                 values.append(
                     None
                     if secant is None
@@ -357,7 +376,7 @@ def _render_plot(
                         panel,
                         gradient,
                         secant,
-                        gradient_points_mm,
+                        half,
                         color,
                     )
                 )
@@ -371,9 +390,20 @@ def _render_plot(
         panel.legend(loc="best", frameon=False)
     if footer:
         _add_footer(figure, footer)
-    if gradient and gradient_points_mm is not None:
+    if gradient and half is not None:
         _add_metric_table(
-            figure, gradient, gradient_points_mm, table, series, footer
+            figure,
+            gradient,
+            half,
+            table,
+            series,
+            footer,
+            spec.gradient_unit,
+            (
+                "wheel center travel"
+                if spec.sweep == Signal("wheel_center_z")
+                else x_style.label
+            ),
         )
     return _save_pdf(figure, plt, footer, logo)
 
@@ -383,31 +413,22 @@ def _secant(
     curves: CurveIndex,
     corner: str,
     options: BranchOptions,
-    gradient_mm: float,
+    half: float,
 ) -> tuple[float, float] | None:
-    """Plotted response at -gradient and +gradient travel, if covered.
-
-    Uses the metric sweep of `wheel_center_z`, like the vertical metrics.
-    """
-    travel = _values(curves, corner, spec.x_signal)
-    response = _values(curves, corner, spec.y_signal)
-    sweep = options.metric_sweep(_values(curves, corner, "wheel_center_z"))
-    if sweep is None or len(travel) != len(response):
+    """Same interpolated secant and sweep as the scalar KnC metric."""
+    try:
+        return secant_points(
+            curves,
+            corner,
+            spec.y_signal,
+            Signal(spec.x_signal, spec.x_at),
+            spec.sweep,
+            half,
+            spec.gradient_unit,
+            options,
+        )
+    except KncKernelError:
         return None
-    travel, response = travel[sweep], response[sweep]
-    finite = np.isfinite(travel) & np.isfinite(response)
-    travel, response = travel[finite], response[finite]
-    if len(travel) < 2:
-        return None
-    order = np.argsort(travel, kind="stable")
-    unique, starts, counts = np.unique(
-        travel[order], return_index=True, return_counts=True
-    )
-    mean = np.add.reduceat(response[order], starts) / counts
-    if unique[0] > -gradient_mm or unique[-1] < gradient_mm:
-        return None
-    lower, upper = np.interp([-gradient_mm, gradient_mm], unique, mean)
-    return float(lower), float(upper)
 
 
 def _draw_secant(
@@ -445,7 +466,9 @@ def _draw_secant(
 def _curve_xy(
     spec: PlotSpec, curves: CurveIndex, corner: str, options: BranchOptions
 ) -> tuple[np.ndarray, np.ndarray]:
-    x = _values(curves, corner, spec.x_signal)
+    x = _values(
+        curves, Signal(spec.x_signal, spec.x_at).location(corner), spec.x_signal
+    )
     y = _values(curves, corner, spec.y_signal)
     if len(x) != len(y):
         raise ValueError(
@@ -454,7 +477,9 @@ def _curve_xy(
     if spec.transform is None:
         return x, y
     denominator = _denominator(spec, curves, corner)
-    sweeps = options.plot_sweeps(_values(curves, corner, "wheel_center_z"))
+    sweeps = options.plot_sweeps(
+        _values(curves, spec.sweep.location(corner), spec.sweep.name)
+    )
     return spec.transform(x, y, denominator, sweeps, options)
 
 
@@ -532,18 +557,23 @@ def _rate_debug_plot(
         raw.set_title(f"Raw {rate}", loc="left")
         final.set_title(f"Final {rate}", loc="left")
 
-        travel = _values(curves, corner, "wheel_center_z")
-        plotted = options.plot_sweeps(travel)
-        _draw_branches(branch, travel, plotted, options.metric_sweep(travel))
+        sweep_values = _values(
+            curves, spec.sweep.location(corner), spec.sweep.name
+        )
+        plotted = options.plot_sweeps(sweep_values)
+        _draw_branches(
+            branch, sweep_values, plotted, options.metric_sweep(sweep_values)
+        )
         for sweep in plotted:
             _draw_sweep(
                 (curvature, raw, final), spec, curves, corner, sweep, options
             )
 
         branch.set_xlabel("sample")
-        branch.set_ylabel("wheel_center_z [mm]")
+        sweep_unit = "deg" if spec.sweep.name == "roll_angle" else "mm"
+        branch.set_ylabel(f"{spec.sweep.name} [{sweep_unit}]")
         for panel in (curvature, raw, final):
-            panel.set_xlabel(f"{spec.x_signal} [mm]")
+            panel.set_xlabel(f"{spec.x_signal} [{spec.gradient_unit}]")
         curvature.set_ylabel("|d²y/dx²|")
         curvature.set_yscale("symlog")
         raw.set_ylabel(rate)
@@ -586,7 +616,11 @@ def _draw_sweep(
 ) -> None:
     """Draw curvature, raw rate and final rate of one plotted sweep."""
     result = sweep_gradient(
-        _values(curves, corner, spec.x_signal),
+        _values(
+            curves,
+            Signal(spec.x_signal, spec.x_at).location(corner),
+            spec.x_signal,
+        ),
         _values(curves, corner, spec.y_signal),
         _denominator(spec, curves, corner),
         sweep,
@@ -652,12 +686,27 @@ def _index(curves: list[dict[str, object]]) -> CurveIndex:
 
 
 def _available(spec: PlotSpec, sources: list[CurveIndex]) -> bool:
-    return all(
-        (corner, signal) in curves
-        for curves in sources
-        for corner, _ in CORNERS
-        for signal in spec.signals
-    )
+    for curves in sources:
+        for corner, _ in CORNERS:
+            if (
+                (
+                    Signal(spec.x_signal, spec.x_at).location(corner),
+                    spec.x_signal,
+                )
+                not in curves
+                or (corner, spec.y_signal) not in curves
+                or (
+                    spec.denominator_signal is not None
+                    and (corner, spec.denominator_signal) not in curves
+                )
+                or (
+                    spec.transform is not None
+                    and (spec.sweep.location(corner), spec.sweep.name)
+                    not in curves
+                )
+            ):
+                return False
+    return True
 
 
 def _new_figure(
@@ -751,6 +800,8 @@ def _add_metric_table(
     table: list[tuple[str, list[float | None]]],
     series: Series,
     footer: str,
+    unit: str = "mm",
+    axis_label: str = "wheel center travel",
 ) -> None:
     """Table above the footer: one row per corner, one cell per source.
 
@@ -784,7 +835,8 @@ def _add_metric_table(
         METRIC_LEFT,
         top,
         f"{gradient.label.capitalize()}, secant between "
-        f"{-gradient_mm:+g} mm and {gradient_mm:+g} mm wheel center travel",
+        f"{-gradient_mm:+g} {unit} and {gradient_mm:+g} {unit} "
+        f"{axis_label.lower()}",
         color=METRIC_TITLE_COLOR,
         fontweight="bold",
     )
