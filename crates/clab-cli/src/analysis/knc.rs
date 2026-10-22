@@ -522,9 +522,7 @@ pub(crate) fn compare_plots(
         VerticalBranch,
         BTreeMap<String, f64>,
     )],
-    baseline_label: &str,
-    footer: &str,
-    prefix: &str,
+    (baseline_label, footer, prefix): (&str, &str, &str),
     debug: Option<&str>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let baseline_json = serde_json::to_string(baseline)?;

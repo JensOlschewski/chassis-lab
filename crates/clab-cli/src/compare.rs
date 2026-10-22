@@ -312,9 +312,11 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 test,
                 (base, base_branch, base_mass),
                 &candidates,
-                "Baseline",
-                &footer,
-                &format!("plots/knc/{}/comparison", test.name()),
+                (
+                    "Baseline",
+                    &footer,
+                    &format!("plots/knc/{}/comparison", test.name()),
+                ),
                 debug.as_deref(),
             )?);
         }
