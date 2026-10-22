@@ -1,13 +1,20 @@
 import json
+from io import BytesIO
 from math import atan, radians, sin
+from pathlib import Path
 
 import numpy as np
 import pytest
+from pypdf import PdfReader
 
-from chassis_lab.knc_kernel import index_curves, signal_values
+from chassis_lab.knc_kernel import BranchOptions, index_curves, signal_values
+from chassis_lab.knc_plot_kernel import _curve_xy
 from chassis_lab.knc_roll_kernel import (
+    PLOT_SPECS,
     _derive_roll_moments,
     metrics,
+    plot,
+    plot_compare,
     roll_center,
 )
 
@@ -90,6 +97,186 @@ def _metrics(
     )
     values = {item["metric"]: item for item in response["metrics"]}
     return values, response["warnings"]
+
+
+def _plot_fixture() -> list[dict[str, object]]:
+    curves = _curves()
+    for axle in ("front", "rear"):
+        for side in ("left", "right"):
+            corner = f"{axle}_{side}"
+            for signal in (
+                "wheel_center_x",
+                "wheel_center_y",
+                "contact_patch_x",
+            ):
+                curves.append(_curve(corner, signal, ROLL))
+    return curves
+
+
+def _pdf_text(data: bytes) -> str:
+    return PdfReader(BytesIO(data)).pages[0].extract_text()
+
+
+def test_roll_corner_plot_catalog_and_secant_axes() -> None:
+    reports = plot(
+        json.dumps(_plot_fixture()),
+        gradient_points_mm=10.0,
+        gradient_points_deg=0.9,
+        branch=json.dumps({"index": 2}),
+    )
+    assert set(reports) == {
+        f"plots/knc/roll/knc_roll_{name}.pdf"
+        for name in (
+            "toe",
+            "toe_vs_roll_angle",
+            "toe_vs_suspension_roll_angle",
+            "camber",
+            "camber_vs_roll_angle",
+            "camber_vs_suspension_roll_angle",
+            "wheel_load",
+            "suspension_rate",
+            "ride_rate",
+            "wheel_load_vs_roll_angle",
+            "wheel_load_vs_suspension_roll_angle",
+            "wcz_vs_wcx",
+            "wcz_vs_wcy",
+            "wpz_vs_cpx",
+            "wpz_vs_cpy",
+        )
+    }
+    assert all(report.startswith(b"%PDF") for report in reports.values())
+    travel = _pdf_text(reports["plots/knc/roll/knc_roll_toe.pdf"])
+    assert "Left front roll steer in deg/mm:" in travel
+    assert "Simulation 0.01" in travel
+    angle = _pdf_text(
+        reports["plots/knc/roll/knc_roll_toe_vs_suspension_roll_angle.pdf"]
+    )
+    assert "Left front roll steer in deg/deg:" in angle
+    assert "-0.9 deg and +0.9 deg suspension roll angle" in angle
+    assert "Simulation 0.1111" in angle
+    body = _pdf_text(reports["plots/knc/roll/knc_roll_toe_vs_roll_angle.pdf"])
+    assert "Left front body-roll steer in deg/deg:" in body
+    assert "-0.9 deg and +0.9 deg body roll angle" in body
+    assert "Simulation 0.1" in body
+    assert "body-roll camber in deg/deg:" in _pdf_text(
+        reports["plots/knc/roll/knc_roll_camber_vs_roll_angle.pdf"]
+    )
+    assert "Roll suspension rate [newton/mm]" in _pdf_text(
+        reports["plots/knc/roll/knc_roll_suspension_rate.pdf"]
+    )
+    assert "Roll ride rate [newton/mm]" in _pdf_text(
+        reports["plots/knc/roll/knc_roll_ride_rate.pdf"]
+    )
+
+
+def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
+    curves = _plot_fixture()
+    info = json.dumps(
+        {
+            "config": "fixture.toml",
+            "creator": "test",
+            "version": "0",
+            "inputs": ["roll.h5"],
+        }
+    )
+    reports = plot(
+        json.dumps(curves),
+        branch=json.dumps({"measurement": True}),
+        debug=info,
+    )
+    for name in ("suspension_rate", "ride_rate"):
+        path = f"plots/knc/roll/debug/measurement_knc_roll_{name}.pdf"
+        assert path in reports
+        text = _pdf_text(reports[path])
+        assert "roll_angle [deg]" in text
+        assert "roll.h5" in text
+
+    compared = plot_compare(
+        json.dumps(curves),
+        json.dumps([{"label": "Candidate", "curves": curves}]),
+        "Baseline",
+        "Config: fixture",
+        (
+            Path(__file__).resolve().parents[2]
+            / "crates/clab-cli/assets/flb-logo.pdf"
+        ).read_bytes(),
+        branches_json=json.dumps([{"measurement": True}] * 2),
+        debug=json.dumps(
+            {**json.loads(info), "inputs": ["baseline.h5", "candidate.h5"]}
+        ),
+    )
+    for index in (0, 1):
+        assert f"debug/series_{index}_knc_roll_ride_rate.pdf" in compared
+    assert "knc_roll_ride_rate.pdf" in compared
+
+
+def test_roll_local_rates_differentiate_within_body_roll_sweeps() -> None:
+    curves = index_curves(_plot_fixture())
+    for name in ("suspension_rate", "ride_rate"):
+        spec = next(
+            spec for spec in PLOT_SPECS if spec.name == f"knc_roll_{name}"
+        )
+        for corner, expected in (("front_left", 30.0), ("rear_right", 40.0)):
+            _, rate = _curve_xy(
+                spec,
+                curves,
+                corner,
+                BranchOptions(plot_branches="selected", index=2),
+            )
+            assert np.isfinite(rate).any()
+            assert rate[np.isfinite(rate)] == pytest.approx(expected)
+
+
+def test_roll_optional_plots_skip_missing_signals_in_analyze_and_compare() -> (
+    None
+):
+    curves = _curves()
+    with pytest.warns(UserWarning, match="knc_roll_wcz_vs_wcx"):
+        reports = plot(json.dumps(curves))
+    assert "plots/knc/roll/knc_roll_wcz_vs_wcx.pdf" not in reports
+    assert "plots/knc/roll/knc_roll_toe.pdf" in reports
+    candidate = [curve for curve in curves if curve["signal"] != "toe"]
+    with pytest.warns(UserWarning, match="knc_roll_toe"):
+        compared = plot_compare(
+            json.dumps(curves),
+            json.dumps([{"label": "Curve 1", "curves": candidate}]),
+            "Baseline",
+            "Config: fixture",
+            (
+                Path(__file__).resolve().parents[2]
+                / "crates/clab-cli/assets/flb-logo.pdf"
+            ).read_bytes(),
+            branches_json=json.dumps([{}, {}]),
+        )
+    assert "knc_roll_toe.pdf" not in compared
+    assert "knc_roll_camber.pdf" in compared
+    assert "Baseline" in _pdf_text(compared["knc_roll_camber.pdf"])
+    assert "Curve 1" in _pdf_text(compared["knc_roll_camber.pdf"])
+
+
+def test_roll_plots_derive_missing_suspension_angle_from_global_geometry() -> (
+    None
+):
+    curves = [
+        item
+        for item in _plot_fixture()
+        if item["signal"] != "suspension_roll_angle"
+    ]
+    for axle in ("front", "rear"):
+        for side, sign in (("left", -1), ("right", 1)):
+            corner = f"{axle}_{side}"
+            curves.extend(
+                (
+                    _curve(
+                        corner,
+                        "wheel_center_global_y",
+                        np.full_like(ROLL, sign * HALF_TRACK),
+                    ),
+                    _curve(corner, "wheel_center_global_z", sign * ROLL),
+                )
+            )
+    reports = plot(json.dumps(curves), gradient_points_deg=1.0)
+    assert "plots/knc/roll/knc_roll_toe_vs_suspension_roll_angle.pdf" in reports
 
 
 def test_roll_secant_metrics_follow_linear_fixture() -> None:

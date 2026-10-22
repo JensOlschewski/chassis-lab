@@ -116,7 +116,7 @@ impl KncTest {
     fn kernels(self) -> &'static [Kernel] {
         match self {
             Self::Vertical => &[CORE_KERNEL, PLOT_KERNEL, VERTICAL_KERNEL],
-            Self::Roll => &[CORE_KERNEL, ROLL_KERNEL],
+            Self::Roll => &[CORE_KERNEL, PLOT_KERNEL, ROLL_KERNEL],
         }
     }
 }
@@ -510,6 +510,7 @@ fn effective_gradient_points(window: &clab_core::config::VerticalWindow) -> f64 
 /// same as `curve_plots` does for a single-source `analyze` report.
 pub(crate) fn compare_plots(
     config: &CaseConfig,
+    test: KncTest,
     (baseline, baseline_branch, baseline_mass): (
         &serde_json::Value,
         &VerticalBranch,
@@ -543,26 +544,45 @@ pub(crate) fn compare_plots(
             .chain(candidates.iter().map(|(_, _, _, mass)| mass))
             .collect::<Vec<_>>(),
     )?;
-    let reports: BTreeMap<String, Vec<u8>> = with_kernel(KncTest::Vertical, |py, module| {
-        module
-            .getattr("plot_compare")?
-            .call1((
+    let reports: BTreeMap<String, Vec<u8>> = with_kernel(test, |py, module| {
+        let gradient = test
+            .config(config)
+            .map(|knc| effective_gradient_points(&knc.window));
+        let function = module.getattr("plot_compare")?;
+        let result = match test {
+            KncTest::Vertical => function.call1((
                 &baseline_json,
                 &candidates_json,
                 baseline_label,
                 footer,
                 logo(py),
-                config
-                    .vertical
-                    .as_ref()
-                    .map(|vertical| effective_gradient_points(&vertical.window)),
+                gradient,
                 &branch,
                 debug,
                 &corner_mass_kg,
-            ))?
-            .extract()
+            ))?,
+            KncTest::Roll => function.call1((
+                &baseline_json,
+                &candidates_json,
+                baseline_label,
+                footer,
+                logo(py),
+                gradient,
+                &branch,
+                test.config(config)
+                    .and_then(|knc| knc.window.gradient_points_deg)
+                    .unwrap_or(1.0),
+                debug,
+            ))?,
+        };
+        result.extract()
     })
-    .context("failed to generate vertical comparison PDF reports with embedded Python")?;
+    .with_context(|| {
+        format!(
+            "failed to generate {} comparison PDF reports with embedded Python",
+            test.name()
+        )
+    })?;
     Ok(reports
         .into_iter()
         .map(|(name, pdf)| (format!("{prefix}/{name}"), pdf))
@@ -956,7 +976,7 @@ fn convention(
         .ok_or_else(|| anyhow::anyhow!("KnC signal convention missing: {name}"))
 }
 
-/// Render KnC vertical PDF plots. Separate from `analyze_input` so slow
+/// Render KnC corner PDF plots. Separate from `analyze_input` so slow
 /// rendering happens only after the caller has already displayed metrics.
 ///
 /// `corner_mass_kg` renders the `ride_frequency` curve plot (same per-corner
@@ -965,6 +985,7 @@ fn convention(
 /// the plot is then skipped like any other optional signal.
 pub(crate) fn curve_plots(
     config: &CaseConfig,
+    test: KncTest,
     curves: &serde_json::Value,
     footer: &str,
     measurement: bool,
@@ -973,28 +994,28 @@ pub(crate) fn curve_plots(
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let source_label = source_label(measurement);
     let curves = serde_json::to_string(curves)?;
-    let gradient = config
-        .vertical
-        .as_ref()
-        .map(|vertical| effective_gradient_points(&vertical.window));
-    let branch = serde_json::to_string(vertical_branch(config, measurement))?;
+    let knc = test.config(config);
+    let gradient = knc.map(|config| effective_gradient_points(&config.window));
+    let branch = serde_json::to_string(knc.map_or_else(
+        || vertical_branch(config, measurement),
+        |config| config.branch.for_measurement(measurement),
+    ))?;
     let corner_mass_kg = serde_json::to_string(corner_mass_kg)?;
-    with_kernel(KncTest::Vertical, |py, module| {
-        module
-            .getattr("plot")?
-            .call1((
-                curves,
-                source_label,
-                footer,
-                logo(py),
-                gradient,
-                &branch,
+    with_kernel(test, |py, module| {
+        let function = module.getattr("plot")?;
+        let result = match test {
+            KncTest::Vertical => function.call1((
+                &curves, source_label, footer, logo(py), gradient, &branch, debug, &corner_mass_kg,
+            ))?,
+            KncTest::Roll => function.call1((
+                &curves, source_label, footer, logo(py), gradient, &branch,
+                knc.and_then(|config| config.window.gradient_points_deg).unwrap_or(1.0),
                 debug,
-                &corner_mass_kg,
-            ))?
-            .extract()
+            ))?,
+        };
+        result.extract()
     })
-    .context("failed to generate vertical PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'")
+    .with_context(|| format!("failed to generate {} PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'", test.name()))
 }
 
 /// Load the embedded kernels of `test` and run `call` with its test kernel.

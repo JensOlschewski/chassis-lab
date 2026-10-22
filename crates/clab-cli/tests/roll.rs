@@ -359,7 +359,11 @@ fn analyzes_roll_measurement_as_curve_bundle() {
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["domains"][0]["test"], "roll");
-    assert!(!output.join("plots").exists());
+    assert!(
+        output
+            .join("plots/knc/roll/knc_roll_wcz_vs_wcx.pdf")
+            .is_file()
+    );
 }
 
 #[test]
@@ -374,6 +378,7 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
         .args([
             "analyze",
             "--verbose",
+            "--debug",
             config_path.to_str().unwrap(),
             input.to_str().unwrap(),
             "-r",
@@ -427,6 +432,16 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
         fs::read_to_string(output.join("metrics.csv"))
             .unwrap()
             .contains("fixture,knc,roll,roll_stiffness_front_nm_per_deg,Nm/deg,")
+    );
+    assert!(
+        output
+            .join("plots/knc/roll/debug/measurement_knc_roll_suspension_rate.pdf")
+            .is_file()
+    );
+    assert!(
+        output
+            .join("plots/knc/roll/knc_roll_ride_rate.pdf")
+            .is_file()
     );
 }
 
@@ -576,6 +591,16 @@ fn analyzes_and_compares_roll_combined_with_vertical_in_one_run() {
     );
     assert!(output.join("knc-vertical.json").is_file());
     assert!(output.join("knc-roll.json").is_file());
+    assert!(
+        output
+            .join("plots/knc/roll/knc_roll_wcz_vs_wcx.pdf")
+            .is_file()
+    );
+    assert!(
+        output
+            .join("plots/knc/vertical/knc_vertical_wcz_vs_wcx.pdf")
+            .is_file()
+    );
 
     let compared = directory.path().join("compare");
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
@@ -595,6 +620,16 @@ fn analyzes_and_compares_roll_combined_with_vertical_in_one_run() {
     assert!(stdout.contains("KnC Roll"), "{stdout}");
     assert!(compared.join("knc-vertical.json").is_file());
     assert!(compared.join("knc-roll.json").is_file());
+    assert!(
+        compared
+            .join("plots/knc/roll/comparison/knc_roll_wcz_vs_wcx.pdf")
+            .is_file()
+    );
+    assert!(
+        compared
+            .join("plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcx.pdf")
+            .is_file()
+    );
 }
 
 #[test]
@@ -613,6 +648,7 @@ fn compares_roll_metrics_between_measurements() {
     let output = directory.path().join("report");
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .arg("compare")
+        .arg("--debug")
         .args([&config_path, &baseline, &candidate])
         .arg("-r")
         .arg(&output)
@@ -639,5 +675,19 @@ fn compares_roll_metrics_between_measurements() {
         .unwrap();
     assert_eq!(stiffness["test"], "roll");
     assert!((stiffness["difference"].as_f64().unwrap() - 100.).abs() < 1e-6);
-    assert!(!output.join("plots").exists());
+    assert!(
+        output
+            .join("plots/knc/roll/comparison/knc_roll_wcz_vs_wcx.pdf")
+            .is_file()
+    );
+    assert!(
+        output
+            .join("plots/knc/roll/comparison/debug/series_0_knc_roll_ride_rate.pdf")
+            .is_file()
+    );
+    assert!(
+        output
+            .join("plots/knc/roll/comparison/debug/series_1_knc_roll_ride_rate.pdf")
+            .is_file()
+    );
 }

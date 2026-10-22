@@ -144,7 +144,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     let mut rows = Vec::new();
     let mut candidates = Vec::new();
     let mut plots = BTreeMap::new();
-    let mut vertical_candidates = Vec::new();
+    let mut knc_candidates: BTreeMap<&str, Vec<_>> = BTreeMap::new();
     let mut candidate_sources = Vec::new();
     let mut unavailable_domains = Vec::new();
     for (index, path) in args.candidates.iter().enumerate() {
@@ -196,11 +196,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     incomplete |= compared.iter().any(|metric| metric.status == "missing");
                     metrics.extend(compared);
                     domains.push(serde_json::json!({"domain": "knc", "test": test.name(), "status": "compared"}));
-                    // Roll comparison plots arrive with #143/#144.
-                    if *test != KncTest::Vertical {
-                        continue;
-                    }
-                    vertical_candidates.push((
+                    knc_candidates.entry(test.name()).or_default().push((
                         format!("Curve {}", index + 1),
                         candidate_curves.clone(),
                         candidate_branch.clone(),
@@ -245,71 +241,83 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         args.tolerances,
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
-    if args.output.is_some()
-        && let Some(ComparedDomain::Knc {
-            test: KncTest::Vertical,
-            curves: base,
-            branch: base_branch,
-            corner_mass_kg: base_mass,
-            ..
-        }) = baseline.domains.get(knc_key(KncTest::Vertical))
-    {
-        let footer = baseline
-            .config
-            .vertical
-            .iter()
-            .map(|vertical| format!("KnC setup: {}", vertical.setup.summary()))
-            .chain(std::iter::once(format!(
-                "Config: {}",
-                absolute_path(&args.config)?.display()
-            )))
-            .chain(std::iter::once(format!(
-                "Baseline: {} | {} | {}",
-                baseline.config.name,
-                baseline.config.loadcase,
-                absolute_path(&args.baseline)?.display()
-            )))
-            .chain(
-                vertical_candidates
-                    .iter()
-                    .map(|(_, _, _, _, metadata, _)| metadata.clone()),
-            )
-            .chain([
-                format!("Created by: {}", report_creator()),
-                format!("clab version: {}", env!("CARGO_PKG_VERSION")),
-            ])
-            .collect::<Vec<_>>()
-            .join("\n");
-        let debug = debug_info(
-            args.debug,
-            &args.config,
-            &std::iter::once(args.baseline.as_path())
-                .chain(vertical_candidates.iter().map(|candidate| candidate.5))
-                .collect::<Vec<_>>(),
-        )?;
-        if debug.is_some()
-            && (!base_branch.measurement
-                || vertical_candidates
-                    .iter()
-                    .any(|(_, _, branch, _, _, _)| !branch.measurement))
+    for test in [KncTest::Vertical, KncTest::Roll] {
+        if args.output.is_some()
+            && let Some(ComparedDomain::Knc {
+                curves: base,
+                branch: base_branch,
+                corner_mass_kg: base_mass,
+                ..
+            }) = baseline.domains.get(knc_key(test))
         {
-            eprintln!(
-                "warning: knc::vertical: debug rate plots require measurement input; skipped for simulation data"
-            );
+            let candidates_for_test = knc_candidates.remove(test.name()).unwrap_or_default();
+            let footer = baseline
+                .config
+                .vertical
+                .iter()
+                .filter(|_| test == KncTest::Vertical)
+                .chain(
+                    baseline
+                        .config
+                        .roll
+                        .iter()
+                        .filter(|_| test == KncTest::Roll),
+                )
+                .map(|config| format!("KnC setup: {}", config.setup.summary()))
+                .chain(std::iter::once(format!(
+                    "Config: {}",
+                    absolute_path(&args.config)?.display()
+                )))
+                .chain(std::iter::once(format!(
+                    "Baseline: {} | {} | {}",
+                    baseline.config.name,
+                    baseline.config.loadcase,
+                    absolute_path(&args.baseline)?.display()
+                )))
+                .chain(
+                    candidates_for_test
+                        .iter()
+                        .map(|(_, _, _, _, metadata, _)| metadata.clone()),
+                )
+                .chain([
+                    format!("Created by: {}", report_creator()),
+                    format!("clab version: {}", env!("CARGO_PKG_VERSION")),
+                ])
+                .collect::<Vec<_>>()
+                .join("\n");
+            let debug = debug_info(
+                args.debug,
+                &args.config,
+                &std::iter::once(args.baseline.as_path())
+                    .chain(candidates_for_test.iter().map(|candidate| candidate.5))
+                    .collect::<Vec<_>>(),
+            )?;
+            if debug.is_some()
+                && (!base_branch.measurement
+                    || candidates_for_test
+                        .iter()
+                        .any(|(_, _, branch, _, _, _)| !branch.measurement))
+            {
+                eprintln!(
+                    "warning: knc::{}: debug rate plots require measurement input; skipped for simulation data",
+                    test.name()
+                );
+            }
+            let candidates = candidates_for_test
+                .into_iter()
+                .map(|(label, curves, branch, mass, _, _)| (label, curves, branch, mass))
+                .collect::<Vec<_>>();
+            plots.extend(knc::compare_plots(
+                &baseline.config,
+                test,
+                (base, base_branch, base_mass),
+                &candidates,
+                "Baseline",
+                &footer,
+                &format!("plots/knc/{}/comparison", test.name()),
+                debug.as_deref(),
+            )?);
         }
-        let candidates = vertical_candidates
-            .into_iter()
-            .map(|(label, curves, branch, mass, _, _)| (label, curves, branch, mass))
-            .collect::<Vec<_>>();
-        plots.extend(knc::compare_plots(
-            &baseline.config,
-            (base, base_branch, base_mass),
-            &candidates,
-            "Baseline",
-            &footer,
-            "plots/knc/vertical/comparison",
-            debug.as_deref(),
-        )?);
     }
     let report = serde_json::json!({
         "schema_version": 1, "command": "compare",
