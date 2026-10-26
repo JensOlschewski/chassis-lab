@@ -358,6 +358,10 @@ fn analyzes_roll_measurement_as_curve_bundle() {
     );
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(
+        report["summary"]["metric_count"],
+        report["metrics"].as_array().unwrap().len()
+    );
     assert_eq!(report["domains"][0]["test"], "roll");
     assert!(
         output
@@ -711,6 +715,9 @@ fn analyzes_and_compares_roll_combined_with_vertical_in_one_run() {
     assert!(stdout.contains("KnC Roll"), "{stdout}");
     assert!(compared.join("knc-vertical.json").is_file());
     assert!(compared.join("knc-roll.json").is_file());
+    let html = fs::read_to_string(compared.join("index.html")).unwrap();
+    assert!(html.contains("href=\"plots/knc/roll/comparison/knc_roll_wcz_vs_wcx.pdf\""));
+    assert!(html.contains("href=\"plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcx.pdf\""));
     assert!(
         compared
             .join("plots/knc/roll/comparison/knc_roll_wcz_vs_wcx.pdf")

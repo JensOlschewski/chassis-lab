@@ -17,7 +17,7 @@ use crate::{
         knc::{self, KncTest},
         svc,
     },
-    analyze::{absolute_path, debug_info, write_bundle},
+    analyze::{absolute_path, debug_info, write_report_bundle},
 };
 
 #[derive(Debug, Args)]
@@ -358,7 +358,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         inputs.extend(baseline.sources.iter().map(PathBuf::as_path));
         inputs.extend(args.candidates.iter().map(PathBuf::as_path));
         inputs.extend(candidate_sources.iter().map(PathBuf::as_path));
-        write_bundle(output, &files, args.force, &inputs)?;
+        write_report_bundle(output, files, args.force, &inputs)?;
         println!("report: {}", output.display());
     }
     println!(
