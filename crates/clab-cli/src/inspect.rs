@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
-use clab_core::svc_simulation_json::SvcSimulationFile;
+use clab_core::svc::SvcSimulationFile;
 use clap::{Args, ValueEnum};
 
 use crate::signals;

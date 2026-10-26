@@ -9,7 +9,7 @@ use clab_core::{
     canonical_hdf5::CanonicalFile,
     config::CaseConfig,
     conventions::{SVC_METRICS, apply_convention_for_final_sample, svc_conventions},
-    svc_simulation_json::SvcSimulationFile,
+    svc::SvcSimulationFile,
 };
 use sha2::{Digest, Sha256};
 

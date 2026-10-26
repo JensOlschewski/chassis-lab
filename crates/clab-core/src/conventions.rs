@@ -1,4 +1,7 @@
-//! Canonical units and signal transformations owned by Rust.
+//! Canonical units and sign/offset conventions for signals, shared
+//! vocabulary between `config` (which signals exist, what unit they use)
+//! and the analysis code that reads and transforms them. Not a file format
+//! — that's `canonical_hdf5`.
 
 use std::{collections::BTreeMap, f64::consts::PI, fmt, str::FromStr};
 
