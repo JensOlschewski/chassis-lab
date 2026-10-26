@@ -312,14 +312,14 @@ fn compares_svc_simulation_and_measurement_references() {
     }));
     assert!(metrics.iter().any(|metric| {
         metric["metric"] == "camber_rear_right_deg"
-            && metric["baseline_value"].is_null()
+            && metric["baseline_value"].is_number()
             && metric["candidate_value"].is_number()
-            && metric["difference"].is_null()
-            && metric["status"] == "missing"
+            && metric["difference"].is_number()
     }));
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.contains("svc::camber_rear_right_deg ... missing (baseline missing; candidate_1 0.00000000; diff_1 missing)"));
-    assert!(!stdout.contains("reference 0.00000000; diff 0.00000000)"));
+    assert!(stdout.contains(
+        "svc::camber_rear_right_deg ... (baseline -1.30000000; candidate_1 0.00000000; diff_1 1.30000000"
+    ));
 }
 
 #[test]
