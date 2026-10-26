@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
-use clab_core::svc_reference::load_svc_reference;
+use clab_core::svc::load_svc_reference;
 use clap::Args;
 use sha2::{Digest, Sha256};
 
@@ -474,7 +474,7 @@ fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
 }
 
 fn write_svc_reference(
-    reference: &clab_core::svc_reference::SvcReference,
+    reference: &clab_core::svc::SvcReference,
     args: &AnalyzeArgs,
     config: &clab_core::config::CaseConfig,
     run: Option<&Path>,
@@ -504,7 +504,7 @@ fn write_svc_reference(
 }
 
 fn svc_reference_reports(
-    reference: &clab_core::svc_reference::SvcReference,
+    reference: &clab_core::svc::SvcReference,
     config: &Path,
     case: &clab_core::config::CaseConfig,
 ) -> Result<SvcReferenceReports> {

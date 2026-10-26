@@ -1,4 +1,12 @@
-//! Canonical HDF5 input schema (version 2; version 1 remains readable).
+//! The canonical HDF5 file format itself: schema, reading, and writing.
+//!
+//! This is the one normalized input shape both domains (SVC and KnC) and
+//! both source kinds (simulation and measurement) share, produced by
+//! `clab convert` (see `clab-converter`) from each format's raw native data.
+//! SVC also accepts its own native JSON directly without this conversion —
+//! see `svc`. Not configuration — that's `config`.
+//!
+//! Schema version 2; version 1 remains readable.
 //!
 //! Root attributes:
 //! `schema_version` (uint32),

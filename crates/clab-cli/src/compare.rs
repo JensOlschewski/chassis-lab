@@ -475,7 +475,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             }
             Some(clab_core::config::SourceKind::Simulation) => svc::evaluate_case(&case)?,
             Some(clab_core::config::SourceKind::Measurement) => {
-                clab_core::svc_reference::load_svc_reference(
+                clab_core::svc::load_svc_reference(
                     &case.simulation_json,
                     &case.svc_measurement_signals,
                 )

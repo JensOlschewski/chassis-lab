@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::{fs, path::PathBuf};
 
 use hdf5::File;
+use hdf5::plist::file_access::FileCloseDegree;
 use hdf5::types::VarLenUnicode;
 use tempfile::tempdir;
 
@@ -165,7 +166,12 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     // Version 1: no domain or test, still readable, with a warning.
     let legacy = directory.path().join("legacy.h5");
     std::fs::copy(&path, &legacy).unwrap();
-    let file = hdf5::File::open_rw(&legacy).unwrap();
+    // The CLI opens this fixture in another process; release every HDF5
+    // handle before spawning it, including handles retained by the library.
+    let file = File::with_options()
+        .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong))
+        .open_rw(&legacy)
+        .unwrap();
     file.attr("schema_version")
         .unwrap()
         .write_scalar(&1_u32)
@@ -184,7 +190,10 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     // Version 2 requires the domain.
     let broken = directory.path().join("broken.h5");
     std::fs::copy(&path, &broken).unwrap();
-    let file = hdf5::File::open_rw(&broken).unwrap();
+    let file = File::with_options()
+        .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong))
+        .open_rw(&broken)
+        .unwrap();
     file.delete_attr("domain").unwrap();
     file.close().unwrap();
     let result = inspect(&broken);
