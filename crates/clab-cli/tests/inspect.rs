@@ -164,13 +164,14 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     assert!(!String::from_utf8_lossy(&current.stderr).contains("warning"));
 
     // Version 1: no domain or test, still readable, with a warning.
+    let legacy_staging = directory.path().join("legacy-staging.h5");
     let legacy = directory.path().join("legacy.h5");
-    std::fs::copy(&path, &legacy).unwrap();
-    // The CLI opens this fixture in another process; release every HDF5
-    // handle before spawning it, including handles retained by the library.
+    fs::copy(&path, &legacy_staging).unwrap();
+    // Edit a staging file, then copy it to a new inode. HDF5 may retain a
+    // lock on the edited file even after its handles have been closed.
     let file = File::with_options()
         .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong))
-        .open_rw(&legacy)
+        .open_rw(&legacy_staging)
         .unwrap();
     file.attr("schema_version")
         .unwrap()
@@ -179,6 +180,7 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     file.delete_attr("domain").unwrap();
     file.delete_attr("test").unwrap();
     file.close().unwrap();
+    fs::copy(&legacy_staging, &legacy).unwrap();
     let result = inspect(&legacy);
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(result.status.success(), "{stderr}");
@@ -188,14 +190,16 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     );
 
     // Version 2 requires the domain.
+    let broken_staging = directory.path().join("broken-staging.h5");
     let broken = directory.path().join("broken.h5");
-    std::fs::copy(&path, &broken).unwrap();
+    fs::copy(&path, &broken_staging).unwrap();
     let file = File::with_options()
         .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong))
-        .open_rw(&broken)
+        .open_rw(&broken_staging)
         .unwrap();
     file.delete_attr("domain").unwrap();
     file.close().unwrap();
+    fs::copy(&broken_staging, &broken).unwrap();
     let result = inspect(&broken);
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(!result.status.success(), "{stderr}");
