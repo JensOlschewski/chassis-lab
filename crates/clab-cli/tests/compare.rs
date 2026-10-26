@@ -129,13 +129,19 @@ fn compares_svc_inputs_and_protects_reports_and_inputs() {
         .map(|metric| stdout.find(&format!("svc::{metric}")).unwrap())
         .collect::<Vec<_>>();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-    for name in ["report.json", "metrics.csv", "svc.json"] {
+    for name in ["report.json", "metrics.csv", "svc.json", "index.html"] {
         assert!(output.join(name).is_file(), "missing {name}");
     }
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["command"], "compare");
     assert_eq!(report["status"], "informational");
+    assert_eq!(report["summary"]["overall"]["total"], 29);
+    assert_eq!(report["summary"]["overall"]["informational"], 29);
+    let html = fs::read_to_string(output.join("index.html")).unwrap();
+    assert!(html.contains("href=\"report.json\""));
+    assert!(html.contains("29 informational"));
+    assert!(!html.contains("<h2>Plots</h2>"));
     assert_eq!(report["baseline"]["case"]["name"], "undefined");
     assert_eq!(report["baseline"]["case"]["loadcase"], "undefined");
     assert_eq!(report["candidates"][0]["case"]["name"], "undefined");

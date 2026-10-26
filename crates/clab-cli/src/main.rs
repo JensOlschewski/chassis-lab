@@ -9,6 +9,7 @@ mod analyze;
 mod compare;
 mod convert;
 mod inspect;
+mod report;
 mod signals;
 
 #[derive(Debug, Parser)]

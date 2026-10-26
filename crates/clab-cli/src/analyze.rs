@@ -276,7 +276,7 @@ fn write_combined_run(
         .iter()
         .map(|(name, contents)| (name.as_str(), contents.clone()))
         .collect::<Vec<_>>();
-    write_bundle(output, &files, args.force, &inputs)?;
+    write_report_bundle(output, files, args.force, &inputs)?;
     println!("report: {}", output.display());
     Ok(())
 }
@@ -488,9 +488,9 @@ fn write_svc_reference(
     print_metrics(reports.report["metrics"].as_array().unwrap());
     print_warnings(&reports.warnings, args);
     if let Some(output) = &args.output {
-        write_bundle(
+        write_report_bundle(
             output,
-            &[
+            vec![
                 ("report.json", reports.detail.clone().into_bytes()),
                 ("metrics.csv", reports.csv.into_bytes()),
                 ("svc.json", reports.detail.into_bytes()),
@@ -587,9 +587,9 @@ fn write_svc_report(
             bundle["inputs"]["run"] = provenance(run)?;
         }
         let detail = serde_json::to_string_pretty(&bundle)? + "\n";
-        write_bundle(
+        write_report_bundle(
             output,
-            &[
+            vec![
                 ("report.json", detail.clone().into_bytes()),
                 ("metrics.csv", report.csv.into_bytes()),
                 ("svc.json", detail.into_bytes()),
@@ -744,7 +744,7 @@ fn write_knc(
     if let Some(run) = run {
         inputs.push(run);
     }
-    write_bundle(output, &files, args.force, &inputs)?;
+    write_report_bundle(output, files, args.force, &inputs)?;
     println!("report: {}", output.display());
     Ok(())
 }
@@ -871,7 +871,17 @@ fn provenance(path: &Path) -> Result<serde_json::Value> {
     )
 }
 
-pub(crate) fn write_bundle(
+pub(crate) fn write_report_bundle(
+    output: &Path,
+    files: Vec<(&str, Vec<u8>)>,
+    force: bool,
+    inputs: &[&Path],
+) -> Result<()> {
+    let files = crate::report::prepare(files)?;
+    write_bundle(output, &files, force, inputs)
+}
+
+fn write_bundle(
     output: &Path,
     files: &[(&str, Vec<u8>)],
     force: bool,

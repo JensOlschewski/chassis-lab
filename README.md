@@ -100,8 +100,9 @@ clab inspect --mapping knc --test vertical --template
 
 Analyze one normalized input or run manifest to calculate metrics and curves.
 
-- Use `--report PATH` to write a report bundle (SVC: JSON/CSV; KnC vertical:
-  JSON/CSV/PDF; KnC roll: JSON/CSV, plots follow).
+- Use `--report PATH` to write a report bundle with `report.json`, `metrics.csv`,
+  and a browsable `index.html` overview. KnC reports also include JSON details
+  and PDF plots.
 - A run manifest may combine `[input.svc]`, `[input.knc.vertical]` and
   `[input.knc.roll]`; each KnC test writes its own `knc-<test>.json`.
 - Use `--debug` for measurement branch detection diagnostics (needs `--report`).
@@ -127,7 +128,8 @@ Compare compatible SVC or KnC baseline and candidate inputs.
 
 - Use `--tolerances` (`-t`) for pass/fail status from config tolerances (without
   it, metrics are informational only).
-- Use `--report PATH` to write a report bundle.
+- Use `--report PATH` to write a report bundle with `report.json`, `metrics.csv`,
+  and a browsable `index.html` linking available KnC PDF plots.
 - Use `--debug` for measurement rate-filter diagnostics (needs `--report`).
 - Use `--force` to replace an existing report bundle.
 

@@ -221,6 +221,12 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     assert_eq!(report["case"]["loadcase"], "undefined");
     let metrics = report["metrics"].as_array().unwrap();
     assert_eq!(metrics.len(), 29);
+    assert_eq!(report["summary"]["metric_count"], 29);
+    assert_eq!(report["summary"]["missing_count"], 0);
+    assert_eq!(report["summary"]["warning_count"], 0);
+    let html = fs::read_to_string(output.join("index.html")).unwrap();
+    assert!(html.contains("29 metrics"));
+    assert!(html.contains("href=\"metrics.csv\""));
     assert_eq!(
         metrics
             .iter()
