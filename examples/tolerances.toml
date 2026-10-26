@@ -23,6 +23,22 @@ wheelbase_mm = 0.01
 front_track_mm = 0.01
 rear_track_mm = 0.01
 cg_x_from_front_axle_mm = 0.01
+cg_height_mm = 1.0
+ride_height_front_left_mm = 1.0
+ride_height_front_right_mm = 1.0
+ride_height_rear_left_mm = 1.0
+ride_height_rear_right_mm = 1.0
+toe_front_left_deg = 0.05
+toe_front_right_deg = 0.05
+toe_rear_left_deg = 0.05
+toe_rear_right_deg = 0.05
+camber_front_left_deg = 0.05
+camber_front_right_deg = 0.05
+camber_rear_left_deg = 0.05
+camber_rear_right_deg = 0.05
+inertia_xx_kg_mm2 = 500.0
+inertia_yy_kg_mm2 = 1000.0
+inertia_zz_kg_mm2 = 1000.0
 
 [svc.validation.tolerances.relative_percent]
 total_mass_kg = 1.0
@@ -49,6 +65,16 @@ wheel_recession_angle_front_left_deg = 0.5
 wheel_recession_angle_front_right_deg = 0.5
 wheel_recession_angle_rear_left_deg = 0.5
 wheel_recession_angle_rear_right_deg = 0.5
+
+brake_support_angle_front_left_deg = 0.5
+brake_support_angle_front_right_deg = 0.5
+brake_support_angle_rear_left_deg = 0.5
+brake_support_angle_rear_right_deg = 0.5
+
+ride_frequency_front_left_hz = 0.05
+ride_frequency_front_right_hz = 0.05
+ride_frequency_rear_left_hz = 0.05
+ride_frequency_rear_right_hz = 0.05
 
 suspension_rate_front_left_n_per_mm = 1.0
 suspension_rate_front_right_n_per_mm = 1.0
@@ -82,3 +108,67 @@ tire_rate_rear_left_n_per_mm = 5.0
 tire_rate_rear_right_n_per_mm = 5.0
 
 # KnC roll tolerances
+[knc.roll.validation.tolerances.absolute]
+roll_steer_front_left_deg_per_mm = 0.005
+roll_steer_front_right_deg_per_mm = 0.005
+roll_steer_rear_left_deg_per_mm = 0.005
+roll_steer_rear_right_deg_per_mm = 0.005
+
+roll_camber_front_left_deg_per_mm = 0.005
+roll_camber_front_right_deg_per_mm = 0.005
+roll_camber_rear_left_deg_per_mm = 0.005
+roll_camber_rear_right_deg_per_mm = 0.005
+
+roll_steer_front_left_deg_per_deg = 0.05
+roll_steer_front_right_deg_per_deg = 0.05
+roll_steer_rear_left_deg_per_deg = 0.05
+roll_steer_rear_right_deg_per_deg = 0.05
+
+roll_camber_front_left_deg_per_deg = 0.05
+roll_camber_front_right_deg_per_deg = 0.05
+roll_camber_rear_left_deg_per_deg = 0.05
+roll_camber_rear_right_deg_per_deg = 0.05
+
+roll_suspension_rate_front_left_n_per_mm = 5.0
+roll_suspension_rate_front_right_n_per_mm = 5.0
+roll_suspension_rate_rear_left_n_per_mm = 5.0
+roll_suspension_rate_rear_right_n_per_mm = 5.0
+
+roll_ride_rate_front_left_n_per_mm = 5.0
+roll_ride_rate_front_right_n_per_mm = 5.0
+roll_ride_rate_rear_left_n_per_mm = 5.0
+roll_ride_rate_rear_right_n_per_mm = 5.0
+
+roll_center_height_front_mm = 10.0
+roll_center_height_rear_mm = 10.0
+
+roll_stiffness_front_nm_per_deg = 50.0
+roll_stiffness_rear_nm_per_deg = 50.0
+roll_stiffness_total_nm_per_deg = 50.0
+roll_stiffness_distribution_front_pct = 5.0
+roll_stiffness_distribution_rear_pct = 5.0
+
+roll_stiffness_suspension_front_nm_per_deg = 100.0
+roll_stiffness_suspension_rear_nm_per_deg = 100.0
+roll_stiffness_suspension_total_nm_per_deg = 100.0
+roll_stiffness_suspension_distribution_front_pct = 5.0
+roll_stiffness_suspension_distribution_rear_pct = 5.0
+
+[knc.roll.validation.tolerances.relative_percent]
+roll_suspension_rate_front_left_n_per_mm = 10.0
+roll_suspension_rate_front_right_n_per_mm = 10.0
+roll_suspension_rate_rear_left_n_per_mm = 10.0
+roll_suspension_rate_rear_right_n_per_mm = 10.0
+
+roll_ride_rate_front_left_n_per_mm = 10.0
+roll_ride_rate_front_right_n_per_mm = 10.0
+roll_ride_rate_rear_left_n_per_mm = 10.0
+roll_ride_rate_rear_right_n_per_mm = 10.0
+
+roll_stiffness_front_nm_per_deg = 10.0
+roll_stiffness_rear_nm_per_deg = 10.0
+roll_stiffness_total_nm_per_deg = 10.0
+
+roll_stiffness_suspension_front_nm_per_deg = 10.0
+roll_stiffness_suspension_rear_nm_per_deg = 10.0
+roll_stiffness_suspension_total_nm_per_deg = 10.0

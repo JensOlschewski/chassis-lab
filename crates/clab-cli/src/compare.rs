@@ -739,12 +739,26 @@ fn print_metrics(
                 grouped.push((metric.test, &metric.metric, vec![(index, metric)]));
             }
         }
+        grouped.sort_by_key(|(test, name, _)| {
+            crate::analysis::display::console_metric_order(domain, *test, name)
+        });
         println!("{title}\nbaseline: {}", baseline.display());
         for (index, candidate) in candidates.iter().enumerate() {
             println!("candidate_{}: {}", index + 1, candidate.display());
         }
-        println!("running {} metrics", grouped.len());
-        for (test, metric_name, values) in grouped {
+        println!(
+            "running {} metrics",
+            grouped
+                .iter()
+                .filter(|(test, name, _)| {
+                    crate::analysis::display::show_metric(domain, *test, name)
+                })
+                .count()
+        );
+        for (test, metric_name, values) in grouped
+            .into_iter()
+            .filter(|(test, name, _)| crate::analysis::display::show_metric(domain, *test, name))
+        {
             let name = crate::analysis::display::qualified_metric_name(domain, test, metric_name);
             let baseline_value = values[0].1.baseline_value;
             let unit = &values[0].1.unit;

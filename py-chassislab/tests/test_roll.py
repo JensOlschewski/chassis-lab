@@ -94,7 +94,6 @@ def _metrics(
                 "gradient_deg": 1.0,
                 "curves": json.dumps(curves),
                 "branch": {"index": 2},
-                "arb_connected": json.dumps({"front": False, "rear": True}),
                 **request,
             }
         )
@@ -457,7 +456,7 @@ def test_roll_secant_metrics_follow_linear_fixture() -> None:
     assert values["roll_camber_front_right_deg_per_mm"][
         "value"
     ] == pytest.approx(-0.03)
-    assert values["roll_wheel_rate_rear_left_n_per_mm"][
+    assert values["roll_suspension_rate_rear_left_n_per_mm"][
         "value"
     ] == pytest.approx(40.0)
     assert values["roll_stiffness_front_nm_per_deg"]["value"] == pytest.approx(
@@ -469,12 +468,56 @@ def test_roll_secant_metrics_follow_linear_fixture() -> None:
     assert values["roll_stiffness_distribution_front_pct"][
         "value"
     ] == pytest.approx(100.0 * 450.0 / 1050.0)
+    assert values["roll_stiffness_distribution_rear_pct"][
+        "value"
+    ] == pytest.approx(100.0 * 600.0 / 1050.0)
+    # Suspension-only stiffness divides by each axle's own suspension roll
+    # (0.9/0.8 deg per deg of body roll), not by body roll directly; "total"
+    # divides by the front/rear mean, so it is not simply front + rear.
+    front_suspension = 450.0 / 0.9
+    rear_suspension = 600.0 / 0.8
+    total_suspension = 1050.0 / 0.85
+    assert values["roll_stiffness_suspension_front_nm_per_deg"][
+        "value"
+    ] == pytest.approx(front_suspension)
+    assert values["roll_stiffness_suspension_rear_nm_per_deg"][
+        "value"
+    ] == pytest.approx(rear_suspension)
+    assert values["roll_stiffness_suspension_total_nm_per_deg"][
+        "value"
+    ] == pytest.approx(total_suspension)
+    assert values["roll_stiffness_suspension_distribution_front_pct"][
+        "value"
+    ] == pytest.approx(100.0 * front_suspension / total_suspension)
+    assert values["roll_stiffness_suspension_distribution_rear_pct"][
+        "value"
+    ] == pytest.approx(100.0 * rear_suspension / total_suspension)
+    for axle, load_per_mm in (("front", 30.0), ("rear", 40.0)):
+        for side in ("left", "right"):
+            location = f"{axle}_{side}"
+            ride = values[f"roll_ride_rate_{location}_n_per_mm"]
+            assert ride["unit"] == "N/mm"
+            assert ride["value"] == pytest.approx(load_per_mm)
     steer = values["roll_steer_front_left_deg_per_deg"]
     assert steer["interval_deg"] == [-1.0, 1.0]
     assert values["roll_steer_front_left_deg_per_mm"]["interval_mm"] == [
         -10.0,
         10.0,
     ]
+
+
+def test_roll_ride_rate_uses_pad_not_wheel_center_travel() -> None:
+    curves = _curves()
+    for curve in curves:
+        if curve["signal"] == "wheel_pad_z":
+            curve["values"] = (2.0 * np.asarray(curve["values"])).tolist()
+    values, _ = _metrics(curves)
+    assert values["roll_suspension_rate_front_left_n_per_mm"][
+        "value"
+    ] == pytest.approx(30.0)
+    assert values["roll_ride_rate_front_left_n_per_mm"][
+        "value"
+    ] == pytest.approx(15.0)
 
 
 def _with_global_wheel_centers(curves):
@@ -532,18 +575,6 @@ def test_invalid_suspension_roll_geometry_does_not_produce_a_metric() -> None:
     values, warnings = _metrics(curves)
     assert values["roll_steer_front_left_deg_per_deg"]["value"] is None
     assert any("invalid wheel-center geometry" in w for w in warnings)
-
-
-def test_roll_wheel_rate_without_arb_follows_configured_arb_state() -> None:
-    values, _ = _metrics(_curves())
-    front = values["roll_wheel_rate_without_arb_front_left_n_per_mm"]
-    assert front["value"] == pytest.approx(30.0)
-    rear = values["roll_wheel_rate_without_arb_rear_left_n_per_mm"]
-    assert rear["value"] is None
-    assert rear["reason"] == "rear anti-roll bar is connected"
-    values, _ = _metrics(_curves(), arb_connected=json.dumps({"front": True}))
-    rear = values["roll_wheel_rate_without_arb_rear_left_n_per_mm"]
-    assert rear["reason"] == "rear_arb_connected is not configured"
 
 
 def test_roll_center_matches_contact_path_geometry_per_axle() -> None:

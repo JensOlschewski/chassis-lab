@@ -132,6 +132,7 @@ const CORE_KERNEL: Kernel = Kernel(
     c"knc_kernel.py",
     c"chassis_lab.knc_kernel",
 );
+
 const PLOT_KERNEL: Kernel = Kernel(
     concat!(
         include_str!("../../../../py-chassislab/src/chassis_lab/knc_plot_kernel.py"),
@@ -140,6 +141,7 @@ const PLOT_KERNEL: Kernel = Kernel(
     c"knc_plot_kernel.py",
     c"chassis_lab.knc_plot_kernel",
 );
+
 const VERTICAL_KERNEL: Kernel = Kernel(
     concat!(
         include_str!("../../../../py-chassislab/src/chassis_lab/knc_vertical_kernel.py"),
@@ -148,6 +150,7 @@ const VERTICAL_KERNEL: Kernel = Kernel(
     c"knc_vertical_kernel.py",
     c"chassis_lab.knc_vertical_kernel",
 );
+
 const ROLL_KERNEL: Kernel = Kernel(
     concat!(
         include_str!("../../../../py-chassislab/src/chassis_lab/knc_roll_kernel.py"),
@@ -392,31 +395,23 @@ fn gradient_metrics(
     }
     let curves = serde_json::to_string(curves)?;
     let branch = serde_json::to_string(knc.branch.for_measurement(measurement))?;
-    let extras = match test {
-        KncTest::Vertical => [
+    let extras: Vec<(&str, String)> = match test {
+        KncTest::Vertical => vec![
             ("corner_mass_kg", serde_json::to_string(corner_mass_kg)?),
             (
                 "corner_mass_source",
                 serde_json::to_string(corner_mass_source)?,
             ),
         ],
-        KncTest::Roll => [
-            (
-                "arb_connected",
-                serde_json::to_string(&serde_json::json!({
-                    "front": knc.setup.front_arb_connected,
-                    "rear": knc.setup.rear_arb_connected,
-                }))?,
-            ),
-            (
-                "gradient_deg",
-                window
-                    .gradient_points_deg
-                    .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG)
-                    .to_string(),
-            ),
-        ],
+        KncTest::Roll => vec![(
+            "gradient_deg",
+            window
+                .gradient_points_deg
+                .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG)
+                .to_string(),
+        )],
     };
+
     let response: String = with_kernel(test, |py, module| {
         let request = PyDict::new(py);
         request.set_item("gradient_mm", gradient)?;
@@ -441,6 +436,7 @@ fn gradient_metrics(
             test.name()
         )
     })?;
+
     warnings.extend(
         response["warnings"]
             .as_array()
@@ -448,6 +444,7 @@ fn gradient_metrics(
             .flatten()
             .filter_map(|warning| warning.as_str().map(str::to_owned)),
     );
+
     Ok(metrics
         .iter()
         .map(|metric| {

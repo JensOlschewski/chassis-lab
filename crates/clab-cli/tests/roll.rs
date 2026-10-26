@@ -366,6 +366,45 @@ fn analyzes_roll_measurement_as_curve_bundle() {
     );
 }
 
+fn assert_roll_console_order(stdout: &str) {
+    let mut expected = Vec::new();
+    for family in ["roll_camber", "roll_steer"] {
+        for unit in ["deg_per_mm", "deg_per_deg"] {
+            for corner in ["front_left", "front_right", "rear_left", "rear_right"] {
+                expected.push(format!("{family}_{corner}_{unit}"));
+            }
+        }
+    }
+    for family in ["roll_suspension_rate", "roll_ride_rate"] {
+        for corner in ["front_left", "front_right", "rear_left", "rear_right"] {
+            expected.push(format!("{family}_{corner}_n_per_mm"));
+        }
+    }
+    expected.extend(
+        [
+            "roll_center_height_front_mm",
+            "roll_center_height_rear_mm",
+            "roll_stiffness_front_nm_per_deg",
+            "roll_stiffness_rear_nm_per_deg",
+            "roll_stiffness_total_nm_per_deg",
+            "roll_stiffness_distribution_front_pct",
+            "roll_stiffness_distribution_rear_pct",
+            "roll_stiffness_suspension_front_nm_per_deg",
+            "roll_stiffness_suspension_rear_nm_per_deg",
+            "roll_stiffness_suspension_total_nm_per_deg",
+            "roll_stiffness_suspension_distribution_front_pct",
+            "roll_stiffness_suspension_distribution_rear_pct",
+        ]
+        .map(str::to_owned),
+    );
+    let actual: Vec<_> = stdout
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("knc::roll::"))
+        .map(|line| line.split(" ...").next().unwrap())
+        .collect();
+    assert_eq!(actual, expected, "{stdout}");
+}
+
 #[test]
 fn analyzes_roll_metrics_from_measurement_cycles() {
     let directory = tempdir().unwrap();
@@ -388,6 +427,29 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(result.status.success(), "{stderr}");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        stdout.contains("KnC Roll\nrunning 36 metrics\n"),
+        "{stdout}"
+    );
+    assert_roll_console_order(&stdout);
+    assert!(
+        stdout.contains("knc::roll::roll_ride_rate_front_left_n_per_mm"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("knc::roll::roll_suspension_rate_front_left_n_per_mm"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("knc::roll::roll_stiffness_distribution_rear_pct"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("knc::roll::roll_stiffness_suspension_distribution_rear_pct"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("knc::roll::roll_wheel_rate_"), "{stdout}");
     assert!(stderr.contains(
         "knc::roll: config key 'gradient_points_deg' missing in [setup.knc.metric]; using default 1 deg"
     ));
@@ -413,6 +475,14 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
         .as_f64()
         .unwrap();
     assert!((distribution - 100. * 500. / 900.).abs() < 1e-6);
+    assert!(
+        (metric("roll_stiffness_distribution_rear_pct")["value"]
+            .as_f64()
+            .unwrap()
+            - 100. * 400. / 900.)
+            .abs()
+            < 1e-6
+    );
     // Contact paths at atan(0.1) over a 1500 mm track: rc_z = 75 mm.
     let height = metric("roll_center_height_front_mm");
     assert!(
@@ -420,14 +490,18 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
         "{height}"
     );
     assert_eq!(height["lateral_signal"], "center_of_pressure_y");
-    assert!(
-        (metric("roll_wheel_rate_without_arb_front_left_n_per_mm")["value"]
-            .as_f64()
-            .unwrap()
-            - 500. / 15.)
-            .abs()
-            < 1e-6
-    );
+    let ride = metric("roll_ride_rate_front_left_n_per_mm");
+    assert_eq!(ride["unit"], "N/mm");
+    assert!((ride["value"].as_f64().unwrap() - 500. / 15.).abs() < 1e-6);
+    // Front suspension roll is mapped at 0.9 deg per deg body roll; rear has
+    // no suspension-roll mapping or wheel-center-global fallback, so rear and
+    // the front/rear-mean "total" stay unavailable.
+    let suspension_front = metric("roll_stiffness_suspension_front_nm_per_deg");
+    assert_eq!(suspension_front["unit"], "Nm/deg");
+    assert!((suspension_front["value"].as_f64().unwrap() - 500. / 0.9).abs() < 1e-6);
+    assert!(metric("roll_stiffness_suspension_rear_nm_per_deg")["value"].is_null());
+    assert!(metric("roll_stiffness_suspension_total_nm_per_deg")["value"].is_null());
+    assert!(metric("roll_stiffness_suspension_distribution_front_pct")["value"].is_null());
     assert!(
         fs::read_to_string(output.join("metrics.csv"))
             .unwrap()
@@ -678,6 +752,17 @@ fn compares_roll_metrics_between_measurements() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert!(stdout.contains("KnC Roll"), "{stdout}");
+    assert!(stdout.contains("running 36 metrics\n"), "{stdout}");
+    assert_roll_console_order(&stdout);
+    assert!(
+        stdout.contains("knc::roll::roll_ride_rate_front_left_n_per_mm"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("knc::roll::roll_suspension_rate_front_left_n_per_mm"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("knc::roll::roll_wheel_rate_"), "{stdout}");
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("knc-roll.json")).unwrap()).unwrap();
     assert_eq!(

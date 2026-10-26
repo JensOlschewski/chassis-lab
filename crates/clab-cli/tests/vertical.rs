@@ -470,6 +470,7 @@ fn assert_measurement_metrics(
         stdout.contains("KnC Vertical\nrunning 36 metrics"),
         "{stdout}"
     );
+    assert_vertical_console_order(&stdout);
     let stderr = String::from_utf8_lossy(&result.stderr);
     if gradient.is_empty() {
         // Every other key is set, so only the gradient default is reported.
@@ -843,16 +844,32 @@ fn comparison_config(path: &std::path::Path, tolerance: &str) {
 }
 
 const EXPECTED_METRICS: [(&str, &str); 9] = [
-    ("brake_support_angle", "deg"),
     ("bump_camber", "deg_per_mm"),
-    ("bump_spin", "deg_per_mm"),
     ("bump_steer", "deg_per_mm"),
+    ("bump_spin", "deg_per_mm"),
+    ("brake_support_angle", "deg"),
+    ("wheel_recession_angle", "deg"),
     ("ride_frequency", "hz"),
     ("ride_rate", "n_per_mm"),
     ("suspension_rate", "n_per_mm"),
     ("tire_rate", "n_per_mm"),
-    ("wheel_recession_angle", "deg"),
 ];
+
+fn assert_vertical_console_order(stdout: &str) {
+    let expected: Vec<_> = EXPECTED_METRICS
+        .iter()
+        .flat_map(|(family, unit)| {
+            ["front_left", "front_right", "rear_left", "rear_right"]
+                .map(move |corner| format!("{family}_{corner}_{unit}"))
+        })
+        .collect();
+    let actual: Vec<_> = stdout
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("knc::vertical::"))
+        .map(|line| line.split(" ...").next().unwrap())
+        .collect();
+    assert_eq!(actual, expected, "{stdout}");
+}
 
 #[test]
 fn compares_only_gradient_metrics_with_overlays() {
@@ -907,6 +924,7 @@ fn compares_only_gradient_metrics_with_overlays() {
     assert_eq!(report["status"], "informational");
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(stdout.contains("KnC Vertical\nbaseline:"));
+    assert_vertical_console_order(&stdout);
     assert!(stdout.contains("knc::vertical::bump_steer_front_left_deg_per_mm ... (baseline"));
     assert!(!stdout.contains("wheel_center_x_mm"));
     let svg = output.join("plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcy.pdf");
