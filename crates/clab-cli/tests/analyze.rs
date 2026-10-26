@@ -177,8 +177,8 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stdout.starts_with("\nSVC\nrunning 29 metrics\n"));
     assert!(stdout.contains("  svc::front_left_mass_kg ... 420.0 kg"));
-    assert!(stdout.contains("  svc::cg_height_mm ... missing mm"));
-    assert!(stderr.contains("16 analysis warnings; details in"));
+    assert!(stdout.contains("  svc::cg_height_mm ... 600.0 mm"));
+    assert!(stderr.is_empty());
     let expected = [
         "front_left_mass_kg",
         "front_right_mass_kg",
@@ -242,9 +242,9 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     assert!(
         metrics
             .iter()
-            .any(|metric| { metric["metric"] == "cg_height_mm" && metric["value"].is_null() })
+            .any(|metric| { metric["metric"] == "cg_height_mm" && metric["value"] == 600.0 })
     );
-    assert_eq!(report["warnings"].as_array().unwrap().len(), 16);
+    assert!(report["warnings"].as_array().unwrap().is_empty());
 
     let verbose = clab()
         .args([
@@ -256,10 +256,6 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
         .output()
         .unwrap();
     assert!(verbose.status.success());
-    assert!(
-        String::from_utf8_lossy(&verbose.stderr)
-            .contains("svc: metric 'cg_height_mm' is missing from measurement reference")
-    );
 }
 
 #[test]

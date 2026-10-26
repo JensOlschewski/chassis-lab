@@ -189,7 +189,7 @@ fn write_combined_run(
         print_metrics(reports.report["metrics"].as_array().unwrap());
     }
     for (test, _, report, _) in &knc_reports {
-        print_header(test.title(), report.metrics.len());
+        print_header(test.title(), visible_metric_count(&report.metrics));
         print_metrics(&report.metrics);
     }
     print_warnings(&warnings, args);
@@ -603,7 +603,15 @@ fn write_svc_report(
 }
 
 fn print_metrics(metrics: &[serde_json::Value]) {
-    for metric in metrics {
+    let mut visible: Vec<_> = visible_metrics(metrics).collect();
+    visible.sort_by_key(|metric| {
+        crate::analysis::display::console_metric_order(
+            metric["domain"].as_str().unwrap_or_default(),
+            metric["test"].as_str(),
+            metric["metric"].as_str().unwrap(),
+        )
+    });
+    for metric in visible {
         let value = if metric["value"].is_null() {
             if std::io::stdout().is_terminal() {
                 "\x1b[38;5;208mmissing\x1b[0m".into()
@@ -620,6 +628,20 @@ fn print_metrics(metrics: &[serde_json::Value]) {
         );
         println!("  {name} ... {value} {}", metric["unit"].as_str().unwrap());
     }
+}
+
+fn visible_metrics(metrics: &[serde_json::Value]) -> impl Iterator<Item = &serde_json::Value> {
+    metrics.iter().filter(|metric| {
+        crate::analysis::display::show_metric(
+            metric["domain"].as_str().unwrap_or_default(),
+            metric["test"].as_str(),
+            metric["metric"].as_str().unwrap_or_default(),
+        )
+    })
+}
+
+fn visible_metric_count(metrics: &[serde_json::Value]) -> usize {
+    visible_metrics(metrics).count()
 }
 
 fn print_header(title: &str, metric_count: usize) {
@@ -675,7 +697,7 @@ fn write_knc(
     let footer = analysis_footer(&args.config, config, test, input, run)?;
     let debug = debug_info(args.debug, &args.config, &[input])?;
     let report = knc::analyze_input(config, test, input, None, debug.as_deref())?;
-    print_header(test.title(), report.metrics.len());
+    print_header(test.title(), visible_metric_count(&report.metrics));
     print_metrics(&report.metrics);
     print_warnings(&report.warnings, args);
     let Some(output) = &args.output else {

@@ -283,11 +283,16 @@ sweep: vertical selects the sweep on each corner's wheel-center travel, roll on
 roll-angle metrics `gradient_points_deg` (default 1 deg). Roll metrics:
 `roll_steer|roll_camber_<corner>_deg_per_mm` (over wheel-center Z) and
 `_deg_per_deg` (over the axle's `suspension_roll_angle`),
-`roll_wheel_rate_<corner>_n_per_mm`, `roll_wheel_rate_without_arb_<corner>_n_per_mm`
-(only for an axle whose `<axle>_arb_connected` is false),
-`roll_stiffness_<axle>_nm_per_deg` (front, rear, total; roll moment over
-`total_roll_angle`), `roll_stiffness_distribution_front_pct` (total falls back
-to front + rear), and per axle `roll_center_height_<axle>_mm`,
+`roll_suspension_rate_<corner>_n_per_mm` (over wheel-center Z) and
+`roll_ride_rate_<corner>_n_per_mm` (over wheel-pad Z) — both can include
+anti-roll-bar engagement during the roll sweep, unlike vertical's isolated
+per-corner rates, so they keep the `roll_` prefix rather than sharing
+vertical's names, `roll_stiffness_<axle>_nm_per_deg` (front, rear, total;
+roll moment over `total_roll_angle`) and `roll_stiffness_distribution_<axle>_pct`
+(front, rear; total falls back to front + rear), with a `roll_stiffness_suspension_*`
+counterpart of each (roll moment over the axle's own `suspension_roll_angle`,
+`total` over the front/rear mean), isolating the suspension's own roll
+stiffness from tire-compliance roll. Per axle: `roll_center_height_<axle>_mm`,
 `roll_center_height_change_<axle>_mm_per_deg` and
 `roll_center_lateral_migration_<axle>_mm_per_deg`. The roll center follows the
 legacy dissertation method: contact-path angles from d(lateral contact

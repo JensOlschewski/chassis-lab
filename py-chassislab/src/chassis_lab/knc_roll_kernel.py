@@ -59,7 +59,8 @@ WHEEL_TRAVEL = Signal("wheel_center_z")
 #   steer/camber per mm: Δtoe or Δcamber / Δwheel-center Z, at ±gradient_mm.
 #   steer/camber per deg: Δtoe or Δcamber / Δaxle suspension roll,
 #                         at ±gradient_deg of suspension roll.
-#   wheel rate: Δwheel load / Δwheel-center Z, at ±gradient_mm.
+#   suspension rate: Δwheel load / Δwheel-center Z, at ±gradient_mm.
+#   ride rate: Δwheel load / Δwheel-pad Z, at ±gradient_mm.
 # These are roll-test metrics, not rates from the vertical test's bounce sweep.
 CORNER_METRICS = (
     GradientMetric(
@@ -85,12 +86,27 @@ CORNER_METRICS = (
         points="deg",
     ),
     GradientMetric(
-        "roll_wheel_rate", "n_per_mm", "wheel_load", "N/mm", axis=WHEEL_TRAVEL
+        "roll_suspension_rate",
+        "n_per_mm",
+        "wheel_load",
+        "N/mm",
+        axis=WHEEL_TRAVEL,
+    ),
+    GradientMetric(
+        "roll_ride_rate",
+        "n_per_mm",
+        "wheel_load",
+        "N/mm",
+        axis=Signal("wheel_pad_z"),
     ),
 )
 
-# Roll stiffness: Δderived moment / Δbody roll at ±gradient_deg. The moment
-# is derived below, not read from mapped source moment channels.
+# Roll stiffness: Δderived moment / Δroll angle at ±gradient_deg. The moment
+# is derived below, not read from mapped source moment channels. The plain
+# family divides by body roll; the `_suspension` family isolates the
+# suspension's own contribution by dividing by suspension roll instead,
+# excluding tire-compliance roll. Each axle uses its own suspension roll
+# angle; "total" uses the front/rear mean, derived alongside it.
 AXLE_METRICS = (
     GradientMetric(
         "roll_stiffness",
@@ -98,6 +114,16 @@ AXLE_METRICS = (
         "roll_moment",
         "Nm/deg",
         axis=ROLL_ANGLE,
+        points="deg",
+    ),
+)
+SUSPENSION_AXLE_METRICS = (
+    GradientMetric(
+        "roll_stiffness_suspension",
+        "nm_per_deg",
+        "roll_moment",
+        "Nm/deg",
+        axis=Signal("suspension_roll_angle", "self"),
         points="deg",
     ),
 )
@@ -186,7 +212,7 @@ PLOT_SPECS = (
         "wheel_load",
         "wheel_center_z",
         "wheel_load",
-        GradientDisplay("roll wheel rate", "N/mm"),
+        GradientDisplay("roll suspension rate", "N/mm"),
     ),
     PlotSpec(
         "knc_roll_suspension_rate",
@@ -338,20 +364,7 @@ def _plot_axle_curves(curves: CurveIndex, options: BranchOptions) -> None:
     uses raw contact-path slopes on each plotted sweep, without fitting.
     """
     roll = signal_values(curves, "total", "roll_angle")
-    angles = [curves.get((axle, "suspension_roll_angle")) for axle in AXLES]
-    if all(angle is not None for angle in angles):
-        front, rear = (
-            signal_values(curves, axle, "suspension_roll_angle")
-            for axle in AXLES
-        )
-        if len(front) == len(rear) == len(roll):
-            _put_curve(
-                curves,
-                "total",
-                "mean_suspension_roll_angle",
-                (front + rear) / 2.0,
-                "deg",
-            )
+    _derive_mean_suspension_roll(curves)
 
     for location in (*AXLES, "total"):
         moment = curves.get((location, "roll_moment"))
@@ -576,9 +589,8 @@ def metrics(request: dict[str, object]) -> str:
 
     PyO3 request: curves (JSON string of canonical Curve objects with optional
     offsets), gradient_mm and gradient_deg (positive secant half-widths),
-    branch (JSON string of BranchOptions), arb_connected (JSON string with
-    front/rear boolean or null). Both tests use this Rust-to-Python entry-point
-    shape; roll adds gradient_deg and arb_connected.
+    branch (JSON string of BranchOptions). Both tests use this Rust-to-Python
+    entry-point shape; roll adds gradient_deg.
 
     Return JSON string: {"metrics": [...], "warnings": [...]}. Unavailable
     metrics keep value: null and carry a reason. Rust tags and writes rows.
@@ -591,13 +603,13 @@ def metrics(request: dict[str, object]) -> str:
     options = BranchOptions.from_json(
         cast("str | dict[str, Any] | None", request.get("branch"))
     )
-    arb_connected = json.loads(str(request.get("arb_connected") or "{}"))
     warnings: list[str] = []
 
     # Fill absent axle angles from global geometry; derive axle and total
     # moments from loads and instantaneous geometric contact-patch track.
     _derive_suspension_roll(curves, warnings)
     _derive_roll_moments(curves, warnings)
+    _derive_mean_suspension_roll(curves)
 
     corner_rates = gradient_metrics(
         curves, CORNER_METRICS, CORNERS, points, ROLL_ANGLE, options
@@ -605,11 +617,27 @@ def metrics(request: dict[str, object]) -> str:
     axle_stiffness = gradient_metrics(
         curves, AXLE_METRICS, (*AXLES, "total"), points, ROLL_ANGLE, options
     )
+    axle_stiffness_suspension = gradient_metrics(
+        curves,
+        SUSPENSION_AXLE_METRICS,
+        (*AXLES, "total"),
+        points,
+        ROLL_ANGLE,
+        options,
+    )
     results = [
         *corner_rates,
-        *_wheel_rates_without_arb(corner_rates, arb_connected),
         *axle_stiffness,
-        _roll_stiffness_distribution(axle_stiffness, points["deg"]),
+        *_roll_stiffness_distribution(
+            axle_stiffness, points["deg"], "roll_stiffness", "roll stiffness"
+        ),
+        *axle_stiffness_suspension,
+        *_roll_stiffness_distribution(
+            axle_stiffness_suspension,
+            points["deg"],
+            "roll_stiffness_suspension",
+            "suspension-only roll stiffness",
+        ),
         *_roll_center_metrics(curves, points["deg"], options, warnings),
     ]
     results.sort(key=lambda item: str(item["metric"]))
@@ -732,62 +760,51 @@ def _derive_suspension_roll(curves: CurveIndex, warnings: list[str]) -> None:
         )
 
 
-def _wheel_rates_without_arb(
-    corner: list[dict[str, object]], arb_connected: dict[str, bool | None]
-) -> list[dict[str, object]]:
-    """Reuse the computed roll wheel rate under the `_without_arb` name.
+def _derive_mean_suspension_roll(curves: CurveIndex) -> None:
+    """Front/rear mean suspension roll, for the "total" axle's own rate.
 
-    No ARB force is subtracted here. Only a disconnected axle measures wheel
-    rate without ARB; a connected or unspecified axle reports the reason.
+    Stored under two keys: `mean_suspension_roll_angle` (the existing axle
+    plot x-axis) and `suspension_roll_angle` (so `total` can reuse the same
+    per-axle gradient axis as `front`/`rear` in `SUSPENSION_AXLE_METRICS`).
     """
-    results = []
-    for row in corner:
-        if not str(row["metric"]).startswith("roll_wheel_rate_"):
-            continue
-        location = str(row["corner"])
-        axle = location.split("_")[0]
-        result = {
-            **row,
-            "metric": f"roll_wheel_rate_without_arb_{location}_n_per_mm",
-        }
-        connected = arb_connected.get(axle)
-        if connected is None:
-            reason = f"{axle}_arb_connected is not configured"
-        elif connected:
-            reason = f"{axle} anti-roll bar is connected"
-        else:
-            reason = None
-        if reason is not None:
-            result.update(value=None, lower=None, upper=None, reason=reason)
-        results.append(result)
-    return results
+    angles = [curves.get((axle, "suspension_roll_angle")) for axle in AXLES]
+    if any(angle is None for angle in angles):
+        return
+    front, rear = (
+        signal_values(curves, axle, "suspension_roll_angle") for axle in AXLES
+    )
+    roll = signal_values(curves, "total", "roll_angle")
+    if not len(front) == len(rear) == len(roll):
+        return
+    mean = (front + rear) / 2.0
+    _put_curve(curves, "total", "mean_suspension_roll_angle", mean, "deg")
+    _put_curve(curves, "total", "suspension_roll_angle", mean, "deg")
 
 
 def _roll_stiffness_distribution(
-    axle: list[dict[str, object]], half: float
-) -> dict[str, object]:
-    """100 * K_front / K_total; K_total falls back to K_front + K_rear."""
+    axle: list[dict[str, object]], half: float, metric: str, label: str
+) -> list[dict[str, object]]:
+    """Front/rear percentages of `label`'s total (front plus rear)."""
     stiffness = {row["corner"]: row["value"] for row in axle}
-    result = metric_row(
-        "front",
-        "roll_stiffness_distribution_front_pct",
-        "%",
-        "deg",
-        half,
-    )
     front, rear, total = (
         cast("float | None", stiffness.get(location))
         for location in ("front", "rear", "total")
     )
     if total is None and front is not None and rear is not None:
         total = front + rear
-    if front is None or total is None:
-        result["reason"] = "front and total roll stiffness unavailable"
-    elif total == 0.0:
-        result["reason"] = "total roll stiffness is zero"
-    else:
-        result["value"] = 100.0 * front / total
-    return result
+    results = []
+    for location, value in (("front", front), ("rear", rear)):
+        result = metric_row(
+            location, f"{metric}_distribution_{location}_pct", "%", "deg", half
+        )
+        if value is None or total is None:
+            result["reason"] = f"{location} and total {label} unavailable"
+        elif total == 0.0:
+            result["reason"] = f"total {label} is zero"
+        else:
+            result["value"] = 100.0 * value / total
+        results.append(result)
+    return results
 
 
 def _roll_center_metrics(

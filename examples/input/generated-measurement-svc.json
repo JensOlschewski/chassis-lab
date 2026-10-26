@@ -25,6 +25,22 @@
         "wheelbase_mm": 2500.0,
         "front_track_mm": 1500.0,
         "rear_track_mm": 1480.0,
-        "cg_x_from_front_axle_mm": 1203.125
+        "cg_x_from_front_axle_mm": 1203.125,
+        "cg_height_mm": 600.0,
+        "ride_height_front_left_mm": 350.0,
+        "ride_height_front_right_mm": 349.0,
+        "ride_height_rear_left_mm": 340.0,
+        "ride_height_rear_right_mm": 339.0,
+        "toe_front_left_deg": 0.1,
+        "toe_front_right_deg": -0.1,
+        "toe_rear_left_deg": 0.2,
+        "toe_rear_right_deg": -0.2,
+        "camber_front_left_deg": -1.0,
+        "camber_front_right_deg": -1.1,
+        "camber_rear_left_deg": -1.2,
+        "camber_rear_right_deg": -1.3,
+        "inertia_xx_kg_mm2": 100000.0,
+        "inertia_yy_kg_mm2": 200000.0,
+        "inertia_zz_kg_mm2": 250000.0
     }
 }
