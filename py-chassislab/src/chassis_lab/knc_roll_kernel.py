@@ -46,6 +46,10 @@ from chassis_lab.knc_plot_kernel import (
     render_contact_path_debug,
     render_rate_debug,
     render_reports,
+    selected_specs,
+)
+from chassis_lab.knc_plot_kernel import (
+    plot_jobs as catalog_jobs,
 )
 
 # Every metric selects samples from the configured body-roll sweep. Its secant
@@ -423,12 +427,13 @@ def plot(
     branch: str | None = None,
     gradient_points_deg: float | None = None,
     debug: str | None = None,
+    selected: list[str] | None = None,
 ) -> dict[str, bytes]:
     options = BranchOptions.from_json(branch)
     curves = _plot_curves(json.loads(curves_json), options)
     reports = render_reports(
         curves,
-        PLOT_SPECS,
+        selected_specs(PLOT_SPECS, selected, "plot"),
         PLOT_SIGNALS,
         source_label,
         "plots/knc/roll",
@@ -437,17 +442,18 @@ def plot(
         gradient_points_mm,
         options,
         gradient_points_deg,
-        warn_missing=True,
+        warn_missing=selected is None,
     )
     reports.update(
         render_axle_reports(
             curves,
             [],
-            AXLE_PLOT_SPECS,
+            selected_specs(AXLE_PLOT_SPECS, selected, "axle"),
             source_label,
             footer,
             logo,
             "plots/knc/roll",
+            warn_missing=selected is None,
         )
     )
     if debug:
@@ -455,7 +461,7 @@ def plot(
         reports.update(
             render_rate_debug(
                 curves,
-                PLOT_SPECS,
+                selected_specs(PLOT_SPECS, selected, "debug:0"),
                 options,
                 "plots/knc/roll",
                 info,
@@ -472,9 +478,21 @@ def plot(
                 logo,
                 "plots/knc/roll",
                 "measurement",
+                selected,
             )
         )
     return reports
+
+
+def plot_jobs(debug: bool, series_count: int = 1) -> list[str]:
+    jobs = catalog_jobs(PLOT_SPECS, AXLE_PLOT_SPECS, debug, series_count)
+    if debug:
+        jobs += [
+            f"center:{index}:{axle}"
+            for index in range(series_count)
+            for axle in AXLES
+        ]
+    return jobs
 
 
 def plot_compare(
@@ -487,6 +505,7 @@ def plot_compare(
     branches_json: str | None = None,
     gradient_points_deg: float | None = None,
     debug: str | None = None,
+    selected: list[str] | None = None,
 ) -> dict[str, bytes]:
     candidates = json.loads(candidates_json)
     branches = (
@@ -502,7 +521,7 @@ def plot_compare(
     reports = render_comparison_reports(
         baseline,
         candidates,
-        PLOT_SPECS,
+        selected_specs(PLOT_SPECS, selected, "plot"),
         PLOT_SIGNALS,
         baseline_label,
         footer,
@@ -510,16 +529,17 @@ def plot_compare(
         gradient_points_mm,
         branches,
         gradient_points_deg,
-        warn_missing=True,
+        warn_missing=selected is None,
     )
     reports.update(
         render_axle_reports(
             baseline,
             candidates,
-            AXLE_PLOT_SPECS,
+            selected_specs(AXLE_PLOT_SPECS, selected, "axle"),
             baseline_label,
             footer,
             logo,
+            warn_missing=selected is None,
         )
     )
     if debug:
@@ -534,7 +554,7 @@ def plot_compare(
             reports.update(
                 render_rate_debug(
                     curves,
-                    PLOT_SPECS,
+                    selected_specs(PLOT_SPECS, selected, f"debug:{index}"),
                     options,
                     "",
                     info,
@@ -552,6 +572,7 @@ def plot_compare(
                     logo,
                     "",
                     f"series_{index}",
+                    selected,
                 )
             )
     return reports
@@ -565,12 +586,19 @@ def _roll_center_debug(
     logo: bytes | None,
     prefix: str,
     source: str,
+    selected: list[str] | None = None,
 ) -> dict[str, bytes]:
     if not options.measurement:
         return {}
     indexed = index_curves(curves)
     reports = {}
+    series_index = source.removeprefix("series_")
+    if source == "measurement":
+        series_index = "0"
     for axle in AXLES:
+        job = f"center:{series_index}:{axle}"
+        if selected is not None and job not in selected:
+            continue
         try:
             lateral = _lateral_signal(indexed, axle, [])
             samples = _roll_center_inputs(indexed, axle, lateral)

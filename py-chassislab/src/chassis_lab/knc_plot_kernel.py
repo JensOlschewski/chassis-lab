@@ -1,5 +1,7 @@
 """Reusable, path-free plotting primitives for KnC report kernels."""
 
+from __future__ import annotations
+
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -32,6 +34,34 @@ CORNERS = (
     ("rear_left", "Rear left"),
     ("rear_right", "Rear right"),
 )
+
+
+def plot_jobs(
+    specs: tuple[PlotSpec, ...],
+    axle_specs: tuple[AxlePlotSpec, ...],
+    debug: bool,
+    series_count: int,
+) -> list[str]:
+    """Independent PDFs; each spec still contains all four corner panels."""
+    jobs = [f"plot:{spec.name}" for spec in specs]
+    jobs += [f"axle:{spec.name}" for spec in axle_specs]
+    if debug:
+        jobs += [
+            f"debug:{index}:{spec.name}"
+            for index in range(series_count)
+            for spec in specs
+            if spec.is_rate
+        ]
+    return jobs
+
+
+def selected_specs(
+    specs: tuple[Any, ...], selected: list[str] | None, kind: str
+) -> tuple[Any, ...]:
+    if selected is None:
+        return specs
+    return tuple(spec for spec in specs if f"{kind}:{spec.name}" in selected)
+
 
 # Also used for clab analyze
 BASELINE_COLOR = "#000000"
@@ -314,6 +344,7 @@ def render_axle_reports(
     footer: str,
     logo: bytes | None,
     output_prefix: str = "",
+    warn_missing: bool = True,
 ) -> dict[str, bytes]:
     """Three-panel axle reports from already derived canonical curves."""
     series = [Source(baseline_label, _index(baseline), BASELINE_COLOR)]
@@ -366,7 +397,7 @@ def render_axle_reports(
         filename = f"{spec.name}.pdf"
         path = f"{output_prefix}/{filename}" if output_prefix else filename
         reports[path] = _save_pdf(figure, _pyplot(), footer, logo)
-    if skipped:
+    if skipped and warn_missing:
         warnings.warn(
             "KnC axle plots skipped because signals or geometry are missing: "
             + ", ".join(skipped),
