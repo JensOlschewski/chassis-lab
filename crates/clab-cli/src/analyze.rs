@@ -354,11 +354,13 @@ fn knc_plots(
         config,
         test,
         &detail["curves"],
-        footer,
         report.measurement,
         &report.corner_mass_kg,
-        debug,
-        workers,
+        knc::PlotOptions {
+            footer,
+            debug,
+            workers,
+        },
     )
 }
 

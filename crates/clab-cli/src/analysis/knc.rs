@@ -1124,6 +1124,12 @@ fn convention(
         .ok_or_else(|| anyhow::anyhow!("KnC signal convention missing: {name}"))
 }
 
+pub(crate) struct PlotOptions<'a> {
+    pub footer: &'a str,
+    pub debug: Option<&'a str>,
+    pub workers: usize,
+}
+
 /// Render KnC corner PDF plots. Separate from `analyze_input` so slow
 /// rendering happens only after the caller has already displayed metrics.
 ///
@@ -1135,11 +1141,9 @@ pub(crate) fn curve_plots(
     config: &CaseConfig,
     test: KncTest,
     curves: &serde_json::Value,
-    footer: &str,
     measurement: bool,
     corner_mass_kg: &BTreeMap<String, f64>,
-    debug: Option<&str>,
-    workers: usize,
+    options: PlotOptions<'_>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let source_label = source_label(measurement);
     let curves = serde_json::to_string(curves)?;
@@ -1155,18 +1159,18 @@ pub(crate) fn curve_plots(
         curves,
         candidates: None,
         label: source_label.into(),
-        footer: footer.into(),
+        footer: options.footer.into(),
         gradient_mm: gradient,
         branch,
         gradient_deg: Some(
             knc.and_then(|config| config.window.gradient_points_deg)
                 .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG),
         ),
-        debug: debug.map(str::to_owned),
+        debug: options.debug.map(str::to_owned),
         mass: corner_mass_kg,
         selected: Vec::new(),
     };
-    render_parallel(request, "", 1, workers).with_context(|| {
+    render_parallel(request, "", 1, options.workers).with_context(|| {
         format!(
             "failed to generate {} PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'",
             test.name()
