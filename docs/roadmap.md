@@ -5,7 +5,7 @@ reference until a domain reaches reviewed parity. Version `0.3.1` is the
 behavioral baseline for the Rust-owned application migration. Known MATLAB
 corner mapping errors are corrected rather than copied into golden data.
 
-## Milestone 1: Foundation
+## M1 Foundation
 
 Goal: establish stable inputs, conventions, and reproducible runs.
 
@@ -24,7 +24,7 @@ Exit criteria:
 - No computation depends on the working directory or a hard-coded user path.
 - Every transformed signal reports its source, original unit, and convention.
 
-## Milestone 2: SVC Parity
+## M2 SVC parity
 
 Goal: replace `Validierung/KnC/SVC/evalSVC.m` as the first end-to-end domain.
 
@@ -43,7 +43,7 @@ Exit criteria:
 - Unrounded calculations agree with reviewed reference values.
 - Reports include provenance and explicit units.
 
-## Milestone 3: Rust CLI and Embedded Python
+## M3 Rust CLI and embedded Python
 
 Goal: make Rust own the application while retaining Python for scientific signal
 analysis and plotting.
@@ -78,7 +78,7 @@ Exit criteria:
 - Release artifacts include checksums, dependency licenses, and runtime/build
   metadata.
 
-## Milestone 4: Vertical and Roll
+## M5 Vertical
 
 Goal: establish the reusable four-corner kinematics pipeline.
 
@@ -88,27 +88,29 @@ Issues:
 2. Implement robust wheel-rate calculation with branch/noise handling.
 3. Implement vertical toe and camber comparisons.
 4. Generate VARB/VARC parity plots and quantitative metrics.
-5. Reuse the vertical pipeline for roll.
-6. Resolve unavailable roll `b1e1f1` results and document supported cases.
 
 Exit criteria:
 
 - Correct left/right mapping is independently tested.
-- Vertical and roll plots are generated without interactive state.
+- Vertical plots are generated without interactive state.
 - Selected curve metrics have reviewed tolerances.
 
-## Milestone 5: Steering
+## M6 Roll
 
-Goal: validate steering geometry and effort without singular metrics.
+Goal: reuse the vertical pipeline for roll analysis and comparison.
 
 Issues:
 
-1. Implement steering angle/torque and front geometry comparisons.
-2. Define relative toe, camber, and caster conventions.
-3. Implement guarded steering-ratio calculation around zero wheel angle.
-4. Validate engine-on and engine-off cases for VARB and VARC.
+1. Reuse the vertical pipeline for roll.
+2. Resolve unavailable roll `b1e1f1` results and document supported cases.
 
-## Milestone 6: Compliance and Aligning
+Exit criteria:
+
+- Correct left/right mapping is independently tested.
+- Roll plots are generated without interactive state.
+- Selected curve metrics have reviewed tolerances.
+
+## M7 Compliance and aligning
 
 Goal: migrate force- and moment-driven KnC events.
 
@@ -122,7 +124,18 @@ Issues include loading/unloading branch detection, hysteresis-aware fitting,
 mm/kN and deg/kN metrics, Nm/Nmm normalization, and documentation of missing
 aligning antiphase simulation results.
 
-## Milestone 7: Automation and Release
+## M8 Steering
+
+Goal: validate steering geometry and effort without singular metrics.
+
+Issues:
+
+1. Implement steering angle/torque and front geometry comparisons.
+2. Define relative toe, camber, and caster conventions.
+3. Implement guarded steering-ratio calculation around zero wheel angle.
+4. Validate engine-on and engine-off cases for VARB and VARC.
+
+## M9 Automation and release
 
 Goal: provide a maintainable private validation service.
 
