@@ -4,6 +4,27 @@
 //! module is the one place that decides how a `(domain, test)` pair becomes
 //! a qualifier, so the two commands can never drift apart.
 
+use std::io::{IsTerminal, Write};
+
+/// Keep warnings next to their metrics, but retain qualifiers in redirected output.
+pub(crate) fn print_warnings(domain: &str, test: Option<&str>, warnings: &[String]) {
+    if warnings.is_empty() {
+        return;
+    }
+    std::io::stdout().flush().ok();
+    if std::io::stdout().is_terminal() && std::io::stderr().is_terminal() {
+        let prefix = format!("{}: ", qualifier(domain, test));
+        eprintln!("\n  Warnings");
+        for warning in warnings {
+            eprintln!("    • {}", warning.strip_prefix(&prefix).unwrap_or(warning));
+        }
+    } else {
+        for warning in warnings {
+            eprintln!("warning: {warning}");
+        }
+    }
+}
+
 /// Qualified display name for a metric row: `domain::metric` or
 /// `domain::test::metric`, e.g. `svc::front_left_mass_kg` or
 /// `knc::vertical::bump_steer_front_left_deg_per_mm`.

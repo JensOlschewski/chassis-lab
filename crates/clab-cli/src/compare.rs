@@ -14,6 +14,7 @@ use sha2::Digest;
 
 use crate::{
     analysis::{
+        display,
         knc::{self, KncTest},
         svc,
     },
@@ -233,6 +234,29 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         candidate_sources.extend(candidate.sources.iter().cloned());
         candidates.push(serde_json::json!({"input": provenance(path)?, "case": {"name": candidate.config.name, "loadcase": candidate.config.loadcase}, "metrics": metrics, "domains": domains}));
     }
+    let mut warnings = BTreeMap::new();
+    if args.debug {
+        for test in [KncTest::Vertical, KncTest::Roll] {
+            let key = knc_key(test);
+            let Some(ComparedDomain::Knc { branch, .. }) = baseline.domains.get(key) else {
+                continue;
+            };
+            if !branch.measurement
+                || knc_candidates.get(test.name()).is_some_and(|candidates| {
+                    candidates.iter().any(|candidate| !candidate.2.measurement)
+                })
+            {
+                warnings.insert(
+                    key,
+                    vec![display::tag_warning(
+                        "knc",
+                        Some(test.name()),
+                        knc::DEBUG_RATE_WARNING,
+                    )],
+                );
+            }
+        }
+    }
     print_metrics(
         &args.baseline,
         &args.candidates,
@@ -240,6 +264,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         &rows,
         &unavailable_domains,
         args.tolerances,
+        &warnings,
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
     let progress = ReportProgress::new(args.output.is_some());
@@ -261,21 +286,29 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             branch: base_branch,
             corner_mass_kg: base_mass,
             ..
-        }) = baseline.domains.get(knc_key(test)) else {
+        }) = baseline.domains.get(knc_key(test))
+        else {
             anyhow::bail!("missing KnC {} baseline", test.name());
         };
         let mut footer = Vec::new();
         if let Some(config) = test.config(&baseline.config) {
             footer.push(format!("KnC setup: {}", config.setup.summary()));
         }
-        footer.push(format!("Config: {}", absolute_path(&args.config)?.display()));
+        footer.push(format!(
+            "Config: {}",
+            absolute_path(&args.config)?.display()
+        ));
         footer.push(format!(
             "Baseline: {} | {} | {}",
             baseline.config.name,
             baseline.config.loadcase,
             absolute_path(&args.baseline)?.display()
         ));
-        footer.extend(candidates_for_test.iter().map(|candidate| candidate.4.clone()));
+        footer.extend(
+            candidates_for_test
+                .iter()
+                .map(|candidate| candidate.4.clone()),
+        );
         footer.push(format!("Created by: {}", report_creator()));
         footer.push(format!("clab version: {}", env!("CARGO_PKG_VERSION")));
         let debug = debug_info(
@@ -285,15 +318,6 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 .chain(candidates_for_test.iter().map(|candidate| candidate.5))
                 .collect::<Vec<_>>(),
         )?;
-        if debug.is_some()
-            && (!base_branch.measurement
-                || candidates_for_test.iter().any(|candidate| !candidate.2.measurement))
-        {
-            eprintln!(
-                "warning: knc::{}: debug rate plots require measurement input; skipped for simulation data",
-                test.name()
-            );
-        }
         let candidates = candidates_for_test
             .into_iter()
             .map(|(label, curves, branch, mass, _, _)| (label, curves, branch, mass))
@@ -303,13 +327,13 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             test,
             (base, base_branch, base_mass),
             &candidates,
-            (
-                "Baseline",
-                &footer.join("\n"),
-                &format!("plots/knc/{}/comparison", test.name()),
-            ),
-            debug.as_deref(),
-            workers,
+            ("Baseline", &format!("plots/knc/{}/comparison", test.name())),
+            knc::PlotOptions {
+                footer: &footer.join("\n"),
+                debug: debug.as_deref(),
+                workers,
+            },
+            &progress,
         )
     })?;
     for group in rendered {
@@ -712,6 +736,7 @@ fn print_metrics(
     rows: &[(PathBuf, Metric)],
     unavailable_domains: &[(usize, &'static str)],
     use_tolerances: bool,
+    warnings: &BTreeMap<&str, Vec<String>>,
 ) {
     for key in DOMAIN_KEYS {
         let Some(compared) = domains.get(key) else {
@@ -840,6 +865,9 @@ fn print_metrics(
                 domain_rows.len() - missing,
                 domain_rows.len()
             );
+        }
+        if let Some(warnings) = warnings.get(key) {
+            display::print_warnings(domain, domain_test, warnings);
         }
     }
 }

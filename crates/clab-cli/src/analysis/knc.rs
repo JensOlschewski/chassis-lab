@@ -17,12 +17,16 @@ use clab_core::conventions::{
     vertical_conventions,
 };
 
+use crate::progress::ReportProgress;
+
 use super::display::{mapping_missing, missing_unit_warning, tag_warnings};
 
 const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
 const AXES: [&str; 3] = ["x", "y", "z"];
 const DEFAULT_GRADIENT_POINTS_MM: f64 = 10.0;
 const DEFAULT_GRADIENT_POINTS_DEG: f64 = 1.0;
+pub(crate) const DEBUG_RATE_WARNING: &str =
+    "debug rate plots require measurement input; skipped for simulation data";
 
 /// KnC test analyzed through the shared four-corner pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +64,7 @@ fn render_parallel(
     prefix: &str,
     series_count: usize,
     workers: usize,
+    progress: &ReportProgress,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let test = request.test;
     let jobs: Vec<String> = with_kernel(test, |_, module| {
@@ -126,8 +131,8 @@ fn render_parallel(
             "{} plot worker failed: {stderr}",
             test.name()
         );
-        if !stderr.is_empty() {
-            eprint!("{stderr}");
+        for line in stderr.lines() {
+            progress.println(line);
         }
         let names: Vec<String> = serde_json::from_slice(&fs::read(output.join("manifest.json"))?)?;
         for name in names {
@@ -411,8 +416,7 @@ pub(crate) fn analyze_input(
     };
     let measurement = file.summary().source_kind == SourceKind::Measurement;
     if debug.is_some() && !measurement {
-        warnings
-            .push("debug rate plots require measurement input; skipped for simulation data".into());
+        warnings.push(DEBUG_RATE_WARNING.into());
     }
     let relative_travel = normalization["method"] != "none";
     let (corner_mass_kg, corner_mass_source) = test
@@ -684,9 +688,9 @@ pub(crate) fn compare_plots(
         VerticalBranch,
         BTreeMap<String, f64>,
     )],
-    (baseline_label, footer, prefix): (&str, &str, &str),
-    debug: Option<&str>,
-    workers: usize,
+    (baseline_label, prefix): (&str, &str),
+    options: PlotOptions<'_>,
+    progress: &ReportProgress,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let baseline_json = serde_json::to_string(baseline)?;
     let candidates_json = serde_json::to_string(
@@ -711,7 +715,7 @@ pub(crate) fn compare_plots(
             curves: baseline_json,
             candidates: Some(candidates_json),
             label: baseline_label.into(),
-            footer: footer.into(),
+            footer: options.footer.into(),
             gradient_mm: test
                 .config(config)
                 .map(|knc| effective_gradient_points(&knc.window)),
@@ -720,13 +724,14 @@ pub(crate) fn compare_plots(
                 .config(config)
                 .and_then(|knc| knc.window.gradient_points_deg)
                 .or(Some(DEFAULT_GRADIENT_POINTS_DEG)),
-            debug: debug.map(str::to_owned),
+            debug: options.debug.map(str::to_owned),
             mass: corner_mass_kg,
             selected: Vec::new(),
         },
         &format!("{prefix}/"),
         candidates.len() + 1,
-        workers,
+        options.workers,
+        progress,
     )
     .with_context(|| {
         format!(
@@ -1144,6 +1149,7 @@ pub(crate) fn curve_plots(
     measurement: bool,
     corner_mass_kg: &BTreeMap<String, f64>,
     options: PlotOptions<'_>,
+    progress: &ReportProgress,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let source_label = source_label(measurement);
     let curves = serde_json::to_string(curves)?;
@@ -1170,7 +1176,7 @@ pub(crate) fn curve_plots(
         mass: corner_mass_kg,
         selected: Vec::new(),
     };
-    render_parallel(request, "", 1, options.workers).with_context(|| {
+    render_parallel(request, "", 1, options.workers, progress).with_context(|| {
         format!(
             "failed to generate {} PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'",
             test.name()
