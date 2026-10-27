@@ -4,6 +4,7 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from functools import lru_cache
 from io import BytesIO
 from math import floor, log10
 from typing import Any, NamedTuple, cast
@@ -1096,11 +1097,22 @@ def _save_pdf(figure: Any, plt: Any, footer: str, logo: bytes | None) -> bytes:
     return _stamp_logo(output.getvalue(), logo, slot_height)
 
 
+@lru_cache(maxsize=1)
+def _parse_logo(logo: bytes) -> Any:
+    """Parse the embedded logo PDF once; every report reuses the same page.
+
+    One `plot()` call stamps a logo on every generated figure (14+ for
+    vertical, more for roll and debug), always with the same `logo` bytes,
+    so re-parsing it with `PdfReader` each time is pure waste.
+    """
+    return PdfReader(BytesIO(logo)).pages[0]
+
+
 def _stamp_logo(report: bytes, logo: bytes, slot_height: float) -> bytes:
     """Add the vector PDF logo to the same footer slot as the old PNG."""
     writer = PdfWriter(clone_from=BytesIO(report))
     page = writer.pages[0]
-    logo_page = PdfReader(BytesIO(logo)).pages[0]
+    logo_page = _parse_logo(logo)
     page_width = float(page.mediabox.width)
     page_height = float(page.mediabox.height)
     logo_width = float(logo_page.mediabox.width)
