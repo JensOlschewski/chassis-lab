@@ -3,8 +3,7 @@ use std::env;
 use std::ffi::CStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use pyo3::prelude::*;
@@ -26,16 +25,16 @@ const DEFAULT_GRADIENT_POINTS_MM: f64 = 10.0;
 const DEFAULT_GRADIENT_POINTS_DEG: f64 = 1.0;
 
 /// KnC test analyzed through the shared four-corner pipeline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum KncTest {
     Vertical,
     Roll,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize)]
 struct RenderRequest {
-    test: String,
-    comparison: bool,
+    test: KncTest,
     curves: String,
     candidates: Option<String>,
     label: String,
@@ -51,8 +50,8 @@ struct RenderRequest {
 pub(crate) fn plot_worker_limit(tests: usize) -> usize {
     std::thread::available_parallelism()
         .map_or(2, |n| n.get())
-        .min(4)
-        .div_ceil(tests)
+        .min(6)
+        .div_ceil(tests.max(1))
         .max(1)
 }
 
@@ -62,7 +61,7 @@ fn render_parallel(
     series_count: usize,
     workers: usize,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
-    let test = KncTest::from_name(&request.test).expect("known test");
+    let test = request.test;
     let jobs: Vec<String> = with_kernel(test, |_, module| {
         module
             .getattr("plot_jobs")?
@@ -116,22 +115,19 @@ fn render_parallel(
             .collect::<Vec<_>>()
     });
     let mut reports = BTreeMap::new();
-    let mut failure = None;
     for finished in finished {
         let (output, result) =
             finished.map_err(|_| anyhow::anyhow!("KnC plot worker thread panicked"))?;
         let result =
             result.with_context(|| format!("failed to launch {} plot worker", test.name()))?;
         let stderr = String::from_utf8_lossy(&result.stderr);
-        if !result.status.success() {
-            failure.get_or_insert_with(|| format!("{} plot worker failed: {stderr}", test.name()));
-            continue;
-        }
+        anyhow::ensure!(
+            result.status.success(),
+            "{} plot worker failed: {stderr}",
+            test.name()
+        );
         if !stderr.is_empty() {
             eprint!("{stderr}");
-        }
-        if failure.is_some() {
-            continue;
         }
         let names: Vec<String> = serde_json::from_slice(&fs::read(output.join("manifest.json"))?)?;
         for name in names {
@@ -148,9 +144,6 @@ fn render_parallel(
             }
         }
     }
-    if let Some(error) = failure {
-        anyhow::bail!("{error}");
-    }
     Ok(reports)
 }
 
@@ -162,70 +155,30 @@ fn valid_plot_path(path: &Path) -> bool {
 
 pub(crate) fn render_worker(input: &Path, output: &Path) -> Result<()> {
     let request: RenderRequest = serde_json::from_slice(&fs::read(input)?)?;
-    let test = KncTest::from_name(&request.test)
-        .ok_or_else(|| anyhow::anyhow!("unknown KnC render test"))?;
-    let reports: BTreeMap<String, Vec<u8>> = with_kernel(test, |py, module| {
-        let function = module.getattr(if request.comparison {
+    let reports: BTreeMap<String, Vec<u8>> = with_kernel(request.test, |py, module| {
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("footer", &request.footer)?;
+        kwargs.set_item("logo", logo(py))?;
+        kwargs.set_item("gradient_points_mm", request.gradient_mm)?;
+        kwargs.set_item("debug", &request.debug)?;
+        kwargs.set_item("selected", &request.selected)?;
+        match request.test {
+            KncTest::Vertical => kwargs.set_item("corner_mass_kg", &request.mass)?,
+            KncTest::Roll => kwargs.set_item("gradient_points_deg", request.gradient_deg)?,
+        }
+        let function = if let Some(candidates) = &request.candidates {
+            kwargs.set_item("baseline_json", &request.curves)?;
+            kwargs.set_item("candidates_json", candidates)?;
+            kwargs.set_item("baseline_label", &request.label)?;
+            kwargs.set_item("branches_json", &request.branch)?;
             "plot_compare"
         } else {
+            kwargs.set_item("curves_json", &request.curves)?;
+            kwargs.set_item("source_label", &request.label)?;
+            kwargs.set_item("branch", &request.branch)?;
             "plot"
-        })?;
-        let selected = &request.selected;
-        let result = match (request.comparison, test) {
-            (false, KncTest::Vertical) => function.call1((
-                &request.curves,
-                &request.label,
-                &request.footer,
-                logo(py),
-                request.gradient_mm,
-                &request.branch,
-                &request.debug,
-                &request.mass,
-                selected,
-            ))?,
-            (false, KncTest::Roll) => function.call1((
-                &request.curves,
-                &request.label,
-                &request.footer,
-                logo(py),
-                request.gradient_mm,
-                &request.branch,
-                request.gradient_deg,
-                &request.debug,
-                selected,
-            ))?,
-            (true, KncTest::Vertical) => function.call1((
-                &request.curves,
-                request
-                    .candidates
-                    .as_deref()
-                    .expect("comparison candidates"),
-                &request.label,
-                &request.footer,
-                logo(py),
-                request.gradient_mm,
-                &request.branch,
-                &request.debug,
-                &request.mass,
-                selected,
-            ))?,
-            (true, KncTest::Roll) => function.call1((
-                &request.curves,
-                request
-                    .candidates
-                    .as_deref()
-                    .expect("comparison candidates"),
-                &request.label,
-                &request.footer,
-                logo(py),
-                request.gradient_mm,
-                &request.branch,
-                request.gradient_deg,
-                &request.debug,
-                selected,
-            ))?,
         };
-        result.extract()
+        module.getattr(function)?.call((), Some(&kwargs))?.extract()
     })?;
     let mut names = Vec::new();
     for (name, pdf) in reports {
@@ -754,8 +707,7 @@ pub(crate) fn compare_plots(
     )?;
     let reports = render_parallel(
         RenderRequest {
-            test: test.name().into(),
-            comparison: true,
+            test,
             curves: baseline_json,
             candidates: Some(candidates_json),
             label: baseline_label.into(),
@@ -767,7 +719,7 @@ pub(crate) fn compare_plots(
             gradient_deg: test
                 .config(config)
                 .and_then(|knc| knc.window.gradient_points_deg)
-                .or(Some(1.0)),
+                .or(Some(DEFAULT_GRADIENT_POINTS_DEG)),
             debug: debug.map(str::to_owned),
             mass: corner_mass_kg,
             selected: Vec::new(),
@@ -1198,14 +1150,28 @@ pub(crate) fn curve_plots(
         |config| config.branch.for_measurement(measurement),
     ))?;
     let corner_mass_kg = serde_json::to_string(corner_mass_kg)?;
-    render_parallel(RenderRequest {
-        test: test.name().into(), comparison: false, curves,
-        candidates: None, label: source_label.into(), footer: footer.into(),
-        gradient_mm: gradient, branch,
-        gradient_deg: Some(knc.and_then(|config| config.window.gradient_points_deg).unwrap_or(1.0)),
-        debug: debug.map(str::to_owned), mass: corner_mass_kg, selected: Vec::new(),
-    }, "", 1, workers)
-    .with_context(|| format!("failed to generate {} PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'", test.name()))
+    let request = RenderRequest {
+        test,
+        curves,
+        candidates: None,
+        label: source_label.into(),
+        footer: footer.into(),
+        gradient_mm: gradient,
+        branch,
+        gradient_deg: Some(
+            knc.and_then(|config| config.window.gradient_points_deg)
+                .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG),
+        ),
+        debug: debug.map(str::to_owned),
+        mass: corner_mass_kg,
+        selected: Vec::new(),
+    };
+    render_parallel(request, "", 1, workers).with_context(|| {
+        format!(
+            "failed to generate {} PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'",
+            test.name()
+        )
+    })
 }
 
 /// Load the embedded kernels of `test` and run `call` with its test kernel.
