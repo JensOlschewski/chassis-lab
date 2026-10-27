@@ -1035,7 +1035,9 @@ fn with_kernel<T>(
         for Kernel(source, file, name) in test.kernels() {
             let name_str = name.to_str().expect("module name is UTF-8");
             let loaded = match modules.get_item(name_str)? {
-                Some(cached) => cached.downcast_into::<PyModule>().expect("cached entry is a module"),
+                Some(cached) => cached
+                    .downcast_into::<PyModule>()
+                    .expect("cached entry is a module"),
                 None => {
                     let source = CStr::from_bytes_with_nul(source.as_bytes())
                         .expect("embedded kernel source is NUL-terminated");
