@@ -9,6 +9,7 @@ mod analyze;
 mod compare;
 mod convert;
 mod inspect;
+mod progress;
 mod report;
 mod signals;
 

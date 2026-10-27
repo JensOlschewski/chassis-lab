@@ -1014,19 +1014,38 @@ pub(crate) fn curve_plots(
 }
 
 /// Load the embedded kernels of `test` and run `call` with its test kernel.
+///
+/// Within one process, `analyze`/`compare` call this at least twice per test
+/// (once for metrics, once for plot rendering), and the test kernels import
+/// `knc_plot_kernel` unconditionally, so `CORE_KERNEL`/`PLOT_KERNEL` would
+/// otherwise be recompiled from source several times per run. `sys.modules`
+/// doubles as the load-once cache: reuse an already-loaded module instead of
+/// recompiling it.
 fn with_kernel<T>(
     test: KncTest,
     call: impl FnOnce(Python<'_>, &Bound<'_, PyModule>) -> PyResult<T>,
 ) -> Result<T> {
     Ok(Python::attach(|py| -> PyResult<T> {
         add_venv_site_packages(py)?;
-        let modules = PyModule::import(py, "sys")?.getattr("modules")?;
+        let modules = PyModule::import(py, "sys")?
+            .getattr("modules")?
+            .downcast_into::<PyDict>()
+            .expect("sys.modules is a dict");
         let mut module = None;
         for Kernel(source, file, name) in test.kernels() {
-            let source = CStr::from_bytes_with_nul(source.as_bytes())
-                .expect("embedded kernel source is NUL-terminated");
-            let loaded = PyModule::from_code(py, source, file, name)?;
-            modules.set_item(name.to_str().expect("module name is UTF-8"), &loaded)?;
+            let name_str = name.to_str().expect("module name is UTF-8");
+            let loaded = match modules.get_item(name_str)? {
+                Some(cached) => cached
+                    .downcast_into::<PyModule>()
+                    .expect("cached entry is a module"),
+                None => {
+                    let source = CStr::from_bytes_with_nul(source.as_bytes())
+                        .expect("embedded kernel source is NUL-terminated");
+                    let loaded = PyModule::from_code(py, source, file, name)?;
+                    modules.set_item(name_str, &loaded)?;
+                    loaded
+                }
+            };
             module = Some(loaded);
         }
         call(py, &module.expect("every test has a kernel"))

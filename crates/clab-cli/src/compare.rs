@@ -18,6 +18,7 @@ use crate::{
         svc,
     },
     analyze::{absolute_path, debug_info, write_report_bundle},
+    progress::ReportProgress,
 };
 
 #[derive(Debug, Args)]
@@ -241,6 +242,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         args.tolerances,
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
+    let progress = ReportProgress::new(args.output.is_some());
     for test in [KncTest::Vertical, KncTest::Roll] {
         if args.output.is_some()
             && let Some(ComparedDomain::Knc {
@@ -307,6 +309,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 .into_iter()
                 .map(|(label, curves, branch, mass, _, _)| (label, curves, branch, mass))
                 .collect::<Vec<_>>();
+            progress.phase(format!("Generating {} plots…", test.title()));
             plots.extend(knc::compare_plots(
                 &baseline.config,
                 test,
@@ -319,6 +322,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 ),
                 debug.as_deref(),
             )?);
+            progress.done(&format!("{} plots", test.title()));
         }
     }
     let report = serde_json::json!({
@@ -358,7 +362,10 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         inputs.extend(baseline.sources.iter().map(PathBuf::as_path));
         inputs.extend(args.candidates.iter().map(PathBuf::as_path));
         inputs.extend(candidate_sources.iter().map(PathBuf::as_path));
+        progress.phase("Writing report bundle…");
         write_report_bundle(output, files, args.force, &inputs)?;
+        progress.done("Writing report bundle");
+        progress.finish();
         println!("report: {}", output.display());
     }
     println!(

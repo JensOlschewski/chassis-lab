@@ -16,6 +16,7 @@ use crate::analysis::{
     knc::{self, KncTest},
     svc,
 };
+use crate::progress::ReportProgress;
 
 #[derive(Debug, Args)]
 pub(crate) struct AnalyzeArgs {
@@ -196,6 +197,7 @@ fn write_combined_run(
     let Some(output) = &args.output else {
         return Ok(());
     };
+    let progress = ReportProgress::new(true);
     let mut domains = Vec::new();
     let mut metrics = Vec::new();
     let mut csv = "run,domain,test,metric,unit,value\n".to_owned();
@@ -245,6 +247,7 @@ fn write_combined_run(
         inputs.push(config.simulation_json.as_path());
     }
     for (test, path, report, debug) in &knc_reports {
+        progress.phase(format!("Generating {} plots…", test.title()));
         let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
         let plots = knc_plots(
             config,
@@ -254,6 +257,7 @@ fn write_combined_run(
             &analysis_footer(&args.config, config, *test, path, Some(&args.input))?,
             debug.as_deref(),
         )?;
+        progress.done(&format!("{} plots", test.title()));
         detail["case"] = bundle["case"].clone();
         let mut knc_inputs = bundle["inputs"].clone();
         knc_inputs["input"] = provenance(path)?;
@@ -276,7 +280,10 @@ fn write_combined_run(
         .iter()
         .map(|(name, contents)| (name.as_str(), contents.clone()))
         .collect::<Vec<_>>();
+    progress.phase("Writing report bundle…");
     write_report_bundle(output, files, args.force, &inputs)?;
+    progress.done("Writing report bundle");
+    progress.finish();
     println!("report: {}", output.display());
     Ok(())
 }
@@ -703,6 +710,7 @@ fn write_knc(
     let Some(output) = &args.output else {
         return Ok(());
     };
+    let progress = ReportProgress::new(true);
     let mut bundle = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
@@ -716,7 +724,9 @@ fn write_knc(
         bundle["inputs"]["run"] = provenance(run)?;
     }
     let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
+    progress.phase(format!("Generating {} plots…", test.title()));
     let plots = knc_plots(config, test, &detail, &report, &footer, debug.as_deref())?;
+    progress.done(&format!("{} plots", test.title()));
     detail["case"] = bundle["case"].clone();
     detail["inputs"] = bundle["inputs"].clone();
     let detail = serde_json::to_string_pretty(&detail)? + "\n";
@@ -744,7 +754,10 @@ fn write_knc(
     if let Some(run) = run {
         inputs.push(run);
     }
+    progress.phase("Writing report bundle…");
     write_report_bundle(output, files, args.force, &inputs)?;
+    progress.done("Writing report bundle");
+    progress.finish();
     println!("report: {}", output.display());
     Ok(())
 }
