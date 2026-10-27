@@ -13,6 +13,7 @@ use clap::Args;
 use sha2::{Digest, Sha256};
 
 use crate::analysis::{
+    display,
     knc::{self, KncTest},
     svc,
 };
@@ -33,7 +34,7 @@ pub(crate) struct AnalyzeArgs {
     /// Include KnC rate-filter diagnostic plots in the report (requires --report).
     #[arg(long, requires = "output")]
     debug: bool,
-    /// Print individual analysis warnings.
+    /// Print individual analysis warnings also when output is redirected.
     #[arg(short, long)]
     verbose: bool,
 }
@@ -188,12 +189,13 @@ fn write_combined_run(
     if let Some(reports) = &svc_reports {
         print_header("SVC", reports.metric_count);
         print_metrics(reports.report["metrics"].as_array().unwrap());
+        print_warnings("svc", None, &reports.warnings, args);
     }
     for (test, _, report, _) in &knc_reports {
         print_header(test.title(), visible_metric_count(&report.metrics));
         print_metrics(&report.metrics);
+        print_warnings("knc", Some(test.name()), &report.warnings, args);
     }
-    print_warnings(&warnings, args);
     let Some(output) = &args.output else {
         return Ok(());
     };
@@ -259,9 +261,12 @@ fn write_combined_run(
             *test,
             &detail,
             report,
-            &footer,
-            debug.as_deref(),
-            workers,
+            knc::PlotOptions {
+                footer: &footer,
+                debug: debug.as_deref(),
+                workers,
+            },
+            &progress,
         )
     })?;
     for ((test, path, report, _), plots) in knc_reports.iter().zip(rendered) {
@@ -346,9 +351,8 @@ fn knc_plots(
     test: KncTest,
     detail: &serde_json::Value,
     report: &knc::Reports,
-    footer: &str,
-    debug: Option<&str>,
-    workers: usize,
+    options: knc::PlotOptions<'_>,
+    progress: &ReportProgress,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     knc::curve_plots(
         config,
@@ -356,11 +360,8 @@ fn knc_plots(
         &detail["curves"],
         report.measurement,
         &report.corner_mass_kg,
-        knc::PlotOptions {
-            footer,
-            debug,
-            workers,
-        },
+        options,
+        progress,
     )
 }
 
@@ -505,7 +506,7 @@ fn write_svc_reference(
     }
     print_header("SVC", reports.report["metrics"].as_array().unwrap().len());
     print_metrics(reports.report["metrics"].as_array().unwrap());
-    print_warnings(&reports.warnings, args);
+    print_warnings("svc", None, &reports.warnings, args);
     if let Some(output) = &args.output {
         write_report_bundle(
             output,
@@ -599,7 +600,7 @@ fn write_svc_report(
 ) -> Result<()> {
     print_header("SVC", report.metric_count);
     print_metrics(report.report["metrics"].as_array().unwrap());
-    print_warnings(&report.warnings, args);
+    print_warnings("svc", None, &report.warnings, args);
     if let Some(output) = &args.output {
         let mut bundle = report.report;
         if let Some(run) = run {
@@ -669,29 +670,29 @@ fn print_header(title: &str, metric_count: usize) {
     println!("running {metric_count} metrics");
 }
 
-fn print_warnings(warnings: &[String], args: &AnalyzeArgs) {
+fn print_warnings(domain: &str, test: Option<&str>, warnings: &[String], args: &AnalyzeArgs) {
     if warnings.is_empty() {
         return;
     }
-    if args.verbose {
-        for warning in warnings {
-            eprintln!("warning: {warning}");
-        }
+    if args.verbose || (std::io::stdout().is_terminal() && std::io::stderr().is_terminal()) {
+        display::print_warnings(domain, test, warnings);
         return;
     }
+    std::io::stdout().flush().ok();
     let suffix = if warnings.len() == 1 { "" } else { "s" };
-    if let Some(output) = &args.output {
-        eprintln!(
-            "warning: {} analysis warning{suffix}; details in {}/report.json",
+    let message = if let Some(output) = &args.output {
+        format!(
+            "{} analysis warning{suffix}; details in {}/report.json",
             warnings.len(),
             output.display()
-        );
+        )
     } else {
-        eprintln!(
-            "warning: {} analysis warning{suffix}; rerun with --verbose for details",
+        format!(
+            "{} analysis warning{suffix}; rerun with --verbose for details",
             warnings.len()
-        );
-    }
+        )
+    };
+    eprintln!("warning: {}", display::tag_warning(domain, test, message));
 }
 
 fn analyze_knc(args: &AnalyzeArgs, test: KncTest) -> Result<()> {
@@ -718,7 +719,7 @@ fn write_knc(
     let report = knc::analyze_input(config, test, input, None, debug.as_deref())?;
     print_header(test.title(), visible_metric_count(&report.metrics));
     print_metrics(&report.metrics);
-    print_warnings(&report.warnings, args);
+    print_warnings("knc", Some(test.name()), &report.warnings, args);
     let Some(output) = &args.output else {
         return Ok(());
     };
@@ -742,9 +743,12 @@ fn write_knc(
         test,
         &detail,
         &report,
-        &footer,
-        debug.as_deref(),
-        knc::plot_worker_limit(1),
+        knc::PlotOptions {
+            footer: &footer,
+            debug: debug.as_deref(),
+            workers: knc::plot_worker_limit(1),
+        },
+        &progress,
     )?;
     progress.done(&format!("{} plots", test.title()));
     detail["case"] = bundle["case"].clone();

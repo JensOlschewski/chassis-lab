@@ -49,6 +49,14 @@ impl ReportProgress {
         }
     }
 
+    pub(crate) fn println(&self, message: &str) {
+        if let Some(multi) = &self.multi {
+            multi.suspend(|| eprintln!("{message}"));
+        } else {
+            eprintln!("{message}");
+        }
+    }
+
     /// Mark the current phase done and leave its checkmark in scrollback.
     pub(crate) fn done(&self, message: &str) {
         if let Some(bar) = &self.bar {
@@ -138,6 +146,12 @@ impl ReportProgress {
             child.println(format!("  \x1b[32m✓\x1b[0m {label} plots"));
             child.finish_and_clear();
         }
+    }
+}
+
+impl Drop for ReportProgress {
+    fn drop(&mut self) {
+        self.finish();
     }
 }
 
