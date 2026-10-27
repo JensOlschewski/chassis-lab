@@ -246,18 +246,52 @@ fn write_combined_run(
     if has_svc {
         inputs.push(config.simulation_json.as_path());
     }
-    for (test, path, report, debug) in &knc_reports {
-        progress.phase(format!("Generating {} plots…", test.title()));
+    let labels = knc_reports
+        .iter()
+        .map(|(test, ..)| test.title())
+        .collect::<Vec<_>>();
+    let bars = progress.parallel_phases(&labels);
+    let workers = knc::plot_worker_limit(knc_reports.len());
+    let rendered = std::thread::scope(|scope| -> Result<Vec<_>> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        knc_reports
+            .iter()
+            .enumerate()
+            .map(|(index, (test, path, report, debug))| {
+                let footer = analysis_footer(&args.config, config, *test, path, Some(&args.input))?;
+                let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
+                let sender = sender.clone();
+                scope.spawn(move || {
+                    let result = knc_plots(
+                        config,
+                        *test,
+                        &detail,
+                        report,
+                        &footer,
+                        debug.as_deref(),
+                        workers,
+                    );
+                    let _ = sender.send((index, result));
+                });
+                Ok(())
+            })
+            .collect::<Result<Vec<_>>>()?;
+        drop(sender);
+        let mut results = (0..knc_reports.len()).map(|_| None).collect::<Vec<_>>();
+        for (index, result) in receiver {
+            if result.is_ok() {
+                progress.parallel_done(bars.get(index), labels[index]);
+            }
+            results[index] = Some(result);
+        }
+        results
+            .into_iter()
+            .map(|result| result.ok_or_else(|| anyhow::anyhow!("KnC plot worker panicked"))?)
+            .collect()
+    })?;
+    progress.end_parallel();
+    for ((test, path, report, _), plots) in knc_reports.iter().zip(rendered) {
         let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
-        let plots = knc_plots(
-            config,
-            *test,
-            &detail,
-            report,
-            &analysis_footer(&args.config, config, *test, path, Some(&args.input))?,
-            debug.as_deref(),
-        )?;
-        progress.done(&format!("{} plots", test.title()));
         detail["case"] = bundle["case"].clone();
         let mut knc_inputs = bundle["inputs"].clone();
         knc_inputs["input"] = provenance(path)?;
@@ -340,6 +374,7 @@ fn knc_plots(
     report: &knc::Reports,
     footer: &str,
     debug: Option<&str>,
+    workers: usize,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     knc::curve_plots(
         config,
@@ -349,6 +384,7 @@ fn knc_plots(
         report.measurement,
         &report.corner_mass_kg,
         debug,
+        workers,
     )
 }
 
@@ -725,7 +761,15 @@ fn write_knc(
     }
     let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
     progress.phase(format!("Generating {} plots…", test.title()));
-    let plots = knc_plots(config, test, &detail, &report, &footer, debug.as_deref())?;
+    let plots = knc_plots(
+        config,
+        test,
+        &detail,
+        &report,
+        &footer,
+        debug.as_deref(),
+        knc::plot_worker_limit(1),
+    )?;
     progress.done(&format!("{} plots", test.title()));
     detail["case"] = bundle["case"].clone();
     detail["inputs"] = bundle["inputs"].clone();

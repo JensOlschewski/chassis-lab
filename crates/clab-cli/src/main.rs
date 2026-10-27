@@ -32,6 +32,11 @@ enum Command {
     Convert(convert::ConvertArgs),
     /// Generate shell completion scripts.
     Completion { shell: Shell },
+    #[command(hide = true, name = "__render-knc")]
+    RenderKnc {
+        request: std::path::PathBuf,
+        output: std::path::PathBuf,
+    },
 }
 
 #[cfg(windows)]
@@ -74,5 +79,6 @@ fn run(cli: Cli) -> Result<()> {
             generate(shell, &mut Cli::command(), "clab", &mut std::io::stdout());
             Ok(())
         }
+        Command::RenderKnc { request, output } => analysis::knc::render_worker(&request, &output),
     }
 }

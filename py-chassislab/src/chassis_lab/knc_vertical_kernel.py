@@ -25,6 +25,10 @@ from chassis_lab.knc_plot_kernel import (
     render_comparison_reports,
     render_rate_debug,
     render_reports,
+    selected_specs,
+)
+from chassis_lab.knc_plot_kernel import (
+    plot_jobs as catalog_jobs,
 )
 
 # Every vertical metric uses the configured sweep of wheel-center travel.
@@ -443,6 +447,7 @@ def plot(
     branch: str | None = None,
     debug: str | None = None,
     corner_mass_kg: str | None = None,
+    selected: list[str] | None = None,
 ) -> dict[str, bytes]:
     """Render vertical report catalog through generic KnC plot kernel."""
     options = BranchOptions.from_json(branch)
@@ -453,7 +458,7 @@ def plot(
     )
     reports = render_reports(
         curves,
-        PLOT_SPECS,
+        selected_specs(PLOT_SPECS, selected, "plot"),
         PLOT_SIGNALS,
         source_label,
         "plots/knc/vertical",
@@ -467,7 +472,7 @@ def plot(
         reports.update(
             render_rate_debug(
                 curves,
-                PLOT_SPECS,
+                selected_specs(PLOT_SPECS, selected, "debug:0"),
                 options,
                 "plots/knc/vertical",
                 info,
@@ -476,6 +481,10 @@ def plot(
             )
         )
     return reports
+
+
+def plot_jobs(debug: bool, series_count: int = 1) -> list[str]:
+    return catalog_jobs(PLOT_SPECS, (), debug, series_count)
 
 
 def plot_compare(
@@ -488,6 +497,7 @@ def plot_compare(
     branches_json: str | None = None,
     debug: str | None = None,
     corner_mass_kg: str | None = None,
+    selected: list[str] | None = None,
 ) -> dict[str, bytes]:
     """Render vertical overlays.
 
@@ -514,7 +524,7 @@ def plot_compare(
     reports = render_comparison_reports(
         baseline,
         candidates,
-        PLOT_SPECS,
+        selected_specs(PLOT_SPECS, selected, "plot"),
         PLOT_SIGNALS,
         baseline_label,
         footer,
@@ -528,10 +538,11 @@ def plot_compare(
         for index, (curves, options) in enumerate(
             zip(series, branches, strict=True)
         ):
+            debug_specs = selected_specs(PLOT_SPECS, selected, f"debug:{index}")
             reports.update(
                 render_rate_debug(
                     curves,
-                    PLOT_SPECS,
+                    debug_specs,
                     options,
                     "",
                     info,

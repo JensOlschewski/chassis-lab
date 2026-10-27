@@ -3,6 +3,8 @@ use std::env;
 use std::ffi::CStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::process::Stdio;
 
 use anyhow::{Context, Result};
 use pyo3::prelude::*;
@@ -28,6 +30,216 @@ const DEFAULT_GRADIENT_POINTS_DEG: f64 = 1.0;
 pub(crate) enum KncTest {
     Vertical,
     Roll,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct RenderRequest {
+    test: String,
+    comparison: bool,
+    curves: String,
+    candidates: Option<String>,
+    label: String,
+    footer: String,
+    gradient_mm: Option<f64>,
+    branch: String,
+    gradient_deg: Option<f64>,
+    debug: Option<String>,
+    mass: String,
+    selected: Vec<String>,
+}
+
+pub(crate) fn plot_worker_limit(tests: usize) -> usize {
+    std::thread::available_parallelism()
+        .map_or(2, |n| n.get())
+        .min(4)
+        .div_ceil(tests)
+        .max(1)
+}
+
+fn render_parallel(
+    mut request: RenderRequest,
+    prefix: &str,
+    series_count: usize,
+    workers: usize,
+) -> Result<BTreeMap<String, Vec<u8>>> {
+    let test = KncTest::from_name(&request.test).expect("known test");
+    let jobs: Vec<String> = with_kernel(test, |_, module| {
+        module
+            .getattr("plot_jobs")?
+            .call1((request.debug.is_some(), series_count))?
+            .extract()
+    })?;
+    if jobs.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let count = workers.min(jobs.len());
+    let mut buckets = vec![Vec::new(); count];
+    // Place expensive diagnostics first so the final worker doesn't inherit
+    // all slow jobs. Each worker renders its subset in one Python interpreter.
+    let mut ordered = jobs;
+    ordered.sort_by_key(|name| !name.starts_with("debug:") && !name.starts_with("center:"));
+    for (index, job) in ordered.into_iter().enumerate() {
+        buckets[index % count].push(job);
+    }
+    let stage = tempfile::tempdir()?;
+    let executable = env::current_exe()?;
+    let mut requests = Vec::new();
+    for (index, selected) in buckets.into_iter().enumerate() {
+        request.selected = selected;
+        let input = stage.path().join(format!("request-{index}.json"));
+        let output = stage.path().join(format!("worker-{index}"));
+        fs::create_dir(&output)?;
+        fs::write(&input, serde_json::to_vec(&request)?)?;
+        requests.push((input, output));
+    }
+    // Always join every child before the temporary input/output directory is
+    // removed, including on a failed launch or a failed render.
+    let finished = std::thread::scope(|scope| {
+        let handles = requests
+            .into_iter()
+            .map(|(input, output)| {
+                let executable = &executable;
+                scope.spawn(move || {
+                    let result = Command::new(executable)
+                        .arg("__render-knc")
+                        .arg(input)
+                        .arg(&output)
+                        .stdout(Stdio::null())
+                        .output();
+                    (output, result)
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| handle.join())
+            .collect::<Vec<_>>()
+    });
+    let mut reports = BTreeMap::new();
+    let mut failure = None;
+    for finished in finished {
+        let (output, result) =
+            finished.map_err(|_| anyhow::anyhow!("KnC plot worker thread panicked"))?;
+        let result =
+            result.with_context(|| format!("failed to launch {} plot worker", test.name()))?;
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        if !result.status.success() {
+            failure.get_or_insert_with(|| format!("{} plot worker failed: {stderr}", test.name()));
+            continue;
+        }
+        if !stderr.is_empty() {
+            eprint!("{stderr}");
+        }
+        if failure.is_some() {
+            continue;
+        }
+        let names: Vec<String> = serde_json::from_slice(&fs::read(output.join("manifest.json"))?)?;
+        for name in names {
+            let relative = Path::new(&name);
+            if !valid_plot_path(relative) {
+                anyhow::bail!("invalid worker plot path: {name}");
+            }
+            let name = format!("{prefix}{name}");
+            if reports
+                .insert(name, fs::read(output.join(relative))?)
+                .is_some()
+            {
+                anyhow::bail!("duplicate plot from workers");
+            }
+        }
+    }
+    if let Some(error) = failure {
+        anyhow::bail!("{error}");
+    }
+    Ok(reports)
+}
+
+fn valid_plot_path(path: &Path) -> bool {
+    path.components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)))
+        && path.extension().is_some_and(|extension| extension == "pdf")
+}
+
+pub(crate) fn render_worker(input: &Path, output: &Path) -> Result<()> {
+    let request: RenderRequest = serde_json::from_slice(&fs::read(input)?)?;
+    let test = KncTest::from_name(&request.test)
+        .ok_or_else(|| anyhow::anyhow!("unknown KnC render test"))?;
+    let reports: BTreeMap<String, Vec<u8>> = with_kernel(test, |py, module| {
+        let function = module.getattr(if request.comparison {
+            "plot_compare"
+        } else {
+            "plot"
+        })?;
+        let selected = &request.selected;
+        let result = match (request.comparison, test) {
+            (false, KncTest::Vertical) => function.call1((
+                &request.curves,
+                &request.label,
+                &request.footer,
+                logo(py),
+                request.gradient_mm,
+                &request.branch,
+                &request.debug,
+                &request.mass,
+                selected,
+            ))?,
+            (false, KncTest::Roll) => function.call1((
+                &request.curves,
+                &request.label,
+                &request.footer,
+                logo(py),
+                request.gradient_mm,
+                &request.branch,
+                request.gradient_deg,
+                &request.debug,
+                selected,
+            ))?,
+            (true, KncTest::Vertical) => function.call1((
+                &request.curves,
+                request
+                    .candidates
+                    .as_deref()
+                    .expect("comparison candidates"),
+                &request.label,
+                &request.footer,
+                logo(py),
+                request.gradient_mm,
+                &request.branch,
+                &request.debug,
+                &request.mass,
+                selected,
+            ))?,
+            (true, KncTest::Roll) => function.call1((
+                &request.curves,
+                request
+                    .candidates
+                    .as_deref()
+                    .expect("comparison candidates"),
+                &request.label,
+                &request.footer,
+                logo(py),
+                request.gradient_mm,
+                &request.branch,
+                request.gradient_deg,
+                &request.debug,
+                selected,
+            ))?,
+        };
+        result.extract()
+    })?;
+    let mut names = Vec::new();
+    for (name, pdf) in reports {
+        let relative = Path::new(&name);
+        if !valid_plot_path(relative) {
+            anyhow::bail!("invalid worker plot path: {name}");
+        }
+        let path = output.join(relative);
+        fs::create_dir_all(path.parent().expect("PDF has parent"))?;
+        fs::write(path, pdf)?;
+        names.push(name);
+    }
+    fs::write(output.join("manifest.json"), serde_json::to_vec(&names)?)?;
+    Ok(())
 }
 
 impl KncTest {
@@ -521,6 +733,7 @@ pub(crate) fn compare_plots(
     )],
     (baseline_label, footer, prefix): (&str, &str, &str),
     debug: Option<&str>,
+    workers: usize,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let baseline_json = serde_json::to_string(baseline)?;
     let candidates_json = serde_json::to_string(
@@ -539,49 +752,37 @@ pub(crate) fn compare_plots(
             .chain(candidates.iter().map(|(_, _, _, mass)| mass))
             .collect::<Vec<_>>(),
     )?;
-    let reports: BTreeMap<String, Vec<u8>> = with_kernel(test, |py, module| {
-        let gradient = test
-            .config(config)
-            .map(|knc| effective_gradient_points(&knc.window));
-        let function = module.getattr("plot_compare")?;
-        let result = match test {
-            KncTest::Vertical => function.call1((
-                &baseline_json,
-                &candidates_json,
-                baseline_label,
-                footer,
-                logo(py),
-                gradient,
-                &branch,
-                debug,
-                &corner_mass_kg,
-            ))?,
-            KncTest::Roll => function.call1((
-                &baseline_json,
-                &candidates_json,
-                baseline_label,
-                footer,
-                logo(py),
-                gradient,
-                &branch,
-                test.config(config)
-                    .and_then(|knc| knc.window.gradient_points_deg)
-                    .unwrap_or(1.0),
-                debug,
-            ))?,
-        };
-        result.extract()
-    })
+    let reports = render_parallel(
+        RenderRequest {
+            test: test.name().into(),
+            comparison: true,
+            curves: baseline_json,
+            candidates: Some(candidates_json),
+            label: baseline_label.into(),
+            footer: footer.into(),
+            gradient_mm: test
+                .config(config)
+                .map(|knc| effective_gradient_points(&knc.window)),
+            branch,
+            gradient_deg: test
+                .config(config)
+                .and_then(|knc| knc.window.gradient_points_deg)
+                .or(Some(1.0)),
+            debug: debug.map(str::to_owned),
+            mass: corner_mass_kg,
+            selected: Vec::new(),
+        },
+        &format!("{prefix}/"),
+        candidates.len() + 1,
+        workers,
+    )
     .with_context(|| {
         format!(
             "failed to generate {} comparison PDF reports with embedded Python",
             test.name()
         )
     })?;
-    Ok(reports
-        .into_iter()
-        .map(|(name, pdf)| (format!("{prefix}/{name}"), pdf))
-        .collect())
+    Ok(reports)
 }
 
 fn subtract_static(
@@ -986,6 +1187,7 @@ pub(crate) fn curve_plots(
     measurement: bool,
     corner_mass_kg: &BTreeMap<String, f64>,
     debug: Option<&str>,
+    workers: usize,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let source_label = source_label(measurement);
     let curves = serde_json::to_string(curves)?;
@@ -996,20 +1198,13 @@ pub(crate) fn curve_plots(
         |config| config.branch.for_measurement(measurement),
     ))?;
     let corner_mass_kg = serde_json::to_string(corner_mass_kg)?;
-    with_kernel(test, |py, module| {
-        let function = module.getattr("plot")?;
-        let result = match test {
-            KncTest::Vertical => function.call1((
-                &curves, source_label, footer, logo(py), gradient, &branch, debug, &corner_mass_kg,
-            ))?,
-            KncTest::Roll => function.call1((
-                &curves, source_label, footer, logo(py), gradient, &branch,
-                knc.and_then(|config| config.window.gradient_points_deg).unwrap_or(1.0),
-                debug,
-            ))?,
-        };
-        result.extract()
-    })
+    render_parallel(RenderRequest {
+        test: test.name().into(), comparison: false, curves,
+        candidates: None, label: source_label.into(), footer: footer.into(),
+        gradient_mm: gradient, branch,
+        gradient_deg: Some(knc.and_then(|config| config.window.gradient_points_deg).unwrap_or(1.0)),
+        debug: debug.map(str::to_owned), mass: corner_mass_kg, selected: Vec::new(),
+    }, "", 1, workers)
     .with_context(|| format!("failed to generate {} PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'", test.name()))
 }
 
@@ -1025,6 +1220,12 @@ fn with_kernel<T>(
     test: KncTest,
     call: impl FnOnce(Python<'_>, &Bound<'_, PyModule>) -> PyResult<T>,
 ) -> Result<T> {
+    // Module creation and `site.addsitedir` can release the GIL while imports
+    // are in progress; another Rust thread must not observe partial modules.
+    static KERNEL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _lock = KERNEL_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     Ok(Python::attach(|py| -> PyResult<T> {
         add_venv_site_packages(py)?;
         let modules = PyModule::import(py, "sys")?
