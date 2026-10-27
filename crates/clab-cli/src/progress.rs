@@ -4,7 +4,7 @@
 //!
 //! Silent unless stderr is a terminal, so piped/CI output is unchanged.
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -18,11 +18,14 @@ impl ReportProgress {
         if !active || !std::io::stderr().is_terminal() {
             return Self(None);
         }
+
+        println!("\nReport generation");
+        std::io::stdout().flush().ok();
         let bar = ProgressBar::new_spinner();
         bar.set_style(
-            ProgressStyle::with_template("  {spinner:.cyan} {msg}").expect("valid spinner template"),
+            ProgressStyle::with_template("  {spinner:.cyan} {msg}")
+                .expect("valid spinner template"),
         );
-        bar.println("\nReport generation");
         bar.enable_steady_tick(Duration::from_millis(80));
         Self(Some(bar))
     }
