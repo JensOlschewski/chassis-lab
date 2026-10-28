@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../../../dist/embed-bundle-linux-x86_64/": "clab-runtime/"
+    }
+  }
+}
