@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "bundle:linux": "tauri build --config src-tauri/tauri.runtime-linux.conf.json --bundles deb"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
