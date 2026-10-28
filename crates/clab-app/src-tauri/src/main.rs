@@ -36,6 +36,12 @@ fn clab_executable(app: &AppHandle) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("clab worker not found; looked in {candidates:?}"))
 }
 
+/// Pasted paths often carry whitespace or the quotes added by "Copy as path".
+fn clean_path(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    PathBuf::from(text.trim().trim_matches('"').trim())
+}
+
 fn analyze(
     clab: &Path,
     config: &Path,
@@ -53,7 +59,10 @@ fn analyze(
         .arg(config)
         .arg(input)
         .arg("--report")
-        .arg(report);
+        .arg(report)
+        // Inputs are only read, and HDF5 cannot lock files on network shares
+        // such as \\wsl.localhost.
+        .env("HDF5_USE_FILE_LOCKING", "FALSE");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -78,6 +87,7 @@ async fn run_analyze(
     report: PathBuf,
 ) -> Result<AnalyzeOutcome, String> {
     let clab = clab_executable(&app)?;
+    let (config, input, report) = (clean_path(config), clean_path(input), clean_path(report));
     tauri::async_runtime::spawn_blocking(move || analyze(&clab, &config, &input, &report))
         .await
         .map_err(|error| error.to_string())?
