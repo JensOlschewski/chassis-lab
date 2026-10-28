@@ -1,0 +1,10 @@
+[package]
+name = "clab-app"
+version.workspace = true
+edition = "2024"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
