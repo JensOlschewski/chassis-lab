@@ -9,7 +9,14 @@
   <body>
     <main>
       <h1>ChassisLab</h1>
+      <form id="analyze-form">
+        <label>Configuration <input id="config" required /></label><br />
+        <label>Input <input id="input" required /></label><br />
+        <label>Report directory <input id="report" required /></label><br />
+        <button type="submit">Run analysis</button>
+      </form>
       <p id="status"></p>
+      <pre id="output"></pre>
     </main>
   </body>
 </html>

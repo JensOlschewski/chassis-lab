@@ -382,6 +382,7 @@ dependencies = [
 name = "clab-app"
 version = "0.7.0"
 dependencies = [
+ "serde",
  "tauri",
  "tauri-build",
 ]
