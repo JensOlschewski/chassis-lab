@@ -47,12 +47,20 @@ fn analyze(
             return Err(format!("{label} file not found: {}", path.display()));
         }
     }
-    let output = Command::new(clab)
+    let mut command = Command::new(clab);
+    command
         .arg("analyze")
         .arg(config)
         .arg(input)
         .arg("--report")
-        .arg(report)
+        .arg(report);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // A GUI app must not flash a console window for each worker run.
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command
         .output()
         .map_err(|error| format!("failed to start clab: {error}"))?;
     Ok(AnalyzeOutcome {

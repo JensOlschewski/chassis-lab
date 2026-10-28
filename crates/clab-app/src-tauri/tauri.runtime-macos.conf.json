@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../../../dist/embed-bundle-macos-x86_64/": "clab-runtime/"
+    }
+  }
+}

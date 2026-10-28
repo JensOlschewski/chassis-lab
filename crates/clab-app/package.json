@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "tauri": "tauri",
-    "bundle:linux": "tauri build --config src-tauri/tauri.runtime-linux.conf.json --bundles deb"
+    "bundle:linux": "tauri build --config src-tauri/tauri.runtime-linux.conf.json --bundles deb",
+    "bundle:windows": "tauri build --config src-tauri/tauri.runtime-windows.conf.json --bundles nsis",
+    "bundle:macos": "tauri build --config src-tauri/tauri.runtime-macos.conf.json --bundles app,dmg"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
