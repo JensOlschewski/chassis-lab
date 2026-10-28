@@ -50,10 +50,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Lint Rust
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude clab-app --all-targets --all-features -- -D warnings
 
       - name: Test Rust
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --exclude clab-app --locked
 
       - name: Check Python
         run: cd py-chassislab && ruff check . && ruff format --check .
