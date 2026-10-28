@@ -2,9 +2,9 @@ name: Desktop
 
 on:
   workflow_dispatch:
-  # Temporary: remove before merging feat/desktop-workspace.
   push:
-    branches: [feat/desktop-workspace]
+    tags:
+      - "v*"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -111,3 +111,4 @@ jobs:
           name: desktop-${{ matrix.platform }}
           path: ${{ matrix.artifact }}
           if-no-files-found: error
+          retention-days: 7
