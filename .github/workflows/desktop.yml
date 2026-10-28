@@ -18,14 +18,17 @@ jobs:
           - os: ubuntu-latest
             platform: linux-x86_64
             target: x86_64-unknown-linux-gnu
+            script: bundle:linux
             artifact: target/release/bundle/deb/*.deb
           - os: windows-latest
             platform: windows-x86_64
             target: x86_64-pc-windows-msvc
+            script: bundle:windows
             artifact: target/release/bundle/nsis/*.exe
           - os: macos-26-intel
             platform: macos-x86_64
             target: x86_64-apple-darwin
+            script: bundle:macos
             artifact: target/release/bundle/dmg/*.dmg
     runs-on: ${{ matrix.os }}
     steps:
@@ -100,13 +103,7 @@ jobs:
 
       - name: Build desktop bundle
         working-directory: crates/clab-app
-        shell: bash
-        run: |
-          case "${{ matrix.platform }}" in
-            linux-x86_64) npm run bundle:linux ;;
-            windows-x86_64) npm run bundle:windows ;;
-            macos-x86_64) npm run bundle:macos ;;
-          esac
+        run: npm run ${{ matrix.script }}
 
       - name: Upload desktop bundle
         uses: actions/upload-artifact@v7
