@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "ChassisLab", "width": 900, "height": 640 }],
+    "windows": [{ "title": "ChassisLab", "width": 1040, "height": 720, "minWidth": 760, "minHeight": 520 }],
     "security": { "csp": null }
   },
   "bundle": {
