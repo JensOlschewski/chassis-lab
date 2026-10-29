@@ -35,6 +35,12 @@ fn executable(app: &AppHandle) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("clab worker not found; looked in {candidates:?}"))
 }
 
+/// Pasted paths often carry whitespace or the quotes added by "Copy as path".
+pub fn clean_path(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    PathBuf::from(text.trim().trim_matches('"').trim())
+}
+
 fn run_blocking(clab: &Path, args: &[OsString]) -> Result<Outcome, String> {
     let mut command = Command::new(clab);
     command

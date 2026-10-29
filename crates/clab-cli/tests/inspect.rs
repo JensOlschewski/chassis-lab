@@ -208,3 +208,83 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
         "{stderr}"
     );
 }
+
+fn convert_example_measurement(directory: &Path) -> PathBuf {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/input/raw-measurement/example-measurement-knc-vertical.acd");
+    let path = directory.join("measurement.h5");
+    let converted = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .args([
+            "convert",
+            source.to_str().unwrap(),
+            "-d",
+            "knc",
+            "-t",
+            "vertical",
+        ])
+        .args(["-o", path.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        converted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&converted.stderr)
+    );
+    path
+}
+
+fn inspect_json(path: &Path, arguments: &[&str]) -> serde_json::Value {
+    let output = inspect(path, &[&["--json"], arguments].concat());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn json_lists_signals_and_reads_values_with_axis() {
+    let directory = tempdir().unwrap();
+    let path = convert_example_measurement(directory.path());
+
+    let catalog = inspect_json(&path, &["--list"]);
+    let signals = catalog["signals"].as_array().unwrap();
+    assert_eq!(signals.len(), 49);
+    let summary = &catalog["summary"];
+    assert_eq!(summary["source_kind"], "measurement");
+    assert_eq!(summary["schema_version"], 2);
+    assert_eq!(summary["samples"], 4096);
+    assert_eq!(summary["signals"], 49);
+    assert_eq!(summary["test_metadata"], 5);
+    let name = signals[0]["name"].as_str().unwrap().to_owned();
+    assert!(signals[0]["unit"].is_string());
+
+    let data = inspect_json(&path, &["--signal", &name]);
+    assert_eq!(data["axis"].as_array().unwrap().len(), 4096);
+    assert_eq!(data["signals"][0]["name"], name);
+    assert_eq!(data["signals"][0]["values"].as_array().unwrap().len(), 4096);
+}
+
+#[test]
+fn json_rejects_unknown_signal_bad_flags_and_non_hdf5() {
+    let directory = tempdir().unwrap();
+    let path = convert_example_measurement(directory.path());
+
+    for arguments in [
+        &["--json", "--signal", "no-such-signal"][..],
+        &["--json"],
+        &["--json", "--list", "--signal", "x"],
+        &["--signal", "x"],
+    ] {
+        let output = inspect(&path, arguments);
+        assert!(!output.status.success(), "{arguments:?}");
+        assert!(output.stdout.is_empty(), "{arguments:?}");
+    }
+
+    let json = directory.path().join("simulation.json");
+    fs::write(&json, "{}").unwrap();
+    let output = inspect(&json, &["--json", "--list"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains(".h5 or .hdf5"));
+}
