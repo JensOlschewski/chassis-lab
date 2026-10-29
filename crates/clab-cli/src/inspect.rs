@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
 use clab_core::svc::SvcSimulationFile;
 use clap::{Args, ValueEnum};
+use serde_json::json;
 
 use crate::signals;
 
@@ -32,6 +33,12 @@ pub(crate) struct InspectArgs {
     /// Emit editable TOML mapping skeleton.
     #[arg(long)]
     template: bool,
+    /// Read one signal by its listed name; repeatable. Requires --json.
+    #[arg(long)]
+    signal: Vec<String>,
+    /// Emit JSON for --list/--match or --signal (HDF5 only).
+    #[arg(long)]
+    json: bool,
 }
 
 pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
@@ -60,6 +67,17 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
     if !file.is_file() {
         bail!("input file does not exist: {}", file.display());
     }
+    if args.json {
+        return inspect_json(
+            &file,
+            &args.signal,
+            args.list || args.r#match.is_some(),
+            args.r#match.as_deref(),
+        );
+    }
+    if !args.signal.is_empty() {
+        bail!("--signal requires --json");
+    }
     let extension = file
         .extension()
         .and_then(|extension| extension.to_str())
@@ -77,6 +95,55 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
         ),
         _ => bail!("unsupported input extension; clab inspect accepts .json, .h5, or .hdf5"),
     }
+}
+
+/// Prints either the signal catalog or the axis plus the named signals' values.
+fn inspect_json(path: &Path, names: &[String], list: bool, match_text: Option<&str>) -> Result<()> {
+    let is_hdf5 = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "h5" | "hdf5"));
+    if !is_hdf5 {
+        bail!("--json supports .h5 or .hdf5 files only");
+    }
+    if list == !names.is_empty() {
+        bail!("--json needs exactly one of --list/--match or --signal");
+    }
+    let file = CanonicalFile::open(path)
+        .with_context(|| format!("failed to inspect HDF5 '{}'", path.display()))?;
+    let document = if list {
+        let rows = match match_text {
+            Some(text) => file.matching_signals(text),
+            None => file.signals().iter().collect(),
+        };
+        let signals: Vec<_> = rows
+            .into_iter()
+            .map(|signal| {
+                json!({
+                    "name": signal.safe_name,
+                    "component": signal.component,
+                    "unit": signal.unit,
+                    "source_path": signal.source_path,
+                })
+            })
+            .collect();
+        json!({ "signals": signals })
+    } else {
+        let signals = names
+            .iter()
+            .map(|name| {
+                let signal = file.read_signal(name, None, None)?;
+                Ok(json!({
+                    "name": signal.info.safe_name,
+                    "unit": signal.info.unit,
+                    "values": signal.values,
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        json!({ "axis": file.read_axis()?, "signals": signals })
+    };
+    println!("{document}");
+    Ok(())
 }
 
 fn inspect_svc_json(path: &Path, signals: bool, match_text: Option<&str>) -> Result<()> {
