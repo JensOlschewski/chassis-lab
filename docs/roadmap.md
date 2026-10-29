@@ -143,7 +143,7 @@ Issues:
 
 1. Add an optional pipeline command for generator, solver, converter, and
    validation stages.
-2. Add Gitea Actions for linting and synthetic unit tests.
+2. Add GitHub Actions for linting and synthetic unit tests.
 3. Add private-runner integration tests against authorized validation data.
 4. Define synchronized Python/Rust semantic versions and HDF5 compatibility.
 5. Publish tagged Python and Rust release artifacts with checksums.
@@ -245,7 +245,7 @@ Exit criteria:
   artifact. Checksums accompany every artifact.
 - `crates/clab-converter/` remains a library dependency of the unified CLI.
 
-## Gitea maintenance policy
+## Repository maintenance policy
 
 - The repository is private.
 - `main` is protected and changes merge through pull requests.
