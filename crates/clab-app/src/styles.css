@@ -87,7 +87,6 @@ label[hidden] { display: none; }
 .row { display: flex; gap: 16px; }
 .row label { flex: 1; }
 .check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
-/* .check input { box-sizing: content-box; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); } */
 .check input { box-sizing: content-box; margin: 0; accent-color: var(--accent); }
 
 .path-row { display: flex; gap: 8px; }

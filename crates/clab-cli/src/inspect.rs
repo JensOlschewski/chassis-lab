@@ -78,11 +78,7 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
     if !args.signal.is_empty() {
         bail!("--signal requires --json");
     }
-    let extension = file
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase);
-    match extension.as_deref() {
+    match extension(&file).as_deref() {
         Some("json") => inspect_svc_json(
             &file,
             args.list || args.r#match.is_some(),
@@ -97,13 +93,15 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
     }
 }
 
+fn extension(path: &Path) -> Option<String> {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+}
+
 /// Prints either the signal catalog or the axis plus the named signals' values.
 fn inspect_json(path: &Path, names: &[String], list: bool, match_text: Option<&str>) -> Result<()> {
-    let is_hdf5 = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "h5" | "hdf5"));
-    if !is_hdf5 {
+    if !matches!(extension(path).as_deref(), Some("h5" | "hdf5")) {
         bail!("--json supports .h5 or .hdf5 files only");
     }
     if list == !names.is_empty() {
