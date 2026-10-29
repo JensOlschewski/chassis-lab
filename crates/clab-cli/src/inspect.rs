@@ -127,7 +127,19 @@ fn inspect_json(path: &Path, names: &[String], list: bool, match_text: Option<&s
                 })
             })
             .collect();
-        json!({ "signals": signals })
+        let summary = file.summary();
+        json!({
+            "summary": {
+                "source_file": summary.source_file,
+                "source_kind": summary.source_kind.as_str(),
+                "schema_version": summary.schema_version,
+                "samples": summary.sample_count,
+                "signals": summary.signal_count,
+                "test_metadata": (summary.source_kind == SourceKind::Measurement)
+                    .then(|| file.test_info().len()),
+            },
+            "signals": signals,
+        })
     } else {
         let signals = names
             .iter()

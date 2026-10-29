@@ -251,6 +251,12 @@ fn json_lists_signals_and_reads_values_with_axis() {
     let catalog = inspect_json(&path, &["--list"]);
     let signals = catalog["signals"].as_array().unwrap();
     assert_eq!(signals.len(), 49);
+    let summary = &catalog["summary"];
+    assert_eq!(summary["source_kind"], "measurement");
+    assert_eq!(summary["schema_version"], 2);
+    assert_eq!(summary["samples"], 4096);
+    assert_eq!(summary["signals"], 49);
+    assert_eq!(summary["test_metadata"], 5);
     let name = signals[0]["name"].as_str().unwrap().to_owned();
     assert!(signals[0]["unit"].is_string());
 
