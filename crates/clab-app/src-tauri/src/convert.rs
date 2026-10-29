@@ -60,7 +60,14 @@ mod tests {
     #[test]
     fn builds_full_argument_list_with_cleaned_paths() {
         let expected = [
-            "convert", "--domain", "knc", "--test", "vertical", "--output", "/out", "--force",
+            "convert",
+            "--domain",
+            "knc",
+            "--test",
+            "vertical",
+            "--output",
+            "/out",
+            "--force",
             "/data/run.res",
         ];
         assert_eq!(request().args(), expected.map(OsString::from));
