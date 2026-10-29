@@ -4,19 +4,64 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChassisLab</title>
+    <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
+    <nav class="sidebar" aria-label="Commands">
+      <h1 class="brand">ChassisLab</h1>
+      <button class="nav-item" data-pane="convert" aria-current="page">Convert</button>
+      <button class="nav-item" data-pane="analyze" disabled>Analyze <small>soon</small></button>
+      <button class="nav-item" data-pane="compare" disabled>Compare <small>soon</small></button>
+    </nav>
+
     <main>
-      <h1>ChassisLab</h1>
-      <form id="analyze-form">
-        <label>Configuration <input id="config" required /></label><br />
-        <label>Input <input id="input" required /></label><br />
-        <label>Report directory <input id="report" required /></label><br />
-        <button type="submit">Run analysis</button>
-      </form>
-      <p id="status"></p>
-      <pre id="output"></pre>
+      <section id="convert" class="pane">
+        <h2>Convert</h2>
+        <p class="hint">Convert an Adams RES or Lommel ACD file to canonical HDF5.</p>
+        <form id="convert-form">
+          <label>
+            Input file
+            <span class="path-row">
+              <input name="input" required placeholder=".res or .acd" />
+              <button type="button" data-browse="file" data-target="input">Browse…</button>
+            </span>
+          </label>
+
+          <div class="row">
+            <label>
+              Domain
+              <select name="domain">
+                <option value="svc">svc</option>
+                <option value="knc">knc</option>
+              </select>
+            </label>
+            <label id="test-field" hidden>
+              Test
+              <select name="test">
+                <option value="vertical">vertical</option>
+                <option value="roll">roll</option>
+                <option value="static">static</option>
+              </select>
+            </label>
+          </div>
+
+          <label>
+            Output folder <span class="optional">optional, defaults to the input folder</span>
+            <span class="path-row">
+              <input name="output" />
+              <button type="button" data-browse="directory" data-target="output">Browse…</button>
+            </span>
+          </label>
+
+          <label class="check"><input type="checkbox" name="force" /> Replace existing output</label>
+
+          <button type="submit" class="primary">Convert</button>
+        </form>
+
+        <p id="convert-status" class="status" role="status"></p>
+        <pre id="convert-output" class="output"></pre>
+      </section>
     </main>
   </body>
 </html>
