@@ -13,6 +13,9 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  desktop:
+    uses: ./.github/workflows/desktop.yml
+
   build:
     strategy:
       fail-fast: true
@@ -41,6 +44,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           test "$(sed -n 's/^version = \"\([^\"]*\)\"/\1/p' Cargo.toml | head -n 1)" = "$version"
           test "$(sed -n 's/^version = \"\([^\"]*\)\"/\1/p' py-chassislab/pyproject.toml | head -n 1)" = "$version"
+          test "$(sed -n 's/^ *\"version\": \"\([^\"]*\)\".*/\1/p' crates/clab-app/src-tauri/tauri.conf.json | head -n 1)" = "$version"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -234,18 +238,17 @@ jobs:
 
   publish:
     if: github.event_name == 'push'
-    needs: build
+    needs: [build, desktop]
     runs-on: ubuntu-latest
     steps:
       - name: Download gated runtime archives
         uses: actions/download-artifact@v8
         with:
-          pattern: package-*
           path: dist
           merge-multiple: true
 
       - name: Create release checksums
-        run: find dist -maxdepth 1 -type f -name 'clab-v*' ! -name '*.sha256' -print0 | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
+        run: find dist -maxdepth 1 -type f ! -name '*.sha256' -print0 | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -256,46 +259,9 @@ jobs:
             - Windows x86_64
             - Intel macOS x86_64
 
-            Each archive contains embedded CPython, required scientific wheels,
+            Desktop installers: .deb (Linux), .exe (Windows), .dmg (Intel macOS).
+
+            Each CLI archive contains embedded CPython, required scientific wheels,
             dependency licenses, build provenance, and internal checksums.
           files: dist/*
           generate_release_notes: true
-
-  publish-gitea:
-    if: github.event_name == 'push' && vars.PUBLISH_TO_GITEA == 'true'
-    needs: [build, publish]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download release archives
-        uses: actions/download-artifact@v8
-        with:
-          pattern: package-*
-          path: dist
-          merge-multiple: true
-
-      - name: Create release checksums
-        run: find dist -maxdepth 1 -type f -name 'clab-v*' ! -name '*.sha256' -print0 | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
-
-      - name: Publish release and assets to Gitea
-        env:
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
-          GITEA_URL: ${{ vars.GITEA_URL }}
-          GITEA_REPOSITORY: ${{ vars.GITEA_REPOSITORY }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          api="$GITEA_URL/api/v1/repos/$GITEA_REPOSITORY"
-          auth=(-H "Authorization: token $GITEA_TOKEN")
-          if ! release=$(curl -fsS "${auth[@]}" "$api/releases/tags/$RELEASE_TAG"); then
-            release=$(curl -fsS -X POST "${auth[@]}" -H 'Content-Type: application/json' \
-              "$api/releases" -d "$(jq -n --arg tag "$RELEASE_TAG" '{tag_name: $tag, name: ("ChassisLab " + $tag), body: "Built by GitHub Actions."}')")
-          fi
-          release_id=$(jq -r '.id' <<< "$release")
-          assets=$(curl -fsS "${auth[@]}" "$api/releases/$release_id/assets")
-          for asset in dist/*; do
-            name=$(basename "$asset")
-            existing_id=$(jq -r --arg name "$name" '.[] | select(.name == $name) | .id' <<< "$assets")
-            if [ -n "$existing_id" ]; then curl -fsS -X DELETE "${auth[@]}" "$api/releases/$release_id/assets/$existing_id"; fi
-            curl -fsS -X POST "${auth[@]}" -H 'Content-Type: application/octet-stream' \
-              --data-binary "@$asset" "$api/releases/$release_id/assets?name=$name" >/dev/null
-          done
