@@ -75,6 +75,7 @@ main {
 }
 
 .pane { max-width: 640px; }
+.pane.wide { max-width: 960px; }
 .pane[hidden] { display: none; }
 h2 { margin: 0 0 4px; font-size: 1.4rem; font-weight: 600; }
 .hint { margin: 0 0 24px; color: var(--muted); }
@@ -131,3 +132,15 @@ button.primary {
   white-space: pre-wrap;
 }
 .output:empty { display: none; }
+
+.curves { display: flex; flex-direction: column; gap: 8px; }
+.curve { display: flex; gap: 8px; align-items: center; }
+.curve select { flex: 1; min-width: 0; }
+.swatch { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+#add-curve { align-self: flex-start; }
+.plot { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
+.plot[hidden] { display: none; }
+.chart { flex: 1; min-width: 0; height: 480px; border: 1px solid var(--text); border-radius: var(--radius); }
+.tools { display: flex; flex-direction: column; gap: 6px; }
+.tools button[aria-pressed=true] { border-color: var(--text); }
+.footer { margin: 8px 0 0; color: var(--muted); font-size: 0.75rem; word-break: break-all; }

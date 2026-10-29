@@ -1,4 +1,4 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { setupBrowse } from "./browse";
 import { describe, run } from "./worker";
 
 interface ConvertRequest {
@@ -41,14 +41,7 @@ export function setupConvert(): void {
     testField.hidden = readRequest(form).domain !== "knc";
   });
 
-  form.querySelectorAll<HTMLButtonElement>("[data-browse]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const selected = await open({ directory: button.dataset.browse === "directory" });
-      if (selected) {
-        form.querySelector<HTMLInputElement>(`[name=${button.dataset.target}]`)!.value = selected;
-      }
-    });
-  });
+  setupBrowse(form);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
