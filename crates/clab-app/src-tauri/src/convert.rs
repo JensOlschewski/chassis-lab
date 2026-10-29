@@ -1,9 +1,8 @@
-use std::{
-    ffi::OsString,
-    path::{Path, PathBuf},
-};
+use std::{ffi::OsString, path::PathBuf};
 
 use serde::Deserialize;
+
+use crate::worker::clean_path;
 
 #[derive(Deserialize)]
 pub struct ConvertRequest {
@@ -12,12 +11,6 @@ pub struct ConvertRequest {
     test: Option<String>,
     output: Option<PathBuf>,
     force: bool,
-}
-
-/// Pasted paths often carry whitespace or the quotes added by "Copy as path".
-fn clean_path(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    PathBuf::from(text.trim().trim_matches('"').trim())
 }
 
 impl ConvertRequest {
