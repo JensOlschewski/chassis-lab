@@ -1,30 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { setupBrowse } from "./browse";
+import { AXIS, Curve, SignalInfo, Signals, Summary, drawChart, labelOf } from "./chart";
 import { describe, run } from "./worker";
-
-interface SignalInfo {
-  name: string;
-  unit: string;
-}
-
-interface Signals {
-  axis: number[];
-  signals: (SignalInfo & { values: number[] })[];
-}
-
-interface Series {
-  label: string;
-  values: number[];
-}
 
 interface Choice {
   value: string;
   text: string;
 }
-
-/** Selectable X/Y value that stands for the file's sample axis. */
-const AXIS = "axis";
 
 /** Same order as the Python reports: black baseline, then the compare palette. */
 const CURVE_COLORS = ["#000000", "#e41a1c", "#377eb8", "#e7298a", "#00a6a6", "#ff7f00", "#6a3d9a"];
@@ -38,15 +21,6 @@ async function inspect<T>(file: string, signals: string[]): Promise<T> {
   return JSON.parse(outcome.stdout) as T;
 }
 
-const labelOf = ({ name, unit }: SignalInfo) => (unit ? `${name} [${unit}]` : name);
-
-/** Looks up what the user selected: the file's axis or one of the returned signals. */
-export function seriesFor(data: Signals, name: string): Series {
-  if (name === AXIS) return { label: AXIS, values: data.axis };
-  const signal = data.signals.find((signal) => signal.name === name)!;
-  return { label: labelOf(signal), values: signal.values };
-}
-
 function createSelect(options: Choice[], selected: string): HTMLSelectElement {
   const select = document.createElement("select");
   select.replaceChildren(...options.map(({ value, text }) => new Option(text, value)));
@@ -54,50 +28,11 @@ function createSelect(options: Choice[], selected: string): HTMLSelectElement {
   return select;
 }
 
-interface Curve {
-  x: string;
-  y: string;
-  color: string;
-}
-
-async function drawChart(root: HTMLElement, data: Signals, curves: Curve[]): Promise<void> {
-  // Plotly is large; load it on first plot only.
-  const { default: Plotly } = await import("plotly.js-basic-dist-min");
-  const text = getComputedStyle(document.body).color;
-  const traces = curves.map(({ x, y, color }) => {
-    const [xs, ys] = [seriesFor(data, x), seriesFor(data, y)];
-    return {
-      x: xs.values,
-      y: ys.values,
-      name: `${ys.label} vs ${xs.label}`,
-      type: "scatter",
-      mode: "lines",
-      line: { color, width: 1.5 },
-    };
-  });
-  // An axis title is only meaningful when every curve shares it.
-  const common = (pick: (curve: Curve) => string) =>
-    new Set(curves.map(pick)).size === 1 ? seriesFor(data, pick(curves[0])).label : "";
-  const frame = { showline: true, mirror: true, linecolor: text, ticks: "outside" };
-  const layout = {
-    xaxis: { ...frame, title: { text: common((curve) => curve.x) } },
-    yaxis: { ...frame, title: { text: common((curve) => curve.y) } },
-    showlegend: curves.length > 1,
-    legend: { orientation: "h", y: -0.2 },
-    // Keep the tool the user picked across redraws.
-    dragmode: document.querySelector<HTMLElement>("#inspect-tools [aria-pressed=true]")!.dataset.tool,
-    margin: { t: 16 },
-    paper_bgcolor: "transparent",
-    plot_bgcolor: "transparent",
-    font: { color: text },
-  };
-  await Plotly.newPlot(root, traces, layout, { responsive: true, displayModeBar: false });
-}
-
 /** Buttons beside the chart replace Plotly's own toolbar. */
 function setupTools(
   chart: HTMLElement,
   tools: HTMLElement,
+  axes: () => string[],
   report: (message: string, ok?: boolean) => void,
 ): void {
   const buttons = [...tools.querySelectorAll<HTMLButtonElement>("button")];
@@ -116,8 +51,7 @@ function setupTools(
             paper_bgcolor: background,
             plot_bgcolor: background,
             "font.color": text,
-            "xaxis.linecolor": text,
-            "yaxis.linecolor": text,
+            ...Object.fromEntries(axes().map((axis) => [`${axis}.linecolor`, text])),
           });
         await paint("white", "black");
         let image: string;
@@ -135,7 +69,7 @@ function setupTools(
       return;
     }
     if (tool === "fit") {
-      await Plotly.relayout(chart, { "xaxis.autorange": true, "yaxis.autorange": true });
+      await Plotly.relayout(chart, Object.fromEntries(axes().map((axis) => [`${axis}.autorange`, true])));
       return;
     }
     await Plotly.relayout(chart, { dragmode: tool });
@@ -149,16 +83,36 @@ export function setupInspect(): void {
   const chart = document.querySelector<HTMLElement>("#inspect-chart")!;
   const plot = document.querySelector<HTMLElement>("#inspect-plot")!;
   const footer = document.querySelector<HTMLElement>("#inspect-footer")!;
+  const info = document.querySelector<HTMLElement>("#inspect-info")!;
   const curvesRoot = document.querySelector<HTMLElement>("#curves")!;
   const addButton = document.querySelector<HTMLButtonElement>("#add-curve")!;
   const file = form.elements.namedItem("file") as HTMLInputElement;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
 
   let choices: Choice[] = [];
+  let axes: string[] = [];
 
   const show = (message: string, ok = true) => {
     status.textContent = message;
     status.classList.toggle("error", !ok);
+  };
+
+  const showInfo = (summary: Summary) => {
+    const fields: [string, string | number][] = [
+      ["Source", summary.source_file],
+      ["Kind", summary.source_kind],
+      ["Samples", summary.samples],
+      ["Signals", summary.signals],
+    ];
+    info.replaceChildren(
+      ...fields.flatMap(([label, value]) => {
+        const [dt, dd] = [document.createElement("dt"), document.createElement("dd")];
+        dt.textContent = label;
+        dd.textContent = String(value);
+        return [dt, dd];
+      }),
+    );
+    info.hidden = false;
   };
 
   const rows = () => [...curvesRoot.querySelectorAll<HTMLElement>(".curve")];
@@ -195,13 +149,30 @@ export function setupInspect(): void {
     remove.addEventListener("click", () => {
       row.remove();
       recolor();
+      syncPanels();
       updateRemoveButtons();
     });
 
-    row.append(swatch, x, y, visibleLabel, remove);
+    const panel = createSelect([], "1");
+    panel.name = "panel";
+    panel.ariaLabel = "Panel";
+
+    row.append(swatch, x, y, panel, visibleLabel, remove);
     curvesRoot.append(row);
     recolor();
+    syncPanels();
   }
+
+  /** Offers panels 1..N for N rows, keeping each choice that is still valid. */
+  const syncPanels = () => {
+    const options = rows().map((_, index) => ({ value: String(index + 1), text: `Panel ${index + 1}` }));
+    rows().forEach((row) => {
+      const select = row.querySelector<HTMLSelectElement>("[name=panel]")!;
+      const kept = Math.min(Number(select.value) || 1, options.length);
+      select.replaceChildren(...options.map(({ value, text }) => new Option(text, value)));
+      select.value = String(kept);
+    });
+  };
 
   const updateRemoveButtons = () =>
     rows().forEach((row) => {
@@ -211,14 +182,14 @@ export function setupInspect(): void {
   /** Rows the user ticked, with the color their position gives them. */
   const selectedCurves = (): Curve[] =>
     rows().flatMap((row, index) => {
-      const [x, y] = row.querySelectorAll("select");
+      const [x, y, panel] = row.querySelectorAll("select");
       return row.querySelector<HTMLInputElement>("[name=show]")!.checked
-        ? [{ x: x.value, y: y.value, color: colorFor(index) }]
+        ? [{ x: x.value, y: y.value, panel: Number(panel.value), color: colorFor(index) }]
         : [];
     });
 
   setupBrowse(form);
-  setupTools(chart, document.querySelector<HTMLElement>("#inspect-tools")!, show);
+  setupTools(chart, document.querySelector<HTMLElement>("#inspect-tools")!, () => axes, show);
 
   addButton.addEventListener("click", () => {
     addRow();
@@ -228,9 +199,11 @@ export function setupInspect(): void {
   file.addEventListener("change", async () => {
     submit.disabled = true;
     addButton.disabled = true;
+    info.hidden = true;
     show("Loading signals…");
     try {
-      const { signals } = await inspect<{ signals: SignalInfo[] }>(file.value, []);
+      const { summary, signals } = await inspect<{ summary: Summary; signals: SignalInfo[] }>(file.value, []);
+      showInfo(summary);
       const sorted = [...signals]
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((signal) => ({ value: signal.name, text: labelOf(signal) }));
@@ -257,7 +230,9 @@ export function setupInspect(): void {
       names.delete(AXIS);
       const data = await inspect<Signals>(file.value, [...names]);
       plot.hidden = false;
-      await drawChart(chart, data, curves);
+      const pressed = document.querySelector<HTMLElement>("#inspect-tools [aria-pressed=true]");
+      // Keep the tool the user picked across redraws.
+      axes = await drawChart(chart, data, curves, pressed?.dataset.tool);
       footer.textContent = `File: ${file.value.trim()} · ${curves.length} curve${curves.length > 1 ? "s" : ""}`;
       show("");
     } catch (error) {
