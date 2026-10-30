@@ -51,6 +51,9 @@ struct ConvertState {
 struct InspectState {
     file: Option<PathBuf>,
     curves: Vec<Curve>,
+    /// Whether the chart was drawn; absent in sessions saved before this field.
+    #[serde(default)]
+    plotted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -76,6 +79,14 @@ pub fn cache_dir(root: &Path, path: &Path) -> PathBuf {
     root.join(format!("{:016x}", hasher.finish()))
 }
 
+/// Removes every extracted session; call only while none is in use.
+pub fn clear_cache(root: &Path) -> io::Result<()> {
+    match fs::remove_dir_all(root) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
 /// Writes `session` to `path`; a failure leaves any existing file untouched.
 pub fn save(path: &Path, session: &Session) -> Result<()> {
     let dir = parent_dir(path);
@@ -88,7 +99,9 @@ pub fn save(path: &Path, session: &Session) -> Result<()> {
                 let name = source
                     .file_name()
                     .ok_or_else(|| format!("{}: not a file", source.display()))?;
-                let entry = format!("{INPUTS}/{index}-{}", name.to_string_lossy());
+                // The index keeps equal file names apart; a directory keeps the
+                // entry name stable when a loaded copy is saved again.
+                let entry = format!("{INPUTS}/{index}/{}", name.to_string_lossy());
                 *slot = Some(PathBuf::from(&entry));
                 files.push((entry, source));
             }
@@ -282,6 +295,7 @@ mod tests {
                     panel: 1,
                     plot: true,
                 }],
+                plotted: true,
             },
         }
     }
@@ -340,6 +354,56 @@ mod tests {
         assert!(input.starts_with(&cache) && file.starts_with(&cache));
         assert_eq!(fs::read(input).unwrap(), b"result");
         assert_eq!(fs::read(file).unwrap(), b"hdf5");
+    }
+
+    #[test]
+    fn keeps_entry_names_stable_across_resaves() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("a.clab");
+        let second = dir.path().join("b.clab");
+        let cache = dir.path().join("cache");
+        fs::create_dir(dir.path().join("data")).unwrap();
+        fs::write(dir.path().join("data/run.res"), b"result").unwrap();
+        fs::write(dir.path().join("run.h5"), b"hdf5").unwrap();
+
+        save(&first, &session(dir.path(), true)).unwrap();
+        save(&second, &load(&first, &cache).unwrap()).unwrap();
+
+        assert_eq!(raw_manifest(&second), raw_manifest(&first));
+        assert_eq!(
+            raw_manifest(&second).inspect.file,
+            Some(PathBuf::from("inputs/1/run.h5"))
+        );
+    }
+
+    #[test]
+    fn loads_sessions_saved_without_plotted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.clab");
+        let mut manifest = serde_json::to_value(session(dir.path(), false)).unwrap();
+        manifest["inspect"]
+            .as_object_mut()
+            .unwrap()
+            .remove("plotted");
+        write_archive_with(
+            &path,
+            &[(MANIFEST, &serde_json::to_vec(&manifest).unwrap())],
+        );
+
+        let loaded = load(&path, &dir.path().join("cache")).unwrap();
+
+        assert!(!loaded.inspect.plotted);
+    }
+
+    #[test]
+    fn clears_cache_and_tolerates_missing_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("sessions");
+        fs::create_dir_all(root.join("abc/inputs")).unwrap();
+
+        clear_cache(&root).unwrap();
+        assert!(!root.exists());
+        clear_cache(&root).unwrap();
     }
 
     #[test]

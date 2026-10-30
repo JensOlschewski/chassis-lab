@@ -14,6 +14,17 @@
       <button class="nav-item" data-pane="inspect">Inspect</button>
       <button class="nav-item" data-pane="analyze" disabled>Analyze <small>soon</small></button>
       <button class="nav-item" data-pane="compare" disabled>Compare <small>soon</small></button>
+
+      <section class="session" aria-label="Session">
+        <p id="session-name" class="session-name">Untitled</p>
+        <div class="session-actions">
+          <button type="button" data-session="new" title="Ctrl+N">New</button>
+          <button type="button" data-session="open" title="Ctrl+O">Open</button>
+          <button type="button" data-session="save" title="Ctrl+S">Save</button>
+          <button type="button" data-session="saveAs" title="Ctrl+Shift+S">Save as</button>
+        </div>
+        <label class="check"><input type="checkbox" id="session-embed" /> Embed input files</label>
+      </section>
     </nav>
 
     <main>
@@ -27,6 +38,7 @@
               <input name="input" required placeholder=".res or .acd" />
               <button type="button" data-browse="file" data-target="input">Browse…</button>
             </span>
+            <small class="embedded-note" data-embedded-for="input" hidden></small>
           </label>
 
           <div class="row">
@@ -73,6 +85,7 @@
               <input name="file" required placeholder=".h5 or .hdf5" />
               <button type="button" data-browse="file" data-target="file">Browse…</button>
             </span>
+            <small class="embedded-note" data-embedded-for="file" hidden></small>
           </label>
           <dl id="inspect-info" class="info" hidden></dl>
 
