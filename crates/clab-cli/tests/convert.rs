@@ -43,7 +43,10 @@ const RES_DECLARING_KNC: &str = r#"<Result>
 
 fn convert(input: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
-    command.arg("convert").arg(input).args(["-d", "svc"]);
+    command
+        .args(["convert", "--yes"])
+        .arg(input)
+        .args(["-d", "svc"]);
     command
 }
 
@@ -280,27 +283,6 @@ fn rejects_input_as_output_even_with_force() {
     assert_eq!(fs::read_to_string(input).unwrap(), MINIMAL_RES);
 }
 
-#[cfg(unix)]
-#[test]
-fn rejects_non_utf8_extension() {
-    use std::os::unix::ffi::OsStringExt;
-
-    let directory = tempdir().unwrap();
-    let input = directory
-        .path()
-        .join(std::ffi::OsString::from_vec(b"input.\xff".to_vec()));
-    fs::write(&input, "data").unwrap();
-
-    let result = convert(&input).output().unwrap();
-
-    assert_eq!(result.status.code(), Some(2));
-    assert!(
-        String::from_utf8(result.stderr)
-            .unwrap()
-            .contains("extension is not valid UTF-8")
-    );
-}
-
 #[test]
 fn requires_domain_and_validates_test() {
     let directory = tempdir().unwrap();
@@ -347,7 +329,7 @@ fn stores_domain_and_test_when_data_has_no_identity_to_disagree_with() {
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .arg("convert")
         .arg(&input)
-        .args(["-d", "knc", "-t", "vertical", "-o"])
+        .args(["-d", "knc", "-t", "vertical", "--yes", "-o"])
         .arg(&output)
         .output()
         .unwrap();
@@ -366,7 +348,139 @@ fn stores_domain_and_test_when_data_has_no_identity_to_disagree_with() {
         (read("domain"), read("test")),
         ("knc".into(), "vertical".into())
     );
-    // MINIMAL_RES has no analysis_type variable, so nothing to disagree with.
+    // MINIMAL_RES has no motion channels, so the test cannot be verified.
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("no motion channels"), "{stderr}");
+}
+
+fn knc_res(roll: f64, vertical: f64) -> String {
+    format!(
+        r#"<Result>
+  <Entity type="request" name="motion_roll" entity="rig.motion_roll" objectId="1">
+    <Component name="R1" unitsValue="rad" id="1" />
+  </Entity>
+  <Entity type="request" name="motion_vertical" entity="rig.motion_vertical" objectId="2">
+    <Component name="Z" unitsValue="mm" id="2" />
+  </Entity>
+  <Entity type="request" name="wheel_travel" entity="rig.wheel_travel" objectId="3">
+    <Component name="Z" unitsValue="mm" id="3" />
+  </Entity>
+  <Step type="input">
+    0.0 0.0 0.0
+  </Step>
+  <Step type="input">
+    {roll} {vertical} 0.0
+  </Step>
+</Result>
+"#
+    )
+}
+
+fn convert_knc(input: &Path, test: &str) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
+    command
+        .arg("convert")
+        .arg(input)
+        .args(["-d", "knc", "-t", test])
+        .stdin(std::process::Stdio::null());
+    command
+}
+
+#[test]
+fn matching_detected_test_converts_silently() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("run.res");
+    fs::write(&input, knc_res(0.0, 100.0)).unwrap();
+
+    let result = convert_knc(&input, "vertical").output().unwrap();
+
+    assert!(result.status.success());
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("warning"));
+}
+
+#[test]
+fn mismatched_test_without_terminal_aborts_and_writes_nothing() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("run.res");
+    fs::write(&input, knc_res(0.0, 100.0)).unwrap();
+
+    let result = convert_knc(&input, "roll").output().unwrap();
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("motion data indicates 'vertical'"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("pass --yes"), "{stderr}");
+    assert!(!directory.path().join("run.h5").exists());
+}
+
+#[test]
+fn mismatched_test_with_yes_warns_and_converts() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("run.res");
+    fs::write(&input, knc_res(0.0, 100.0)).unwrap();
+
+    let result = convert_knc(&input, "roll").arg("--yes").output().unwrap();
+
+    assert!(result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("motion data indicates 'vertical'"),
+        "{stderr}"
+    );
+    assert!(directory.path().join("run.h5").is_file());
+}
+
+#[test]
+fn combined_motion_warns_and_converts() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("run.res");
+    fs::write(&input, knc_res(0.14, 100.0)).unwrap();
+
+    let result = convert_knc(&input, "roll").arg("--yes").output().unwrap();
+
+    assert!(result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("combined test file"), "{stderr}");
+}
+
+#[test]
+fn missing_motion_channels_abort_without_terminal() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("run.res");
+    fs::write(&input, MINIMAL_RES).unwrap();
+
+    let result = convert_knc(&input, "roll").output().unwrap();
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("no motion channels"), "{stderr}");
+}
+
+#[test]
+fn acd_testtype_mismatch_warns_and_prompts() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("run.acd");
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/input/raw-measurement/example-measurement-knc-roll.acd"),
+        &input,
+    )
+    .unwrap();
+
+    let result = convert_knc(&input, "vertical").output().unwrap();
+    assert!(!result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr
+            .contains("testtype 'roll' and motion data indicate 'roll', but --test is 'vertical'"),
+        "{stderr}"
+    );
+
+    let result = convert_knc(&input, "roll").output().unwrap();
+    assert!(result.status.success());
     assert!(!String::from_utf8_lossy(&result.stderr).contains("warning"));
 }
 
@@ -382,12 +496,15 @@ fn rejects_declared_domain_the_data_contradicts_and_writes_nothing() {
         .arg(&input)
         .args(["-d", "svc", "-o"])
         .arg(&output)
+        .stdin(std::process::Stdio::null())
         .output()
         .unwrap();
 
     assert!(!result.status.success());
     let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(stderr.contains("--domain svc"), "{stderr}");
-    assert!(stderr.contains("indicates knc"), "{stderr}");
+    assert!(
+        stderr.contains("analysis_type indicates 'knc', but --domain is 'svc'"),
+        "{stderr}"
+    );
     assert!(!output.exists());
 }

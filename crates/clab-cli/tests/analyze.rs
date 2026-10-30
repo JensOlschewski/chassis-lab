@@ -650,6 +650,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     let result = clab()
         .args([
             "convert",
+            "--yes",
             vertical.to_str().unwrap(),
             "-d",
             "knc",
@@ -669,6 +670,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     let result = clab()
         .args([
             "convert",
+            "--yes",
             static_input.to_str().unwrap(),
             "-d",
             "knc",

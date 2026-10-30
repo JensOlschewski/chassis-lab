@@ -1,7 +1,8 @@
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use clab_converter::identity::Identity;
+use clab_converter::identity::{Identity, acd_warnings, res_domain_warnings, res_warnings};
 use clap::Args;
 
 #[derive(Debug, Args)]
@@ -25,6 +26,9 @@ pub(crate) struct ConvertArgs {
     /// Test within the domain: required for knc (vertical, roll, or static), not allowed for svc.
     #[arg(short, long, value_name = "TEST", required_if_eq("domain", "knc"))]
     test: Option<String>,
+    /// Proceed without prompting when motion data disagrees with --test.
+    #[arg(short, long)]
+    yes: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -80,18 +84,59 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     }
     validate_output(&args.input, &output, args.force)?;
 
+    let declared = identity.test.clone();
     match kind {
-        InputKind::Res => clab_converter::convert_res(&args.input, &output, args.force, &identity),
-        InputKind::Acd => clab_converter::measurement_hdf5::import_acd(
+        InputKind::Res => clab_converter::convert_res_checked(
             &args.input,
             &output,
             args.force,
             &identity,
+            |result| {
+                let mut warnings = res_domain_warnings(result, &identity.domain);
+                if let Some(test) = &declared {
+                    warnings.extend(res_warnings(result, test));
+                }
+                confirm(warnings, args.yes)
+            },
+        ),
+        InputKind::Acd => clab_converter::measurement_hdf5::import_acd_checked(
+            &args.input,
+            &output,
+            args.force,
+            &identity,
+            |measurement| match &declared {
+                Some(test) => confirm(acd_warnings(measurement, test), args.yes),
+                None => Ok(()),
+            },
         ),
     }
     .with_context(|| format!("failed to generate '{}'", output.display()))?;
 
     println!("generated {} ({})", output.display(), kind.output_type());
+    Ok(())
+}
+
+/// Print warnings; unless `--yes`, ask before proceeding.
+fn confirm(warnings: Vec<String>, yes: bool) -> Result<()> {
+    if warnings.is_empty() {
+        return Ok(());
+    }
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
+    }
+    if yes {
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        bail!("warnings present and no terminal to confirm; pass --yes to proceed");
+    }
+    eprint!("Proceed? [y/N] ");
+    std::io::stderr().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        bail!("aborted by user");
+    }
     Ok(())
 }
 

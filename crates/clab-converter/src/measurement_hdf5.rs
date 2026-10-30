@@ -19,10 +19,23 @@ pub fn import_acd(
     overwrite: bool,
     identity: &Identity,
 ) -> Result<()> {
+    import_acd_checked(source, output, overwrite, identity, |_| Ok(()))
+}
+
+/// Like [`import_acd`], but runs `check` on the parsed measurement after the
+/// identity check and before writing. An error from `check` aborts the write.
+pub fn import_acd_checked(
+    source: impl AsRef<Path>,
+    output: impl AsRef<Path>,
+    overwrite: bool,
+    identity: &Identity,
+    check: impl FnOnce(&AcdMeasurement) -> Result<()>,
+) -> Result<()> {
     let source = source.as_ref();
     let measurement = acd::parse_file(source)
         .with_context(|| format!("failed to parse ACD file '{}'", source.display()))?;
     identity::check_acd_identity(&measurement, identity, &source.display().to_string())?;
+    check(&measurement)?;
     crate::write_atomically(output.as_ref(), overwrite, |temporary| {
         write_file(temporary, source, &measurement, identity)
     })
