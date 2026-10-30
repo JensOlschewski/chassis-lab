@@ -69,6 +69,19 @@ body {
 .nav-item:disabled { color: var(--muted); cursor: default; }
 .nav-item small { font-size: 0.7rem; }
 
+.session {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding: 12px 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.session-name { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.session-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
 main {
   overflow-y: auto;
   padding: 32px 40px;
@@ -83,7 +96,8 @@ h2 { margin: 0 0 4px; font-size: 1.4rem; font-weight: 600; }
 form { display: flex; flex-direction: column; gap: 16px; }
 label { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; font-weight: 500; }
 label[hidden] { display: none; }
-.optional { font-weight: 400; color: var(--muted); }
+.optional,
+.embedded-note { font-weight: 400; color: var(--muted); }
 .row { display: flex; gap: 16px; }
 .row label { flex: 1; }
 .check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }

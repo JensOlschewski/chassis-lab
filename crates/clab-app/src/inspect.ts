@@ -9,6 +9,22 @@ interface Choice {
   text: string;
 }
 
+/** A curve row as stored in a session file. */
+interface SavedCurve {
+  x: string;
+  y: string;
+  panel: number;
+  plot: boolean;
+}
+
+/** The form as stored in a session file. */
+export interface InspectState {
+  file: string | null;
+  curves: SavedCurve[];
+  /** Whether the chart was drawn; reopening redraws it. */
+  plotted: boolean;
+}
+
 /** Same order as the Python reports: black baseline, then the compare palette. */
 const CURVE_COLORS = ["#000000", "#e41a1c", "#377eb8", "#e7298a", "#00a6a6", "#ff7f00", "#6a3d9a"];
 const colorFor = (index: number) => CURVE_COLORS[index % CURVE_COLORS.length];
@@ -77,7 +93,7 @@ function setupTools(
   });
 }
 
-export function setupInspect(): void {
+export function setupInspect() {
   const form = document.querySelector<HTMLFormElement>("#inspect-form")!;
   const status = document.querySelector<HTMLElement>("#inspect-status")!;
   const chart = document.querySelector<HTMLElement>("#inspect-chart")!;
@@ -91,6 +107,7 @@ export function setupInspect(): void {
 
   let choices: Choice[] = [];
   let axes: string[] = [];
+  let plotted = false;
 
   const show = (message: string, ok = true) => {
     status.textContent = message;
@@ -123,21 +140,27 @@ export function setupInspect(): void {
       row.querySelector<HTMLElement>(".swatch")!.style.background = colorFor(index);
     });
 
-  function addRow(): void {
+  /** Tells the session that the curve rows changed; row selects report their own changes. */
+  const changed = () => curvesRoot.dispatchEvent(new Event("change", { bubbles: true }));
+
+  const pick = (wanted: string | undefined, fallback: string) =>
+    choices.some((choice) => choice.value === wanted) ? wanted! : fallback;
+
+  function addRow(saved?: SavedCurve): void {
     const row = document.createElement("div");
     row.className = "curve";
 
     const swatch = document.createElement("span");
     swatch.className = "swatch";
-    const x = createSelect(choices, choices.some((c) => c.value === "time") ? "time" : AXIS);
-    const y = createSelect(choices, choices[1].value);
+    const x = createSelect(choices, pick(saved?.x, choices.some((c) => c.value === "time") ? "time" : AXIS));
+    const y = createSelect(choices, pick(saved?.y, choices[1].value));
     x.name = "x";
     y.name = "y";
 
     const visible = document.createElement("input");
     visible.type = "checkbox";
     visible.name = "show";
-    visible.checked = true;
+    visible.checked = saved?.plot ?? true;
     const visibleLabel = document.createElement("label");
     visibleLabel.className = "check";
     visibleLabel.append(visible, "Plot");
@@ -151,6 +174,7 @@ export function setupInspect(): void {
       recolor();
       syncPanels();
       updateRemoveButtons();
+      changed();
     });
 
     const panel = createSelect([], "1");
@@ -179,14 +203,22 @@ export function setupInspect(): void {
       row.querySelector<HTMLButtonElement>("button")!.hidden = rows().length === 1;
     });
 
+  const savedCurves = (): SavedCurve[] =>
+    rows().map((row) => {
+      const [x, y, panel] = row.querySelectorAll("select");
+      return {
+        x: x.value,
+        y: y.value,
+        panel: Number(panel.value),
+        plot: row.querySelector<HTMLInputElement>("[name=show]")!.checked,
+      };
+    });
+
   /** Rows the user ticked, with the color their position gives them. */
   const selectedCurves = (): Curve[] =>
-    rows().flatMap((row, index) => {
-      const [x, y, panel] = row.querySelectorAll("select");
-      return row.querySelector<HTMLInputElement>("[name=show]")!.checked
-        ? [{ x: x.value, y: y.value, panel: Number(panel.value), color: colorFor(index) }]
-        : [];
-    });
+    savedCurves().flatMap(({ x, y, panel, plot }, index) =>
+      plot ? [{ x, y, panel, color: colorFor(index) }] : [],
+    );
 
   setupBrowse(form);
   setupTools(chart, document.querySelector<HTMLElement>("#inspect-tools")!, () => axes, show);
@@ -194,12 +226,22 @@ export function setupInspect(): void {
   addButton.addEventListener("click", () => {
     addRow();
     updateRemoveButtons();
+    changed();
   });
 
-  file.addEventListener("change", async () => {
+  /** Drops the previous file's rows and disables plotting until signals load. */
+  const clear = () => {
+    plotted = false;
+    plot.hidden = true;
     submit.disabled = true;
     addButton.disabled = true;
     info.hidden = true;
+    curvesRoot.replaceChildren();
+  };
+
+  /** Lists the file's signals and starts with one default row; false if that failed. */
+  async function loadSignals(): Promise<boolean> {
+    clear();
     show("Loading signals…");
     try {
       const { summary, signals } = await inspect<{ summary: Summary; signals: SignalInfo[] }>(file.value, []);
@@ -208,19 +250,24 @@ export function setupInspect(): void {
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((signal) => ({ value: signal.name, text: labelOf(signal) }));
       choices = [{ value: AXIS, text: AXIS }, ...sorted];
-      curvesRoot.replaceChildren();
       addRow();
       updateRemoveButtons();
       submit.disabled = false;
       addButton.disabled = false;
       show(`${signals.length} signals`);
+      return true;
     } catch (error) {
       show(String(error), false);
+      return false;
     }
+  }
+
+  file.addEventListener("change", async () => {
+    await loadSignals();
+    changed();
   });
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  async function plotCurves(): Promise<void> {
     const curves = selectedCurves();
     if (curves.length === 0) return show("Tick at least one curve", false);
     submit.disabled = true;
@@ -235,10 +282,40 @@ export function setupInspect(): void {
       axes = await drawChart(chart, data, curves, pressed?.dataset.tool);
       footer.textContent = `File: ${file.value.trim()} · ${curves.length} curve${curves.length > 1 ? "s" : ""}`;
       show("");
+      plotted = true;
+      changed();
     } catch (error) {
       show(String(error), false);
     } finally {
       submit.disabled = false;
     }
+  }
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    return plotCurves();
   });
+
+  return {
+    get: (): InspectState => ({ file: file.value.trim() || null, curves: savedCurves(), plotted }),
+    /** A file that fails to load keeps its path; the error is shown as for a manual pick. */
+    async set(state: InspectState): Promise<void> {
+      file.value = state.file ?? "";
+      footer.textContent = "";
+      if (!state.file) {
+        clear();
+        return show("");
+      }
+      if (!(await loadSignals()) || state.curves.length === 0) return;
+
+      curvesRoot.replaceChildren();
+      state.curves.forEach((curve) => addRow(curve));
+      rows().forEach((row, index) => {
+        const panel = row.querySelector<HTMLSelectElement>("[name=panel]")!;
+        panel.value = String(Math.min(Math.max(state.curves[index].panel, 1), rows().length));
+      });
+      updateRemoveButtons();
+      if (state.plotted) await plotCurves();
+    },
+  };
 }
