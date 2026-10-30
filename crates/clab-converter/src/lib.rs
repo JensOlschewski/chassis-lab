@@ -19,9 +19,20 @@ pub fn convert_res(
     overwrite: bool,
     identity: &identity::Identity,
 ) -> Result<()> {
+    convert_res_checked(source, output, overwrite, identity, |_| Ok(()))
+}
+
+/// Like [`convert_res`], but runs `check` on the parsed result before writing. An error from `check` aborts the write.
+pub fn convert_res_checked(
+    source: &Path,
+    output: &Path,
+    overwrite: bool,
+    identity: &identity::Identity,
+    check: impl FnOnce(&model::AdamsResult) -> Result<()>,
+) -> Result<()> {
     let result = parser::parse_file(source)
         .with_context(|| format!("failed to parse RES file '{}'", source.display()))?;
-    identity::check_res_identity(&result, identity, &source.display().to_string())?;
+    check(&result)?;
     write_atomically(output, overwrite, |temporary| {
         hdf5_writer::write_file(temporary, source, &result, identity)
     })
