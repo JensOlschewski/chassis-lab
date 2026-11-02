@@ -119,7 +119,7 @@ jobs:
             cp /tmp/input/examples/config.toml /tmp/smoke/
             cp /tmp/input/examples/setup.toml /tmp/input/examples/tolerances.toml /tmp/smoke/
             cp -R /tmp/input/examples/mappings /tmp/smoke/
-            mkdir /tmp/smoke/input
+            mkdir -p /tmp/smoke/input/raw-simulation
             cp /tmp/input/examples/input/run-simulation.toml /tmp/smoke/input/
             cp /tmp/input/examples/input/raw-simulation/example-simulation-svc.res /tmp/smoke/
             cp /tmp/input/examples/input/raw-simulation/example-simulation-knc-vertical.res /tmp/smoke/
@@ -127,10 +127,10 @@ jobs:
             cp /tmp/input/examples/input/raw-simulation/example-simulation-knc-roll.res /tmp/smoke/
             cd /tmp/smoke
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-svc.res -d svc -o input/generated-simulation-svc.h5
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-knc-vertical.res -d knc -t vertical -o input/generated-simulation-knc-vertical.h5
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-knc-static.res -d knc -t static -o input/generated-simulation-knc-static.h5
-            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-knc-roll.res -d knc -t roll -o input/generated-simulation-knc-roll.h5
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-svc.res -d svc -o input/raw-simulation/example-simulation-svc.h5
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-knc-vertical.res -d knc -t vertical -o input/raw-simulation/example-simulation-knc-vertical.h5
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-knc-static.res -d knc -t static -o input/raw-simulation/example-simulation-knc-static.h5
+            env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-knc-roll.res -d knc -t roll -o input/raw-simulation/example-simulation-knc-roll.h5
             env -i PATH="$bundle/bin:/usr/bin:/bin" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" analyze config.toml input/run-simulation.toml -r reports
             test -s reports/report.json && test -s reports/metrics.csv && test -s reports/svc.json && test -s reports/knc-vertical.json && test -s reports/knc-roll.json
           ' < "$smoke_input"
@@ -149,7 +149,7 @@ jobs:
           $env:VIRTUAL_ENV = "C:\poisoned"
           & "$bundle\bin\clab.exe" --version
           Copy-Item examples\config.toml $smoke
-          New-Item -ItemType Directory -Path (Join-Path $smoke "input") | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $smoke "input\raw-simulation") | Out-Null
           Copy-Item examples\input\run-simulation.toml (Join-Path $smoke "input")
           Copy-Item examples\setup.toml $smoke
           Copy-Item examples\mappings $smoke -Recurse
@@ -159,10 +159,10 @@ jobs:
           Copy-Item examples\input\raw-simulation\example-simulation-knc-static.res $smoke
           Copy-Item examples\input\raw-simulation\example-simulation-knc-roll.res $smoke
           Push-Location $smoke
-          & "$bundle\bin\clab.exe" convert --yes example-simulation-svc.res -d svc -o input\generated-simulation-svc.h5
-          & "$bundle\bin\clab.exe" convert --yes example-simulation-knc-vertical.res -d knc -t vertical -o input\generated-simulation-knc-vertical.h5
-          & "$bundle\bin\clab.exe" convert --yes example-simulation-knc-static.res -d knc -t static -o input\generated-simulation-knc-static.h5
-          & "$bundle\bin\clab.exe" convert --yes example-simulation-knc-roll.res -d knc -t roll -o input\generated-simulation-knc-roll.h5
+          & "$bundle\bin\clab.exe" convert --yes example-simulation-svc.res -d svc -o input\raw-simulation\example-simulation-svc.h5
+          & "$bundle\bin\clab.exe" convert --yes example-simulation-knc-vertical.res -d knc -t vertical -o input\raw-simulation\example-simulation-knc-vertical.h5
+          & "$bundle\bin\clab.exe" convert --yes example-simulation-knc-static.res -d knc -t static -o input\raw-simulation\example-simulation-knc-static.h5
+          & "$bundle\bin\clab.exe" convert --yes example-simulation-knc-roll.res -d knc -t roll -o input\raw-simulation\example-simulation-knc-roll.h5
           & "$bundle\bin\clab.exe" analyze config.toml input\run-simulation.toml -r reports
           foreach ($report in "report.json", "metrics.csv", "svc.json", "knc-vertical.json", "knc-roll.json") {
             $path = Join-Path reports $report
@@ -183,17 +183,17 @@ jobs:
           cp examples/config.toml "$smoke/"
           cp examples/setup.toml examples/tolerances.toml "$smoke/"
           cp -R examples/mappings "$smoke/"
-          mkdir "$smoke/input"
+          mkdir -p "$smoke/input/raw-simulation"
           cp examples/input/run-simulation.toml "$smoke/input/"
           cp examples/input/raw-simulation/example-simulation-svc.res "$smoke/"
           cp examples/input/raw-simulation/example-simulation-knc-vertical.res "$smoke/"
           cp examples/input/raw-simulation/example-simulation-knc-static.res "$smoke/"
           cp examples/input/raw-simulation/example-simulation-knc-roll.res "$smoke/"
           cd "$smoke"
-          "${clean_env[@]}" "$bundle/bin/clab" convert --yes example-simulation-svc.res -d svc -o input/generated-simulation-svc.h5
-          "${clean_env[@]}" "$bundle/bin/clab" convert --yes example-simulation-knc-vertical.res -d knc -t vertical -o input/generated-simulation-knc-vertical.h5
-          "${clean_env[@]}" "$bundle/bin/clab" convert --yes example-simulation-knc-static.res -d knc -t static -o input/generated-simulation-knc-static.h5
-          "${clean_env[@]}" "$bundle/bin/clab" convert --yes example-simulation-knc-roll.res -d knc -t roll -o input/generated-simulation-knc-roll.h5
+          "${clean_env[@]}" "$bundle/bin/clab" convert --yes example-simulation-svc.res -d svc -o input/raw-simulation/example-simulation-svc.h5
+          "${clean_env[@]}" "$bundle/bin/clab" convert --yes example-simulation-knc-vertical.res -d knc -t vertical -o input/raw-simulation/example-simulation-knc-vertical.h5
+          "${clean_env[@]}" "$bundle/bin/clab" convert --yes example-simulation-knc-static.res -d knc -t static -o input/raw-simulation/example-simulation-knc-static.h5
+          "${clean_env[@]}" "$bundle/bin/clab" convert --yes example-simulation-knc-roll.res -d knc -t roll -o input/raw-simulation/example-simulation-knc-roll.h5
           "${clean_env[@]}" "$bundle/bin/clab" analyze config.toml input/run-simulation.toml -r reports
           test -s reports/report.json && test -s reports/metrics.csv && test -s reports/svc.json && test -s reports/knc-vertical.json && test -s reports/knc-roll.json
 
