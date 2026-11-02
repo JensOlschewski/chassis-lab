@@ -524,7 +524,7 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
         let destination = directory.path().join(output);
         let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
         command
-            .arg("convert")
+            .args(["convert", "--yes"])
             .arg(examples.join("input").join(source))
             .args(["-d", "knc", "-t", test, "-o"])
             .arg(&destination);
