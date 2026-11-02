@@ -155,7 +155,9 @@ fn render_parallel(
 fn valid_plot_path(path: &Path) -> bool {
     path.components()
         .all(|c| matches!(c, std::path::Component::Normal(_)))
-        && path.extension().is_some_and(|extension| extension == "pdf")
+        && path
+            .extension()
+            .is_some_and(|extension| extension == "pdf" || extension == "json")
 }
 
 pub(crate) fn render_worker(input: &Path, output: &Path) -> Result<()> {
@@ -181,6 +183,7 @@ pub(crate) fn render_worker(input: &Path, output: &Path) -> Result<()> {
             kwargs.set_item("curves_json", &request.curves)?;
             kwargs.set_item("source_label", &request.label)?;
             kwargs.set_item("branch", &request.branch)?;
+            kwargs.set_item("series", true)?;
             "plot"
         };
         module.getattr(function)?.call((), Some(&kwargs))?.extract()
@@ -1176,12 +1179,44 @@ pub(crate) fn curve_plots(
         mass: corner_mass_kg,
         selected: Vec::new(),
     };
-    render_parallel(request, "", 1, options.workers, progress).with_context(|| {
+    let mut files = render_parallel(request, "", 1, options.workers, progress).with_context(|| {
         format!(
             "failed to generate {} PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'",
             test.name()
         )
-    })
+    })?;
+    if let Some(series) = merge_plot_series(test, &mut files)? {
+        files.insert(format!("knc-{}.plots.json", test.name()), series);
+    }
+    Ok(files)
+}
+
+/// Moves the per-plot `*.plot.json` files out of `files` into one document,
+/// ordered by plot path so the bundle stays deterministic.
+fn merge_plot_series(
+    test: KncTest,
+    files: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<Option<Vec<u8>>> {
+    let names: Vec<String> = files
+        .keys()
+        .filter(|name| name.ends_with(".plot.json"))
+        .cloned()
+        .collect();
+    if names.is_empty() {
+        return Ok(None);
+    }
+    let plots = names
+        .iter()
+        .map(|name| serde_json::from_slice(&files.remove(name).expect("listed key")))
+        .collect::<Result<Vec<serde_json::Value>, _>>()?;
+    let document = serde_json::json!({
+        "schema_version": 1,
+        "command": "analyze",
+        "domain": "knc",
+        "test": test.name(),
+        "plots": plots,
+    });
+    Ok(Some(serde_json::to_vec(&document)?))
 }
 
 /// Load the embedded kernels of `test` and run `call` with its test kernel.
@@ -1258,4 +1293,42 @@ fn find_venv(path: &Path) -> Option<PathBuf> {
     path.ancestors()
         .map(|directory| directory.join(".venv"))
         .find(|venv| venv.is_dir())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merges_plot_series_in_path_order_and_keeps_pdfs() {
+        let mut files = BTreeMap::from([
+            (
+                "plots/knc/roll/b.plot.json".to_owned(),
+                br#"{"name":"b"}"#.to_vec(),
+            ),
+            (
+                "plots/knc/roll/a.plot.json".to_owned(),
+                br#"{"name":"a"}"#.to_vec(),
+            ),
+            ("plots/knc/roll/a.pdf".to_owned(), b"%PDF".to_vec()),
+        ]);
+        let merged = merge_plot_series(KncTest::Roll, &mut files)
+            .unwrap()
+            .unwrap();
+        let merged: serde_json::Value = serde_json::from_slice(&merged).unwrap();
+        assert_eq!(merged["test"], "roll");
+        assert_eq!(merged["plots"][0]["name"], "a");
+        assert_eq!(merged["plots"][1]["name"], "b");
+        assert_eq!(files.keys().collect::<Vec<_>>(), ["plots/knc/roll/a.pdf"]);
+    }
+
+    #[test]
+    fn no_series_files_means_no_document() {
+        let mut files = BTreeMap::from([("a.pdf".to_owned(), vec![])]);
+        assert!(
+            merge_plot_series(KncTest::Vertical, &mut files)
+                .unwrap()
+                .is_none()
+        );
+    }
 }

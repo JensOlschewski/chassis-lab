@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -235,6 +236,44 @@ class PlotSpec:
         return self.output_signal or self.y_signal
 
 
+SERIES_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class SourceSeries:
+    """One source's line in one panel, with its optional secant."""
+
+    label: str
+    color: str
+    x: np.ndarray
+    y: np.ndarray
+    secant: tuple[float, float] | None
+    metric: float | None
+
+
+@dataclass(frozen=True)
+class PanelSeries:
+    corner: str
+    title: str
+    sources: list[SourceSeries]
+
+
+@dataclass(frozen=True)
+class PlotSeries:
+    """Everything a renderer needs to draw one report plot."""
+
+    name: str
+    title: str
+    x_label: str
+    y_label: str
+    y_limits: tuple[float, float] | None
+    gradient: GradientDisplay | None
+    half: float | None
+    gradient_unit: str
+    axis_label: str
+    panels: list[PanelSeries]
+
+
 @dataclass(frozen=True)
 class AxlePanel:
     location: str
@@ -270,8 +309,13 @@ def render_reports(
     branches: BranchOptions | None = None,
     gradient_points_deg: float | None = None,
     warn_missing: bool = False,
+    series_json: bool = False,
 ) -> dict[str, bytes]:
-    """Render one source using same catalog as comparison reports."""
+    """Render one source using same catalog as comparison reports.
+
+    With `series_json`, each `<name>.pdf` gets a `<name>.plot.json` of the
+    plotted data beside it.
+    """
     series = [
         Source(
             source_label,
@@ -290,6 +334,7 @@ def render_reports(
         [branches or BranchOptions()],
         gradient_points_deg,
         warn_missing,
+        series_json,
     )
 
 
@@ -345,6 +390,7 @@ def render_axle_reports(
     logo: bytes | None,
     output_prefix: str = "",
     warn_missing: bool = True,
+    series_json: bool = False,
 ) -> dict[str, bytes]:
     """Three-panel axle reports from already derived canonical curves."""
     series = [Source(baseline_label, _index(baseline), BASELINE_COLOR)]
@@ -372,7 +418,9 @@ def render_axle_reports(
             continue
         figure, panels = _new_axle_figure(footer)
         figure.suptitle(spec.title, fontsize=16)
+        panels_json = []
         for axes, panel in zip(panels, spec.panels, strict=True):
+            sources_json = []
             for source in series:
                 x = _values(
                     source.curves,
@@ -388,15 +436,32 @@ def render_axle_reports(
                 axes.plot(
                     x, y, color=source.color, linewidth=1.8, label=source.label
                 )
+                if series_json:
+                    sources_json.append(
+                        _source_json(source.label, source.color, x, y)
+                    )
             axes.set_title(panel.title, loc="left", fontweight="bold")
             axes.set_xlabel(panel.x_label)
             axes.set_ylabel(panel.y_label)
             axes.legend(loc="best", frameon=False)
+            panels_json.append(
+                _panel_json(
+                    panel.location,
+                    panel.title,
+                    panel.x_label,
+                    panel.y_label,
+                    sources_json,
+                )
+            )
         if footer:
             _add_footer(figure, footer)
         filename = f"{spec.name}.pdf"
         path = f"{output_prefix}/{filename}" if output_prefix else filename
         reports[path] = _save_pdf(figure, _pyplot(), footer, logo)
+        if series_json:
+            reports[path.removesuffix(".pdf") + ".plot.json"] = (
+                _axle_series_json(spec, panels_json, footer)
+            )
     if skipped and warn_missing:
         warnings.warn(
             "KnC axle plots skipped because signals or geometry are missing: "
@@ -443,6 +508,7 @@ def _render_catalog(
     branches: list[BranchOptions],
     gradient_points_deg: float | None,
     warn_missing: bool,
+    series_json: bool = False,
 ) -> dict[str, bytes]:
     reports = {}
     skipped = []
@@ -455,18 +521,18 @@ def _render_catalog(
                 "plot requires canonical signals "
                 f"{spec.x_signal} and {spec.y_signal}"
             )
-        filename = f"{spec.name}.pdf"
-        path = f"{output_prefix}/{filename}" if output_prefix else filename
-        reports[path] = _render_plot(
+        plot = _plot_series(
             spec,
             signals,
             series,
-            footer,
-            logo,
             gradient_points_mm,
             branches,
             gradient_points_deg,
         )
+        stem = f"{output_prefix}/{spec.name}" if output_prefix else spec.name
+        reports[f"{stem}.pdf"] = _draw_plot(plot, footer, logo)
+        if series_json:
+            reports[f"{stem}.plot.json"] = _series_json(plot, footer)
     if skipped and warn_missing:
         warnings.warn(
             "KnC plots skipped because canonical signals are missing: "
@@ -476,23 +542,60 @@ def _render_catalog(
     return reports
 
 
-def _render_plot(
+def _plot_series(
     spec: PlotSpec,
     signals: dict[str, SignalStyle],
     series: Series,
-    footer: str,
-    logo: bytes | None,
     gradient_points_mm: float | None,
     branches: list[BranchOptions],
     gradient_points_deg: float | None,
-) -> bytes:
-    plt = _pyplot()
+) -> PlotSeries:
+    """Compute the data of one plot; nothing here draws."""
     half = (
         gradient_points_deg
         if spec.gradient_unit == "deg"
         else gradient_points_mm
     )
     gradient = spec.gradient if half is not None and half > 0 else None
+    x_style = signals[spec.x_signal]
+    y_style = signals[spec.plotted_signal]
+    panels = []
+    for corner, corner_label in CORNERS:
+        sources = []
+        for (source_label, curves, color), options in zip(
+            series, branches, strict=True
+        ):
+            x, y = _curve_xy(spec, curves, corner, spec.branch_options(options))
+            secant = metric = None
+            if gradient and half is not None:
+                secant = _secant(spec, curves, corner, options, half)
+                if secant is not None:
+                    metric = gradient.value(secant[1] - secant[0], 2.0 * half)
+            sources.append(
+                SourceSeries(source_label, color, x, y, secant, metric)
+            )
+        panels.append(PanelSeries(corner, corner_label, sources))
+    return PlotSeries(
+        name=spec.name,
+        title=spec.title,
+        x_label=f"{x_style.label} [{x_style.unit}]",
+        y_label=f"{y_style.label} [{y_style.unit}]",
+        y_limits=spec.y_limits,
+        gradient=gradient,
+        half=half if gradient else None,
+        gradient_unit=spec.gradient_unit,
+        axis_label=(
+            "wheel center travel"
+            if spec.sweep == Signal("wheel_center_z")
+            else x_style.label
+        ),
+        panels=panels,
+    )
+
+
+def _draw_plot(plot: PlotSeries, footer: str, logo: bytes | None) -> bytes:
+    plt = _pyplot()
+    gradient, half = plot.gradient, plot.half
     figure, panels = _new_figure(
         plt,
         2,
@@ -501,38 +604,24 @@ def _render_plot(
         footer,
         len(CORNERS) + 1 if gradient else 0,
     )
-    x_style = signals[spec.x_signal]
-    y_style = signals[spec.plotted_signal]
-    figure.suptitle(spec.title, fontsize=16)
-    table: list[tuple[str, list[float | None]]] = []
-    for panel, (corner, corner_label) in zip(panels.flat, CORNERS, strict=True):
-        values: list[float | None] = []
-        for (source_label, curves, color), options in zip(
-            series, branches, strict=True
-        ):
-            x, y = _curve_xy(spec, curves, corner, spec.branch_options(options))
-            panel.plot(x, y, color=color, linewidth=1.8, label=source_label)
-            if gradient and half is not None:
-                secant = _secant(spec, curves, corner, options, half)
-                values.append(
-                    None
-                    if secant is None
-                    else _draw_secant(
-                        panel,
-                        gradient,
-                        secant,
-                        half,
-                        color,
-                    )
-                )
-        if gradient:
-            table.append((corner, values))
-        panel.set_title(corner_label, loc="left", fontweight="bold")
-        panel.set_xlabel(f"{x_style.label} [{x_style.unit}]")
-        panel.set_ylabel(f"{y_style.label} [{y_style.unit}]")
-        if spec.y_limits:
-            panel.set_ylim(*spec.y_limits)
-        panel.legend(loc="best", frameon=False)
+    figure.suptitle(plot.title, fontsize=16)
+    for axes, panel in zip(panels.flat, plot.panels, strict=True):
+        for source in panel.sources:
+            axes.plot(
+                source.x,
+                source.y,
+                color=source.color,
+                linewidth=1.8,
+                label=source.label,
+            )
+            if source.secant is not None and half is not None:
+                _draw_secant(axes, source.secant, half, source.color)
+        axes.set_title(panel.title, loc="left", fontweight="bold")
+        axes.set_xlabel(plot.x_label)
+        axes.set_ylabel(plot.y_label)
+        if plot.y_limits:
+            axes.set_ylim(*plot.y_limits)
+        axes.legend(loc="best", frameon=False)
     if footer:
         _add_footer(figure, footer)
     if gradient and half is not None:
@@ -540,17 +629,124 @@ def _render_plot(
             figure,
             gradient,
             half,
-            table,
-            series,
+            [
+                (panel.corner, [source.metric for source in panel.sources])
+                for panel in plot.panels
+            ],
+            [
+                Source(source.label, {}, source.color)
+                for source in plot.panels[0].sources
+            ],
             footer,
-            spec.gradient_unit,
-            (
-                "wheel center travel"
-                if spec.sweep == Signal("wheel_center_z")
-                else x_style.label
-            ),
+            plot.gradient_unit,
+            plot.axis_label,
         )
     return _save_pdf(figure, plt, footer, logo)
+
+
+SERIES_DIGITS = 6
+
+
+def _finite(values: np.ndarray) -> list[float | None]:
+    """Significant-digit rounded values; non-finite samples become null."""
+    return [
+        float(f"{v:.{SERIES_DIGITS}g}") if np.isfinite(v) else None
+        for v in values
+    ]
+
+
+def _panel_json(
+    corner: str,
+    title: str,
+    x_label: str,
+    y_label: str,
+    sources: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "corner": corner,
+        "title": title,
+        "x_label": x_label,
+        "y_label": y_label,
+        "sources": sources,
+    }
+
+
+def _source_json(
+    label: str,
+    color: str,
+    x: np.ndarray,
+    y: np.ndarray,
+    secant: tuple[float, float] | None = None,
+    metric: float | None = None,
+) -> dict[str, object]:
+    return {
+        "label": label,
+        "color": color,
+        "x": _finite(x),
+        "y": _finite(y),
+        "secant": secant,
+        "metric": metric,
+    }
+
+
+def _axle_series_json(
+    spec: AxlePlotSpec, panels: list[dict[str, object]], footer: str
+) -> bytes:
+    return _series_bytes(
+        {
+            "name": spec.name,
+            "title": spec.title,
+            "y_limits": None,
+            "footer": footer,
+            "gradient": None,
+            "panels": panels,
+        }
+    )
+
+
+def _series_bytes(document: dict[str, object]) -> bytes:
+    document = {"schema_version": SERIES_SCHEMA_VERSION, **document}
+    return json.dumps(document, separators=(",", ":")).encode()
+
+
+def _series_json(plot: PlotSeries, footer: str) -> bytes:
+    """Versioned, deterministic JSON of one plot for the desktop app."""
+    return _series_bytes(
+        {
+            "name": plot.name,
+            "title": plot.title,
+            "y_limits": plot.y_limits,
+            "footer": footer,
+            "gradient": plot.gradient
+            and {
+                "label": plot.gradient.label,
+                "unit": plot.gradient.unit,
+                "half": plot.half,
+                "half_unit": plot.gradient_unit,
+                "axis_label": plot.axis_label,
+            },
+            "panels": [
+                _panel_json(
+                    panel.corner,
+                    panel.title,
+                    plot.x_label,
+                    plot.y_label,
+                    [
+                        _source_json(
+                            source.label,
+                            source.color,
+                            source.x,
+                            source.y,
+                            source.secant,
+                            source.metric,
+                        )
+                        for source in panel.sources
+                    ],
+                )
+                for panel in plot.panels
+            ],
+        }
+    )
 
 
 def _secant(
@@ -578,11 +774,10 @@ def _secant(
 
 def _draw_secant(
     panel: Any,
-    gradient: GradientDisplay,
     secant: tuple[float, float],
     gradient_mm: float,
     color: str,
-) -> float:
+) -> None:
     """Draw the dashed secant over the panel, markers at its two points."""
     points = ((-gradient_mm, secant[0]), (gradient_mm, secant[1]))
     panel.axline(
@@ -605,7 +800,6 @@ def _draw_secant(
             markeredgewidth=GRADIENT_MARKER_WIDTH,
             zorder=4,
         )
-    return gradient.value(secant[1] - secant[0], 2.0 * gradient_mm)
 
 
 def _curve_xy(

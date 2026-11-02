@@ -22,3 +22,4 @@ ford-b479-data/
 target/
 .claude
 .DS_Store
+/report/

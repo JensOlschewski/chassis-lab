@@ -428,6 +428,7 @@ def plot(
     gradient_points_deg: float | None = None,
     debug: str | None = None,
     selected: list[str] | None = None,
+    series: bool = False,
 ) -> dict[str, bytes]:
     options = BranchOptions.from_json(branch)
     curves = _plot_curves(json.loads(curves_json), options)
@@ -443,6 +444,7 @@ def plot(
         options,
         gradient_points_deg,
         warn_missing=selected is None,
+        series_json=series,
     )
     reports.update(
         render_axle_reports(
@@ -454,6 +456,7 @@ def plot(
             logo,
             "plots/knc/roll",
             warn_missing=selected is None,
+            series_json=series,
         )
     )
     if debug:
