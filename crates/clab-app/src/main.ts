@@ -1,3 +1,4 @@
+import { setupAnalyze } from "./analyze";
 import { setupConvert } from "./convert";
 import { setupInspect } from "./inspect";
 import { setupSession } from "./session";
@@ -15,4 +16,5 @@ function showPane(id: string): void {
 
 navItems.forEach((item) => item.addEventListener("click", () => showPane(item.dataset.pane!)));
 
+setupAnalyze();
 setupSession(setupConvert(), setupInspect());

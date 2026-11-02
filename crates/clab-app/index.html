@@ -12,7 +12,7 @@
       <h1 class="brand">ChassisLab</h1>
       <button class="nav-item" data-pane="convert" aria-current="page">Convert</button>
       <button class="nav-item" data-pane="inspect">Inspect</button>
-      <button class="nav-item" data-pane="analyze" disabled>Analyze <small>soon</small></button>
+      <button class="nav-item" data-pane="analyze">Analyze</button>
       <button class="nav-item" data-pane="compare" disabled>Compare <small>soon</small></button>
 
       <section class="session" aria-label="Session">
@@ -106,6 +106,38 @@
           </div>
         </div>
         <p id="inspect-footer" class="footer"></p>
+      </section>
+      <section id="analyze" class="pane" hidden>
+        <h2>Analyze</h2>
+        <p class="hint">Compute metrics from a run manifest or converted file.</p>
+        <form id="analyze-form">
+          <label>
+            Config
+            <span class="path-row">
+              <input name="config" required placeholder=".toml" />
+              <button type="button" data-browse="file" data-target="config" data-extensions="toml">Browse…</button>
+            </span>
+          </label>
+          <label>
+            Input
+            <span class="path-row">
+              <input name="input" required placeholder="run .toml or .h5" />
+              <button type="button" data-browse="file" data-target="input" data-extensions="toml,h5,hdf5">Browse…</button>
+            </span>
+          </label>
+          <label>
+            Report folder <span class="optional">optional</span>
+            <span class="path-row">
+              <input name="report" />
+              <button type="button" data-browse="directory" data-target="report">Browse…</button>
+            </span>
+          </label>
+          <label class="check"><input type="checkbox" name="force" /> Replace existing report files</label>
+          <button type="submit" class="primary">Analyze</button>
+        </form>
+
+        <p id="analyze-status" class="status" role="status"></p>
+        <div id="analyze-sections"></div>
       </section>
     </main>
 
