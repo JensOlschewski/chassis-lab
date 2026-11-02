@@ -37,6 +37,9 @@ pub(crate) struct AnalyzeArgs {
     /// Print individual analysis warnings also when output is redirected.
     #[arg(short, long)]
     verbose: bool,
+    /// Print one JSON line per analysis section instead of console text.
+    #[arg(long)]
+    json: bool,
 }
 
 struct SvcReferenceReports {
@@ -187,19 +190,22 @@ fn write_combined_run(
     warnings.sort();
     warnings.dedup();
     if let Some(reports) = &svc_reports {
-        print_header("SVC", reports.metric_count);
-        print_metrics(reports.report["metrics"].as_array().unwrap());
-        print_warnings("svc", None, &reports.warnings, args);
+        show_section(
+            args,
+            "SVC",
+            reports.metric_count,
+            ("svc", None),
+            reports.report["metrics"].as_array().unwrap(),
+            &reports.warnings,
+        );
     }
     for (test, _, report, _) in &knc_reports {
-        print_header(test.title(), visible_metric_count(&report.metrics));
-        print_metrics(&report.metrics);
-        print_warnings("knc", Some(test.name()), &report.warnings, args);
+        show_knc_section(args, *test, report);
     }
     let Some(output) = &args.output else {
         return Ok(());
     };
-    let progress = ReportProgress::new(true);
+    let progress = ReportProgress::new(!args.json);
     let mut domains = Vec::new();
     let mut metrics = Vec::new();
     let mut csv = "run,domain,test,metric,unit,value\n".to_owned();
@@ -297,7 +303,7 @@ fn write_combined_run(
     write_report_bundle(output, files, args.force, &inputs)?;
     progress.done("Writing report bundle");
     progress.finish();
-    println!("report: {}", output.display());
+    report_written(args, output);
     Ok(())
 }
 
@@ -504,9 +510,15 @@ fn write_svc_reference(
         reports.report["inputs"]["run"] = provenance(run)?;
         reports.detail = serde_json::to_string_pretty(&reports.report)? + "\n";
     }
-    print_header("SVC", reports.report["metrics"].as_array().unwrap().len());
-    print_metrics(reports.report["metrics"].as_array().unwrap());
-    print_warnings("svc", None, &reports.warnings, args);
+    let metrics = reports.report["metrics"].as_array().unwrap();
+    show_section(
+        args,
+        "SVC",
+        metrics.len(),
+        ("svc", None),
+        metrics,
+        &reports.warnings,
+    );
     if let Some(output) = &args.output {
         write_report_bundle(
             output,
@@ -518,7 +530,7 @@ fn write_svc_reference(
             args.force,
             &[&args.config, &args.input, &reference.path],
         )?;
-        println!("report: {}", output.display());
+        report_written(args, output);
     }
     Ok(())
 }
@@ -598,9 +610,14 @@ fn write_svc_report(
     run: Option<&Path>,
     report: svc::Reports,
 ) -> Result<()> {
-    print_header("SVC", report.metric_count);
-    print_metrics(report.report["metrics"].as_array().unwrap());
-    print_warnings("svc", None, &report.warnings, args);
+    show_section(
+        args,
+        "SVC",
+        report.metric_count,
+        ("svc", None),
+        report.report["metrics"].as_array().unwrap(),
+        &report.warnings,
+    );
     if let Some(output) = &args.output {
         let mut bundle = report.report;
         if let Some(run) = run {
@@ -617,12 +634,68 @@ fn write_svc_report(
             args.force,
             &[&args.config, &args.input, &config.simulation_json],
         )?;
-        println!("report: {}", output.display());
+        report_written(args, output);
     }
     Ok(())
 }
 
-fn print_metrics(metrics: &[serde_json::Value]) {
+/// One analysis section: console text, or with `--json` one JSON line.
+fn show_section(
+    args: &AnalyzeArgs,
+    title: &str,
+    metric_count: usize,
+    (domain, test): (&str, Option<&str>),
+    metrics: &[serde_json::Value],
+    warnings: &[String],
+) {
+    if !args.json {
+        print_header(title, metric_count);
+        print_metrics(metrics);
+        print_warnings(domain, test, warnings, args);
+        return;
+    }
+    let metrics: Vec<_> = console_metrics(metrics)
+        .into_iter()
+        .map(|metric| {
+            serde_json::json!({
+                "name": crate::analysis::display::qualified_metric_name(
+                    domain, test, metric["metric"].as_str().unwrap_or_default(),
+                ),
+                "unit": metric["unit"],
+                "value": metric["value"],
+            })
+        })
+        .collect();
+    display::print_json(&display::section_json(
+        title,
+        (domain, test),
+        metrics,
+        warnings,
+        serde_json::Value::Null,
+    ));
+}
+
+fn show_knc_section(args: &AnalyzeArgs, test: KncTest, report: &knc::Reports) {
+    show_section(
+        args,
+        test.title(),
+        visible_metric_count(&report.metrics),
+        ("knc", Some(test.name())),
+        &report.metrics,
+        &report.warnings,
+    );
+}
+
+fn report_written(args: &AnalyzeArgs, output: &Path) {
+    if args.json {
+        display::print_json(&serde_json::json!({"report": output}));
+    } else {
+        println!("report: {}", output.display());
+    }
+}
+
+/// Metrics shown on the console, in console order.
+fn console_metrics(metrics: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     let mut visible: Vec<_> = visible_metrics(metrics).collect();
     visible.sort_by_key(|metric| {
         crate::analysis::display::console_metric_order(
@@ -631,7 +704,11 @@ fn print_metrics(metrics: &[serde_json::Value]) {
             metric["metric"].as_str().unwrap(),
         )
     });
-    for metric in visible {
+    visible
+}
+
+fn print_metrics(metrics: &[serde_json::Value]) {
+    for metric in console_metrics(metrics) {
         let value = if metric["value"].is_null() {
             if std::io::stdout().is_terminal() {
                 "\x1b[38;5;208mmissing\x1b[0m".into()
@@ -717,13 +794,11 @@ fn write_knc(
     let footer = analysis_footer(&args.config, config, test, input, run)?;
     let debug = debug_info(args.debug, &args.config, &[input])?;
     let report = knc::analyze_input(config, test, input, None, debug.as_deref())?;
-    print_header(test.title(), visible_metric_count(&report.metrics));
-    print_metrics(&report.metrics);
-    print_warnings("knc", Some(test.name()), &report.warnings, args);
+    show_knc_section(args, test, &report);
     let Some(output) = &args.output else {
         return Ok(());
     };
-    let progress = ReportProgress::new(true);
+    let progress = ReportProgress::new(!args.json);
     let mut bundle = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
@@ -782,7 +857,7 @@ fn write_knc(
     write_report_bundle(output, files, args.force, &inputs)?;
     progress.done("Writing report bundle");
     progress.finish();
-    println!("report: {}", output.display());
+    report_written(args, output);
     Ok(())
 }
 

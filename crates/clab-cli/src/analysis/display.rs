@@ -25,6 +25,30 @@ pub(crate) fn print_warnings(domain: &str, test: Option<&str>, warnings: &[Strin
     }
 }
 
+/// Print one `--json` line. stdout carries only these lines in that mode.
+pub(crate) fn print_json(value: &serde_json::Value) {
+    println!("{value}");
+}
+
+/// Envelope of one domain section in `analyze --json` and `compare --json`.
+/// `extra` holds command-specific keys merged beside the shared ones.
+pub(crate) fn section_json(
+    title: &str,
+    (domain, test): (&str, Option<&str>),
+    metrics: Vec<serde_json::Value>,
+    warnings: &[String],
+    extra: serde_json::Value,
+) -> serde_json::Value {
+    let mut section = serde_json::json!({
+        "title": title, "domain": domain, "test": test,
+        "metrics": metrics, "warnings": warnings,
+    });
+    if let (Some(section), Some(extra)) = (section.as_object_mut(), extra.as_object()) {
+        section.extend(extra.clone());
+    }
+    serde_json::json!({ "section": section })
+}
+
 /// Qualified display name for a metric row: `domain::metric` or
 /// `domain::test::metric`, e.g. `svc::front_left_mass_kg` or
 /// `knc::vertical::bump_steer_front_left_deg_per_mm`.

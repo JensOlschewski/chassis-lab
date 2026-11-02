@@ -149,6 +149,39 @@ fn warns_when_run_manifest_uses_schema_version_one() {
 }
 
 #[test]
+fn analyze_json_prints_one_line_per_section() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let config = examples.join("config.toml");
+    let input = examples.join("input/generated-measurement-svc.json");
+    if !config.is_file() || !input.is_file() {
+        return;
+    }
+    let result = clab()
+        .args([
+            "analyze",
+            config.to_str().unwrap(),
+            input.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let lines: Vec<Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 1);
+    let section = &lines[0]["section"];
+    assert_eq!(section["title"], "SVC");
+    assert_eq!(section["domain"], "svc");
+    let metric = &section["metrics"][0];
+    assert_eq!(metric["name"], "svc::front_left_mass_kg");
+    assert_eq!(metric["unit"], "kg");
+    assert_eq!(metric["value"], 420.0);
+}
+
+#[test]
 fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
