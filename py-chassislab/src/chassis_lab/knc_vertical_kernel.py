@@ -448,6 +448,7 @@ def plot(
     debug: str | None = None,
     corner_mass_kg: str | None = None,
     selected: list[str] | None = None,
+    series: bool = False,
 ) -> dict[str, bytes]:
     """Render vertical report catalog through generic KnC plot kernel."""
     options = BranchOptions.from_json(branch)
@@ -466,6 +467,7 @@ def plot(
         logo,
         gradient_points_mm,
         options,
+        series_json=series,
     )
     if debug:
         info = json.loads(debug)

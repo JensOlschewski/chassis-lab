@@ -889,3 +889,36 @@ def test_missing_contact_geometry_does_not_substitute_center_of_pressure():
         "missing canonical signal front_left_contact_patch_y" in w
         for w in warnings
     )
+
+
+def test_roll_plot_series_json_is_versioned_deterministic_and_paired() -> None:
+    kwargs = {
+        "gradient_points_mm": 10.0,
+        "gradient_points_deg": 0.9,
+        "branch": json.dumps({"index": 2}),
+        "footer": "Footer",
+    }
+    plain = plot(json.dumps(_plot_fixture()), **kwargs)
+    reports = plot(json.dumps(_plot_fixture()), series=True, **kwargs)
+    again = plot(json.dumps(_plot_fixture()), series=True, **kwargs)
+
+    series = {k for k in reports if k.endswith(".plot.json")}
+    assert series == {k.removesuffix(".pdf") + ".plot.json" for k in plain}
+    assert {k: reports[k] for k in series} == {k: again[k] for k in series}
+    assert set(reports) - series == set(plain)
+
+    corner = json.loads(reports["plots/knc/roll/knc_roll_camber.plot.json"])
+    assert corner["schema_version"] == 1
+    assert corner["footer"] == "Footer"
+    assert corner["gradient"]["half"] == 10.0
+    assert len(corner["panels"]) == 4
+    source = corner["panels"][0]["sources"][0]
+    assert len(source["x"]) == len(source["y"])
+    assert source["metric"] is not None
+
+    axle_name = next(
+        k for k in series if "roll_moment" in k or "roll_stiffness" in k
+    )
+    axle = json.loads(reports[axle_name])
+    assert len(axle["panels"]) == 3
+    assert axle["gradient"] is None
