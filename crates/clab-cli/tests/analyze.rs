@@ -152,7 +152,7 @@ fn warns_when_run_manifest_uses_schema_version_one() {
 fn analyze_json_prints_one_line_per_section() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let input = examples.join("input/generated-measurement-svc.json");
+    let input = examples.join("input/raw-measurement/example-measurement-svc.json");
     if !config.is_file() || !input.is_file() {
         return;
     }
@@ -185,7 +185,7 @@ fn analyze_json_prints_one_line_per_section() {
 fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let input = examples.join("input/generated-measurement-svc.json");
+    let input = examples.join("input/raw-measurement/example-measurement-svc.json");
     if !config.is_file() || !input.is_file() {
         return;
     }
@@ -301,7 +301,7 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
 fn analyzes_svc_measurement_run_with_manifest_metadata() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let input = examples.join("input/generated-measurement-svc.json");
+    let input = examples.join("input/raw-measurement/example-measurement-svc.json");
     if !config.is_file() || !input.is_file() {
         return;
     }
