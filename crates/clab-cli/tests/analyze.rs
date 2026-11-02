@@ -771,9 +771,25 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         "metrics.csv",
         "svc.json",
         "knc-vertical.json",
+        "knc-vertical.plots.json",
     ] {
         assert!(output.join(name).is_file(), "missing {name}");
     }
+    let series: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("knc-vertical.plots.json")).unwrap())
+            .unwrap();
+    assert_eq!(series["schema_version"], 1);
+    assert_eq!(series["test"], "vertical");
+    assert!(!series["plots"].as_array().unwrap().is_empty());
+    assert!(
+        fs::read_dir(output.join("plots/knc/vertical"))
+            .unwrap()
+            .all(|entry| entry
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|e| e == "pdf"))
+    );
     let pdf = fs::read(output.join("plots/knc/vertical/knc_vertical_wcz_vs_wcy.pdf")).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     let report: Value =
