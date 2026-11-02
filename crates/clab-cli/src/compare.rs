@@ -43,6 +43,9 @@ pub(crate) struct CompareArgs {
     /// Include KnC rate-filter diagnostic plots in the report (requires --report).
     #[arg(long, requires = "output")]
     debug: bool,
+    /// Print one JSON line per comparison section instead of console text.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug)]
@@ -257,7 +260,12 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             }
         }
     }
-    print_metrics(
+    let show = if args.json {
+        json_metrics
+    } else {
+        print_metrics
+    };
+    show(
         &args.baseline,
         &args.candidates,
         &baseline.domains,
@@ -267,7 +275,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         &warnings,
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
-    let progress = ReportProgress::new(args.output.is_some());
+    let progress = ReportProgress::new(args.output.is_some() && !args.json);
     let plot_tests = [KncTest::Vertical, KncTest::Roll]
         .into_iter()
         .filter(|test| args.output.is_some() && baseline.domains.contains_key(knc_key(*test)))
@@ -380,14 +388,26 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         write_report_bundle(output, files, args.force, &inputs)?;
         progress.done("Writing report bundle");
         progress.finish();
-        println!("report: {}", output.display());
+        if args.json {
+            display::print_json(&serde_json::json!({"report": output}));
+        } else {
+            println!("report: {}", output.display());
+        }
     }
-    println!(
-        "comparison: baseline {}; {} candidate(s); {}",
-        args.baseline.display(),
-        args.candidates.len(),
-        status
-    );
+    if args.json {
+        display::print_json(&serde_json::json!({"comparison": {
+            "baseline": args.baseline,
+            "candidates": args.candidates.len(),
+            "status": status,
+        }}));
+    } else {
+        println!(
+            "comparison: baseline {}; {} candidate(s); {}",
+            args.baseline.display(),
+            args.candidates.len(),
+            status
+        );
+    }
     if failed {
         bail!(ToleranceFailure);
     }
@@ -729,6 +749,98 @@ fn metrics_csv(baseline: &Path, rows: &[(PathBuf, Metric)]) -> Result<String> {
     Ok(String::from_utf8(csv.into_inner()?)?)
 }
 
+/// Rows of one domain grouped per metric (one value per candidate), in console order.
+fn grouped_metrics<'a>(
+    compared: &ComparedDomain,
+    candidates: &[PathBuf],
+    rows: &'a [(PathBuf, Metric)],
+) -> GroupedMetrics<'a> {
+    let (domain, domain_test) = (compared.domain(), compared.test().map(KncTest::name));
+    let mut grouped: GroupedMetrics<'_> = Vec::new();
+    for (candidate, metric) in rows
+        .iter()
+        .filter(|(_, metric)| metric.domain == domain && metric.test == domain_test)
+    {
+        let index = candidates
+            .iter()
+            .position(|path| path == candidate)
+            .expect("candidate row must have an input");
+        if let Some((_, _, values)) = grouped
+            .iter_mut()
+            .find(|(test, name, _)| *test == metric.test && *name == metric.metric.as_str())
+        {
+            values.push((index, metric));
+        } else {
+            grouped.push((metric.test, &metric.metric, vec![(index, metric)]));
+        }
+    }
+    grouped.sort_by_key(|(test, name, _)| {
+        crate::analysis::display::console_metric_order(domain, *test, name)
+    });
+    grouped
+}
+
+/// `--json` twin of `print_metrics`: one section line per compared domain.
+fn json_metrics(
+    _baseline: &Path,
+    candidates: &[PathBuf],
+    domains: &BTreeMap<&'static str, ComparedDomain>,
+    rows: &[(PathBuf, Metric)],
+    unavailable_domains: &[(usize, &'static str)],
+    _use_tolerances: bool,
+    warnings: &BTreeMap<&str, Vec<String>>,
+) {
+    for key in DOMAIN_KEYS {
+        let Some(compared) = domains.get(key) else {
+            continue;
+        };
+        let (domain, test) = (compared.domain(), compared.test().map(KncTest::name));
+        let metrics = grouped_metrics(compared, candidates, rows)
+            .into_iter()
+            .filter(|(test, name, _)| display::show_metric(domain, *test, name))
+            .map(|(test, name, values)| {
+                let mut per_candidate = vec![serde_json::Value::Null; candidates.len()];
+                for (index, metric) in &values {
+                    let compared = !unavailable_domains
+                        .iter()
+                        .any(|(unavailable, domain)| unavailable == index && *domain == key);
+                    per_candidate[*index] = if compared {
+                        serde_json::json!({
+                            "value": metric.candidate_value,
+                            "difference": metric.difference,
+                            "status": metric.status,
+                        })
+                    } else {
+                        serde_json::json!({"value": null, "difference": null, "status": "not compared"})
+                    };
+                }
+                serde_json::json!({
+                    "name": display::qualified_metric_name(domain, test, name),
+                    "unit": values[0].1.unit,
+                    "baseline": values[0].1.baseline_value,
+                    "allowed_difference": values.iter().find_map(|(_, metric)| metric.allowed_difference),
+                    "candidates": per_candidate,
+                })
+            })
+            .collect();
+        let domain_rows: Vec<_> = rows
+            .iter()
+            .filter(|(_, metric)| metric.domain == domain && metric.test == test)
+            .collect();
+        let (passed, failed, missing, tolerance_missing) = outcome_counts(&domain_rows);
+        display::print_json(&display::section_json(
+            compared.title(),
+            (domain, test),
+            metrics,
+            warnings.get(key).map_or(&[][..], Vec::as_slice),
+            serde_json::json!({"result": {
+                "passed": passed, "failed": failed, "missing": missing,
+                "tolerance_missing": tolerance_missing, "total": domain_rows.len(),
+            }}),
+        ));
+    }
+}
+
 fn print_metrics(
     baseline: &Path,
     candidates: &[PathBuf],
@@ -746,24 +858,7 @@ fn print_metrics(
         let domain_test = compared.test().map(KncTest::name);
         let in_domain = |metric: &Metric| metric.domain == domain && metric.test == domain_test;
         println!();
-        let mut grouped: GroupedMetrics<'_> = Vec::new();
-        for (candidate, metric) in rows.iter().filter(|(_, metric)| in_domain(metric)) {
-            let index = candidates
-                .iter()
-                .position(|path| path == candidate)
-                .expect("candidate row must have an input");
-            if let Some((_, _, values)) = grouped
-                .iter_mut()
-                .find(|(test, name, _)| *test == metric.test && *name == metric.metric.as_str())
-            {
-                values.push((index, metric));
-            } else {
-                grouped.push((metric.test, &metric.metric, vec![(index, metric)]));
-            }
-        }
-        grouped.sort_by_key(|(test, name, _)| {
-            crate::analysis::display::console_metric_order(domain, *test, name)
-        });
+        let grouped = grouped_metrics(compared, candidates, rows);
         println!("{title}\nbaseline: {}", baseline.display());
         for (index, candidate) in candidates.iter().enumerate() {
             println!("candidate_{}: {}", index + 1, candidate.display());

@@ -245,6 +245,44 @@ fn compares_svc_json_and_returns_one_for_failed_tolerance() {
 }
 
 #[test]
+fn compare_json_prints_sections_and_summary_and_keeps_exit_code() {
+    let directory = tempdir().unwrap();
+    let config = config_with_tolerance(directory.path(), 0.0001);
+    let simulation = directory.path().join("simulation.json");
+    let candidate = directory.path().join("candidate.json");
+    write_simulation_json(&simulation, 4000.0);
+    write_simulation_json(&candidate, 4200.0);
+    let result = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            simulation.to_str().unwrap(),
+            candidate.to_str().unwrap(),
+            "--tolerances",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(1));
+    let lines: Vec<Value> = String::from_utf8_lossy(&result.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2);
+    let section = &lines[0]["section"];
+    assert_eq!(section["domain"], "svc");
+    assert!(section["result"]["failed"].as_u64().unwrap() > 0);
+    let metric = section["metrics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|metric| metric["name"] == "svc::total_mass_kg")
+        .unwrap();
+    assert_eq!(metric["candidates"][0]["status"], "failed");
+    assert_eq!(lines[1]["comparison"]["status"], "failed");
+}
+
+#[test]
 fn aggregates_candidates_once_and_marks_missing_without_extra_sections() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
@@ -282,7 +320,7 @@ fn aggregates_candidates_once_and_marks_missing_without_extra_sections() {
 fn compares_svc_simulation_and_measurement_references() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
-    let measurement = examples.join("input/generated-measurement-svc.json");
+    let measurement = examples.join("input/raw-measurement/example-measurement-svc.json");
     let directory = tempdir().unwrap();
     let simulation = directory.path().join("simulation.json");
     write_simulation_json(&simulation, 4000.0);
