@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod analyze;
 mod convert;
 mod inspect;
 mod session;
@@ -21,6 +22,14 @@ async fn run_convert(
 async fn run_inspect(
     app: AppHandle,
     request: inspect::InspectRequest,
+) -> Result<worker::Outcome, String> {
+    worker::run(&app, request.args()).await
+}
+
+#[tauri::command]
+async fn run_analyze(
+    app: AppHandle,
+    request: analyze::AnalyzeRequest,
 ) -> Result<worker::Outcome, String> {
     worker::run(&app, request.args()).await
 }
@@ -62,6 +71,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             run_convert,
             run_inspect,
+            run_analyze,
             save_image,
             save_session,
             load_session
