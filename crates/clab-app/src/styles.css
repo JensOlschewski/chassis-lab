@@ -162,3 +162,19 @@ button.primary {
 .info dt { font-weight: 500; }
 .info dd { margin: 0; color: var(--text); word-break: break-all; }
 .footer { margin: 8px 0 0; color: var(--muted); font-size: 0.75rem; word-break: break-all; }
+
+.section { margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.section summary { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font-weight: 500; cursor: pointer; }
+.section summary::before { content: "▸"; margin-right: 8px; color: var(--muted); transition: transform 0.1s; }
+.section[open] > summary::before { transform: rotate(90deg); }
+.section summary > span:first-child { flex: 1; }
+.badge { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; color: #fff; font-size: 0.75rem; font-weight: 700; line-height: 1; }
+.badge.ok { background: #2e7d32; }
+.badge.warning { background: #b26a00; }
+.badge.error { background: #b3261e; }
+.metrics { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.metrics td { padding: 3px 12px; }
+.metrics td:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
+.metrics td:nth-child(3) { color: var(--muted); }
+.metrics .missing { color: var(--error); }
+.warnings { margin: 8px 0; padding: 0 12px 0 32px; color: var(--muted); font-size: 0.8125rem; }
