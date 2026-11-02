@@ -11,6 +11,9 @@ pub struct ConvertRequest {
     test: Option<String>,
     output: Option<PathBuf>,
     force: bool,
+    /// The user accepted the warnings of an earlier run.
+    #[serde(default)]
+    confirmed: bool,
 }
 
 impl ConvertRequest {
@@ -31,6 +34,9 @@ impl ConvertRequest {
         if self.force {
             args.push("--force".into());
         }
+        if self.confirmed {
+            args.push("--yes".into());
+        }
         args.push(clean_path(&self.input).into());
         args
     }
@@ -47,7 +53,18 @@ mod tests {
             test: Some("vertical".into()),
             output: Some(PathBuf::from("/out")),
             force: true,
+            confirmed: false,
         }
+    }
+
+    #[test]
+    fn confirmed_adds_yes() {
+        let request = ConvertRequest {
+            confirmed: true,
+            ..request()
+        };
+        let args = request.args();
+        assert_eq!(args[args.len() - 2], OsString::from("--yes"));
     }
 
     #[test]

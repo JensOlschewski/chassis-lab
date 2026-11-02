@@ -1,5 +1,14 @@
+import { ask } from "@tauri-apps/plugin-dialog";
 import { setupBrowse } from "./browse";
 import { describe, run } from "./worker";
+
+/** clab exit code: warnings need the user's confirmation. */
+const CONFIRMATION_REQUIRED = 3;
+
+/** Asks in a native dialog whether to proceed despite the warnings. */
+function confirmWarnings(warnings: string[]): Promise<boolean> {
+  return ask(warnings.join("\n\n"), { title: "Convert warnings", kind: "warning", okLabel: "Proceed", cancelLabel: "Cancel" });
+}
 
 interface ConvertRequest {
   input: string;
@@ -7,6 +16,7 @@ interface ConvertRequest {
   test: string | null;
   output: string | null;
   force: boolean;
+  confirmed: boolean;
 }
 
 /** Reads the form into a request; empty optional fields become null. */
@@ -21,6 +31,7 @@ export function readRequest(form: HTMLFormElement): ConvertRequest {
     test: domain === "knc" ? text("test") : null,
     output: text("output") || null,
     force: data.has("force"),
+    confirmed: false,
   };
 }
 
@@ -60,7 +71,24 @@ export function setupConvert() {
     submit.disabled = true;
     show("Converting…", true);
     try {
-      const outcome = await run("run_convert", readRequest(form));
+      const request = readRequest(form);
+      if (!/\.(res|acd)$/i.test(request.input.replace(/["\s]+$/, ""))) {
+        show("Input must be a .res or .acd file", false);
+        return;
+      }
+      let outcome = await run("run_convert", request);
+      if (outcome.exit_code === CONFIRMATION_REQUIRED) {
+        const warnings = outcome.stderr
+          .split("\n")
+          .filter((line) => line.startsWith("warning: "))
+          .map((line) => line.slice("warning: ".length));
+        if (!(await confirmWarnings(warnings))) {
+          show("Convert cancelled", false);
+          return;
+        }
+        show("Converting…", true);
+        outcome = await run("run_convert", { ...request, confirmed: true });
+      }
       const { ok, message } = describe(outcome);
       show(message, ok, (outcome.stdout + outcome.stderr).trim());
     } catch (error) {
@@ -72,7 +100,7 @@ export function setupConvert() {
 
   return {
     get(): ConvertState {
-      const { input, ...rest } = readRequest(form);
+      const { input, confirmed, ...rest } = readRequest(form);
       return { input: input || null, ...rest };
     },
     set(state: ConvertState): void {

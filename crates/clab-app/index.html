@@ -36,7 +36,7 @@
             Input file
             <span class="path-row">
               <input name="input" required placeholder=".res or .acd" />
-              <button type="button" data-browse="file" data-target="input">Browse…</button>
+              <button type="button" data-browse="file" data-target="input" data-extensions="res,acd">Browse…</button>
             </span>
             <small class="embedded-note" data-embedded-for="input" hidden></small>
           </label>
@@ -60,10 +60,10 @@
           </div>
 
           <label>
-            Output folder <span class="optional">optional, defaults to the input folder</span>
+            Output <span class="optional">optional folder or .h5 file, defaults to the input folder</span>
             <span class="path-row">
               <input name="output" />
-              <button type="button" data-browse="directory" data-target="output">Browse…</button>
+              <button type="button" data-browse="save" data-target="output" data-suggest-from="input" data-extensions="h5,hdf5">Browse…</button>
             </span>
           </label>
 
@@ -108,5 +108,6 @@
         <p id="inspect-footer" class="footer"></p>
       </section>
     </main>
+
   </body>
 </html>

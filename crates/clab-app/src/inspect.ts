@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { setupBrowse } from "./browse";
 import { AXIS, Curve, SignalInfo, Signals, Summary, drawChart, labelOf } from "./chart";
-import { describe, run } from "./worker";
+import { describe, errorLine, run } from "./worker";
 
 interface Choice {
   value: string;
@@ -32,7 +32,7 @@ const colorFor = (index: number) => CURVE_COLORS[index % CURVE_COLORS.length];
 async function inspect<T>(file: string, signals: string[]): Promise<T> {
   const outcome = await run("run_inspect", { file, signals });
   if (outcome.exit_code !== 0) {
-    throw new Error(outcome.stderr.trim() || describe(outcome).message);
+    throw new Error(errorLine(outcome.stderr) ?? describe(outcome).message);
   }
   return JSON.parse(outcome.stdout) as T;
 }
