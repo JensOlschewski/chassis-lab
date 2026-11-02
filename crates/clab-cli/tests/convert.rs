@@ -406,10 +406,10 @@ fn mismatched_test_without_terminal_aborts_and_writes_nothing() {
 
     let result = convert_knc(&input, "roll").output().unwrap();
 
-    assert!(!result.status.success());
+    assert_eq!(result.status.code(), Some(3));
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(
-        stderr.contains("motion data indicates 'vertical'"),
+        stderr.contains("warning: motion data indicates 'vertical'"),
         "{stderr}"
     );
     assert!(stderr.contains("pass --yes"), "{stderr}");

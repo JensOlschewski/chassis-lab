@@ -116,6 +116,18 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     Ok(())
 }
 
+/// Warnings need confirmation but there is no terminal to ask on.
+#[derive(Debug)]
+pub(crate) struct ConfirmationRequired;
+
+impl std::fmt::Display for ConfirmationRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("warnings present and no terminal to confirm; pass --yes to proceed")
+    }
+}
+
+impl std::error::Error for ConfirmationRequired {}
+
 /// Print warnings; unless `--yes`, ask before proceeding.
 fn confirm(warnings: Vec<String>, yes: bool) -> Result<()> {
     if warnings.is_empty() {
@@ -128,7 +140,7 @@ fn confirm(warnings: Vec<String>, yes: bool) -> Result<()> {
         return Ok(());
     }
     if !std::io::stdin().is_terminal() {
-        bail!("warnings present and no terminal to confirm; pass --yes to proceed");
+        return Err(ConfirmationRequired.into());
     }
     eprint!("Proceed? [y/N] ");
     std::io::stderr().flush()?;

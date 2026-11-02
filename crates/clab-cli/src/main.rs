@@ -64,6 +64,10 @@ fn main() -> ExitCode {
         }
         Err(error) => {
             eprintln!("error: {error:#}");
+            if error.downcast_ref::<convert::ConfirmationRequired>().is_some() {
+                // Lets a GUI caller tell "ask the user" apart from a failure.
+                return ExitCode::from(3);
+            }
             ExitCode::from(2)
         }
     }
