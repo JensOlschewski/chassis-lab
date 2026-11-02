@@ -11,10 +11,10 @@ name = "example_run_measurement"
 loadcase = "example_loadcase"
 
 [input.svc]
-file = "generated-measurement-svc.json"
+file = "raw-measurement/example-measurement-svc.json"
 
 [input.knc.vertical]
-file = "generated-measurement-knc-vertical.h5"
+file = "raw-measurement/example-measurement-knc-vertical.h5"
 
 [input.knc.roll]
-file = "generated-measurement-knc-roll.h5"
+file = "raw-measurement/example-measurement-knc-roll.h5"

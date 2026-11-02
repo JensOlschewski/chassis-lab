@@ -11,13 +11,13 @@ name = "example_run_simulation"
 loadcase = "example_loadcase"
 
 [input.svc]
-file = "generated-simulation-svc.h5"
+file = "raw-simulation/example-simulation-svc.h5"
 
 [input.knc.static]
-file = "generated-simulation-knc-static.h5"
+file = "raw-simulation/example-simulation-knc-static.h5"
 
 [input.knc.vertical]
-file = "generated-simulation-knc-vertical.h5"
+file = "raw-simulation/example-simulation-knc-vertical.h5"
 
 [input.knc.roll]
-file = "generated-simulation-knc-roll.h5"
+file = "raw-simulation/example-simulation-knc-roll.h5"
