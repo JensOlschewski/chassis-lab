@@ -593,9 +593,7 @@ def _plot_series(
     )
 
 
-def _draw_plot(
-    plot: PlotSeries, footer: str, logo: bytes | None
-) -> bytes:
+def _draw_plot(plot: PlotSeries, footer: str, logo: bytes | None) -> bytes:
     plt = _pyplot()
     gradient, half = plot.gradient, plot.half
     figure, panels = _new_figure(
