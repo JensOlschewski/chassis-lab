@@ -126,14 +126,16 @@
               <button type="button" data-browse="file" data-target="input" data-extensions="toml,h5,hdf5">Browse…</button>
             </span>
           </label>
-          <label>
-            Report folder <span class="optional">optional</span>
-            <span class="path-row">
-              <input name="report" />
-              <button type="button" data-browse="directory" data-target="report">Browse…</button>
-            </span>
-          </label>
-          <label class="check"><input type="checkbox" name="force" /> Replace existing report files</label>
+          <label class="check"><input type="checkbox" name="generate" checked /> Generate report</label>
+          <fieldset id="analyze-report">
+            <label>
+              Report folder
+              <span class="path-row">
+                <input name="report" placeholder="default: report folder next to the input" />
+                <button type="button" data-browse="directory" data-target="report">Browse…</button>
+              </span>
+            </label>
+          </fieldset>
           <button type="submit" class="primary">Analyze</button>
         </form>
 

@@ -118,7 +118,7 @@ export function setupReport() {
     try {
       const directory = folder.value;
       const report = JSON.parse(await readFile(directory, "report.json")) as ReportFile;
-      sectionsRoot.replaceChildren(...sectionsFromReport(report).map(renderSection));
+      sectionsRoot.replaceChildren(...sectionsFromReport(report).map((section) => renderSection(section)));
       const missing = await loadPlots(directory, report.domains);
       viewer.hidden = plots.length === 0;
       show(missing.length > 0 ? `No plot data for ${missing.join(", ")}; run Analyze with a report folder again.` : "");

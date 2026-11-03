@@ -9,7 +9,7 @@ mod worker;
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, ipc::Channel};
 
 #[tauri::command]
 async fn run_convert(
@@ -31,14 +31,24 @@ async fn run_inspect(
 async fn run_analyze(
     app: AppHandle,
     request: analyze::AnalyzeRequest,
+    on_line: Channel<String>,
 ) -> Result<worker::Outcome, String> {
-    worker::run(&app, request.args()).await
+    worker::run_streaming(&app, request.args(), move |line| {
+        let _ = on_line.send(line);
+    })
+    .await
 }
 
 /// Writes an exported chart image to the path the user chose in the save dialog.
 #[tauri::command]
 fn save_image(path: PathBuf, bytes: Vec<u8>) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// Whether `path` exists, so the app can confirm before a report replaces a folder.
+#[tauri::command]
+fn path_exists(path: PathBuf) -> bool {
+    worker::clean_path(&path).exists()
 }
 
 /// Reads one file of an opened report folder; see `report::read_file` for the allowed names.
@@ -80,6 +90,7 @@ fn main() {
             run_inspect,
             run_analyze,
             save_image,
+            path_exists,
             read_report_file,
             save_session,
             load_session
