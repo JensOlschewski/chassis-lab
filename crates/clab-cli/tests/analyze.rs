@@ -781,6 +781,30 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     assert_eq!(series["schema_version"], 1);
     assert_eq!(series["test"], "vertical");
     assert!(!series["plots"].as_array().unwrap().is_empty());
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    let known: Vec<&str> = report["metrics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|metric| metric["metric"].as_str().unwrap())
+        .collect();
+    let first_knc = report["metrics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|metric| metric["domain"] == "knc")
+        .unwrap();
+    assert_eq!(first_knc["metric"], "bump_camber_front_left_deg_per_mm");
+    let named: Vec<&str> = series["plots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|plot| plot["metrics"].as_array().unwrap())
+        .map(|name| name.as_str().unwrap())
+        .collect();
+    assert!(named.contains(&"bump_steer_front_left_deg_per_mm"));
+    assert!(named.iter().all(|name| known.contains(name)), "{named:?}");
     assert!(
         fs::read_dir(output.join("plots/knc/vertical"))
             .unwrap()

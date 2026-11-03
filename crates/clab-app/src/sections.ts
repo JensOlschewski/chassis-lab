@@ -66,6 +66,7 @@ export function renderSection(section: Section, report?: ReportStatus): HTMLDeta
   const table = element("table", "", "metrics");
   for (const metric of section.metrics) {
     const row = table.insertRow();
+    row.dataset.metric = metric.name.split("::").at(-1);
     // Names arrive qualified (`svc::front_left_mass_kg`); the card title already says where.
     row.insertCell().textContent = metric.name.split("::").at(-1)!;
     const value = row.insertCell();

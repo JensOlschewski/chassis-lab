@@ -15,6 +15,8 @@ from chassis_lab.knc_kernel import (
     gradient_curve,
 )
 from chassis_lab.knc_vertical_kernel import (
+    GRADIENT_METRICS,
+    PLOT_SPECS,
     evaluate,
     metrics,
     plot,
@@ -595,3 +597,11 @@ def test_branch_detection_discards_short_turnaround_jitter() -> None:
     branches = branch_ranges(travel, BranchOptions(measurement=True))
     # The first (partial) measurement sweep is dropped.
     assert [(segment.start, sign) for segment, sign in branches] == [(57, -1)]
+
+
+def test_plot_metrics_name_catalog_metrics() -> None:
+    catalog = {f"{m.name}_{{corner}}_{m.suffix}" for m in GRADIENT_METRICS}
+    catalog.add("ride_frequency_{corner}_hz")
+    named = {spec.metric for spec in PLOT_SPECS if spec.metric}
+    assert named
+    assert named <= catalog

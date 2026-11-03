@@ -220,6 +220,9 @@ class PlotSpec:
     x_at: str = "self"
     sweep: Signal = Signal("wheel_center_z")
     gradient_unit: str = "mm"
+    # Name of the scalar metric this plot shows, `{corner}` standing for the
+    # corner. The desktop app highlights these metrics beside the plot.
+    metric: str | None = None
 
     def branch_options(self, options: BranchOptions) -> BranchOptions:
         return replace(options, **self.branch)
@@ -272,6 +275,7 @@ class PlotSeries:
     gradient_unit: str
     axis_label: str
     panels: list[PanelSeries]
+    metrics: list[str]
 
 
 @dataclass(frozen=True)
@@ -590,6 +594,11 @@ def _plot_series(
             else x_style.label
         ),
         panels=panels,
+        metrics=[
+            spec.metric.format(corner=corner)
+            for corner, _ in CORNERS
+            if spec.metric
+        ],
     )
 
 
@@ -699,6 +708,7 @@ def _axle_series_json(
             "y_limits": None,
             "footer": footer,
             "gradient": None,
+            "metrics": [],
             "panels": panels,
         }
     )
@@ -725,6 +735,7 @@ def _series_json(plot: PlotSeries, footer: str) -> bytes:
                 "half_unit": plot.gradient_unit,
                 "axis_label": plot.axis_label,
             },
+            "metrics": plot.metrics,
             "panels": [
                 _panel_json(
                     panel.corner,
