@@ -32,6 +32,14 @@ interface ReportBadge {
   phases: string[];
 }
 
+/** The form as stored in a session file: paths only, never results. */
+export interface AnalyzeState {
+  config: string | null;
+  input: string | null;
+  generate: boolean;
+  report: string | null;
+}
+
 /** `showReport` opens a report folder in Inspect, at the plots of `test` if given. */
 export function setupAnalyze(showReport: (directory: string, test?: string) => void) {
   const form = document.querySelector<HTMLFormElement>("#analyze-form")!;
@@ -70,7 +78,8 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   const generate = form.elements.namedItem("generate") as HTMLInputElement;
   const folder = form.elements.namedItem("report") as HTMLInputElement;
   // Disabled controls stay out of FormData, so an unchecked box sends no report folder.
-  generate.addEventListener("change", () => (reportOptions.disabled = !generate.checked));
+  const syncGenerate = () => (reportOptions.disabled = !generate.checked);
+  generate.addEventListener("change", syncGenerate);
 
   /** The report folder to write, `null` for none; `undefined` when the user cancels a confirmation. */
   async function confirmReport(input: string): Promise<{ report: string | null; force: boolean } | undefined> {
@@ -152,4 +161,26 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       submit.disabled = false;
     }
   });
+
+  const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement;
+  const saved = (name: string) => clean(field(name).value) || null;
+
+  return {
+    get(): AnalyzeState {
+      return { config: saved("config"), input: saved("input"), generate: generate.checked, report: saved("report") };
+    },
+    /** Restores the form; results of an earlier run are dropped, not restored. */
+    set(state: AnalyzeState): void {
+      field("config").value = state.config ?? "";
+      field("input").value = state.input ?? "";
+      generate.checked = state.generate;
+      folder.value = state.report ?? "";
+      syncGenerate();
+      sections.replaceChildren();
+      sections.classList.remove("finished");
+      reportButton.hidden = true;
+      shown = null;
+      show("", true);
+    },
+  };
 }

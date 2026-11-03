@@ -34,6 +34,31 @@ pub struct Session {
     embed: bool,
     convert: ConvertState,
     inspect: InspectState,
+    /// Absent in sessions saved before the Analyze tab was stored.
+    #[serde(default)]
+    analyze: AnalyzeState,
+}
+
+/// The Analyze form. Paths only: results are never stored, and `--force` is
+/// asked again on every run.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnalyzeState {
+    config: Option<PathBuf>,
+    input: Option<PathBuf>,
+    generate: bool,
+    report: Option<PathBuf>,
+}
+
+impl Default for AnalyzeState {
+    fn default() -> Self {
+        Self {
+            config: None,
+            input: None,
+            generate: true,
+            report: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -69,6 +94,16 @@ impl Session {
     /// Paths that are copied into the archive when embedding.
     fn inputs_mut(&mut self) -> [&mut Option<PathBuf>; 2] {
         [&mut self.convert.input, &mut self.inspect.file]
+    }
+
+    /// Paths that are never copied: stored relative to the session file where possible.
+    fn linked_mut(&mut self) -> [&mut Option<PathBuf>; 4] {
+        [
+            &mut self.convert.output,
+            &mut self.analyze.config,
+            &mut self.analyze.input,
+            &mut self.analyze.report,
+        ]
     }
 }
 
@@ -112,7 +147,10 @@ pub fn save(path: &Path, session: &Session) -> Result<()> {
             .into_iter()
             .for_each(|slot| relativize(slot, dir));
     }
-    relativize(&mut manifest.convert.output, dir);
+    manifest
+        .linked_mut()
+        .into_iter()
+        .for_each(|slot| relativize(slot, dir));
 
     let mut temp = NamedTempFile::new_in(dir).map_err(|error| describe(dir, error))?;
     write_archive(temp.as_file_mut(), &manifest, &files).map_err(|error| describe(path, error))?;
@@ -144,7 +182,10 @@ pub fn load(path: &Path, cache: &Path) -> Result<Session> {
             .into_iter()
             .for_each(|slot| resolve(slot, dir));
     }
-    resolve(&mut session.convert.output, dir);
+    session
+        .linked_mut()
+        .into_iter()
+        .for_each(|slot| resolve(slot, dir));
     Ok(session)
 }
 
@@ -297,6 +338,12 @@ mod tests {
                 }],
                 plotted: true,
             },
+            analyze: AnalyzeState {
+                config: Some(dir.join("config.toml")),
+                input: Some(dir.join("data/run.toml")),
+                generate: true,
+                report: Some(PathBuf::from("/elsewhere/report")),
+            },
         }
     }
 
@@ -335,6 +382,28 @@ mod tests {
         assert_eq!(stored.convert.input, Some(PathBuf::from("data/run.res")));
         assert_eq!(stored.inspect.file, Some(PathBuf::from("run.h5")));
         assert_eq!(stored.convert.output, Some(PathBuf::from("/elsewhere/out")));
+        assert_eq!(stored.analyze.config, Some(PathBuf::from("config.toml")));
+        assert_eq!(stored.analyze.input, Some(PathBuf::from("data/run.toml")));
+        assert_eq!(
+            stored.analyze.report,
+            Some(PathBuf::from("/elsewhere/report"))
+        );
+    }
+
+    #[test]
+    fn loads_sessions_saved_without_analyze() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.clab");
+        let mut manifest = serde_json::to_value(session(dir.path(), false)).unwrap();
+        manifest.as_object_mut().unwrap().remove("analyze");
+        write_archive_with(
+            &path,
+            &[(MANIFEST, &serde_json::to_vec(&manifest).unwrap())],
+        );
+
+        let loaded = load(&path, &dir.path().join("cache")).unwrap();
+
+        assert_eq!(loaded.analyze, AnalyzeState::default());
     }
 
     #[test]

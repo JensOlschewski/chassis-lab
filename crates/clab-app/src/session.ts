@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
+import type { AnalyzeState } from "./analyze";
 import type { ConvertState } from "./convert";
 import type { InspectState } from "./inspect";
 
@@ -15,6 +16,7 @@ interface SessionFile {
   embed: boolean;
   convert: ConvertState;
   inspect: InspectState;
+  analyze: AnalyzeState;
 }
 
 const FILTERS = [{ name: "ChassisLab session", extensions: ["clab"] }];
@@ -24,6 +26,7 @@ const BLANK: SessionFile = {
   embed: false,
   convert: { input: null, domain: "svc", test: null, output: null, force: false },
   inspect: { file: null, curves: [], plotted: false },
+  analyze: { config: null, input: null, generate: true, report: null },
 };
 
 const baseName = (path: string) => path.split(/[\\/]/).pop()!;
@@ -32,7 +35,11 @@ const baseName = (path: string) => path.split(/[\\/]/).pop()!;
  * Owns the current session file and its dirty state. A session is dirty when
  * the panes no longer serialize to what was last saved or opened.
  */
-export function setupSession(convert: Pane<ConvertState>, inspect: Pane<InspectState>): void {
+export function setupSession(
+  convert: Pane<ConvertState>,
+  inspect: Pane<InspectState>,
+  analyze: Pane<AnalyzeState>,
+): void {
   const name = document.querySelector<HTMLElement>("#session-name")!;
   const embed = document.querySelector<HTMLInputElement>("#session-embed")!;
 
@@ -46,6 +53,7 @@ export function setupSession(convert: Pane<ConvertState>, inspect: Pane<InspectS
     embed: embed.checked,
     convert: convert.get(),
     inspect: inspect.get(),
+    analyze: analyze.get(),
   });
   const isDirty = () => JSON.stringify(collect()) !== saved;
 
@@ -73,6 +81,7 @@ export function setupSession(convert: Pane<ConvertState>, inspect: Pane<InspectS
   async function apply(session: SessionFile): Promise<void> {
     embed.checked = session.embed;
     convert.set(session.convert);
+    analyze.set(session.analyze);
     await inspect.set(session.inspect);
   }
 
