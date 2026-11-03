@@ -17,9 +17,9 @@ function showPane(id: string): void {
 navItems.forEach((item) => item.addEventListener("click", () => showPane(item.dataset.pane!)));
 
 const inspect = setupInspect();
-setupAnalyze((directory, test) => {
+const analyze = setupAnalyze((directory, test) => {
   // Plotly needs a visible container to size the chart.
   showPane("inspect");
   void inspect.show(directory, test);
 });
-setupSession(setupConvert(), inspect);
+setupSession(setupConvert(), inspect, analyze);
