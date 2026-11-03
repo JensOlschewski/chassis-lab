@@ -155,6 +155,12 @@ button.primary {
 .curve select[name=panel] { flex: none; }
 .swatch { flex: none; width: 10px; height: 10px; border-radius: 50%; }
 #add-curve { align-self: flex-start; }
+legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
+.inputs { display: flex; flex-direction: column; gap: 8px; }
+.input-row { display: flex; gap: 8px; align-items: center; }
+.input-row input { flex: 1; min-width: 0; }
+.input-row .role { flex: none; width: 7.5em; color: var(--muted); font-size: 0.8125rem; }
+#add-input { align-self: flex-start; }
 .plot { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
 .plot[hidden] { display: none; }
 .chart { flex: 1; min-width: 0; height: 480px; border: 1px solid var(--text); border-radius: var(--radius); }
@@ -191,4 +197,12 @@ button.primary {
 .metrics td:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
 .metrics td:nth-child(3) { color: var(--muted); }
 .metrics .missing { color: var(--error); }
+.table-scroll { overflow-x: auto; }
+.comparison th { padding: 3px 12px; color: var(--muted); font-weight: 500; text-align: right; white-space: nowrap; }
+.comparison td:nth-child(n+2) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.comparison td:nth-child(3) { color: inherit; }
+.comparison td:last-child { text-align: left; color: var(--muted); }
+.comparison td.delta { color: var(--muted); }
+.comparison td.missing,
+.comparison td.failed { color: var(--error); }
 .warnings { margin: 8px 0; padding: 0 12px 0 32px; color: var(--muted); font-size: 0.8125rem; }

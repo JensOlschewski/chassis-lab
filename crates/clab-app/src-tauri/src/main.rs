@@ -33,7 +33,7 @@ async fn run_analyze(
     request: analyze::AnalyzeRequest,
     on_line: Channel<String>,
 ) -> Result<worker::Outcome, String> {
-    worker::run_streaming(&app, request.args(), move |line| {
+    worker::run_streaming(&app, request.args()?, move |line| {
         let _ = on_line.send(line);
     })
     .await

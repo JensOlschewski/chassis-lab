@@ -132,7 +132,7 @@
       </section>
       <section id="analyze" class="pane" hidden>
         <h2>Analyze</h2>
-        <p class="hint">Compute metrics from a run manifest or converted file.</p>
+        <p class="hint">Compute metrics from a run manifest or converted file. Add more inputs to compare them with the first.</p>
         <form id="analyze-form">
           <label>
             Config
@@ -141,12 +141,13 @@
               <button type="button" data-browse="file" data-target="config" data-extensions="toml">Browse…</button>
             </span>
           </label>
-          <label>
-            Input
-            <span class="path-row">
-              <input name="input" required placeholder="run .toml or .h5" />
-              <button type="button" data-browse="file" data-target="input" data-extensions="toml,h5,hdf5">Browse…</button>
-            </span>
+          <fieldset>
+            <legend>Inputs</legend>
+            <div id="analyze-inputs" class="inputs"></div>
+            <button type="button" id="add-input">+ Add input to compare</button>
+          </fieldset>
+          <label class="check" id="analyze-tolerances" hidden>
+            <input type="checkbox" name="tolerances" /> Check tolerances from config
           </label>
           <label class="check"><input type="checkbox" name="generate" checked /> Generate report</label>
           <fieldset id="analyze-report">

@@ -51,31 +51,54 @@ export interface ReportStatus {
   open?: () => void;
 }
 
-/** A foldable card, always closed at first; its badges show whether it needs a look. */
-export function renderSection(section: Section, report?: ReportStatus): HTMLDetailsElement {
-  const missing = section.metrics.some((metric) => metric.value === null);
-  const state = missing ? "error" : section.warnings.length > 0 ? "warning" : "ok";
+/** One candidate's value of a compared metric, as printed by `clab compare --json`. */
+export interface CandidateValue {
+  value: number | null;
+  difference: number | null;
+  /** `passed`, `failed`, `missing`, `informational` (no tolerance applied), or `not compared`. */
+  status: string;
+}
 
+export interface ComparedMetric {
+  name: string;
+  unit: string;
+  baseline: number | null;
+  allowed_difference: number | null;
+  candidates: CandidateValue[];
+}
+
+export interface ComparisonSection {
+  title: string;
+  metrics: ComparedMetric[];
+  warnings: string[];
+  domain?: string;
+  test?: string | null;
+}
+
+/** Names arrive qualified (`svc::front_left_mass_kg`); the card title already says where. */
+const shortName = (name: string) => name.split("::").at(-1)!;
+
+const valueCell = (row: HTMLTableRowElement, value: number | null, unit: string) => {
+  const cell = row.insertCell();
+  cell.textContent = formatValue(value, unit);
+  cell.className = value === null ? "missing" : "num";
+  if (value !== null) cell.title = String(value);
+  return cell;
+};
+
+/** Card shell shared by analysis and comparison results; `body` goes between title and warnings. */
+function renderCard(
+  section: { title: string; warnings: string[] },
+  result: { label: string; state: BadgeState },
+  body: HTMLElement,
+  report?: ReportStatus,
+): HTMLDetailsElement {
   const card = element("details", "", "section");
   const summary = element("summary", "");
   summary.append(element("span", section.title));
   if (report) summary.append(labeled("Report", report.badge));
-  summary.append(labeled("Analysis", createBadge(state)));
-  card.append(summary);
-
-  const table = element("table", "", "metrics");
-  for (const metric of section.metrics) {
-    const row = table.insertRow();
-    row.dataset.metric = metric.name.split("::").at(-1);
-    // Names arrive qualified (`svc::front_left_mass_kg`); the card title already says where.
-    row.insertCell().textContent = metric.name.split("::").at(-1)!;
-    const value = row.insertCell();
-    value.textContent = formatValue(metric.value, metric.unit);
-    value.className = metric.value === null ? "missing" : "num";
-    if (metric.value !== null) value.title = String(metric.value);
-    row.insertCell().textContent = metric.value === null ? "" : metric.unit;
-  }
-  card.append(table);
+  summary.append(labeled(result.label, createBadge(result.state)));
+  card.append(summary, body);
 
   if (section.warnings.length > 0) {
     const list = element("ul", "", "warnings");
@@ -93,4 +116,79 @@ export function renderSection(section: Section, report?: ReportStatus): HTMLDeta
     card.append(location);
   }
   return card;
+}
+
+/** A foldable card, always closed at first; its badges show whether it needs a look. */
+export function renderSection(section: Section, report?: ReportStatus): HTMLDetailsElement {
+  const missing = section.metrics.some((metric) => metric.value === null);
+  const state = missing ? "error" : section.warnings.length > 0 ? "warning" : "ok";
+
+  const table = element("table", "", "metrics");
+  for (const metric of section.metrics) {
+    const row = table.insertRow();
+    row.dataset.metric = shortName(metric.name);
+    row.insertCell().textContent = shortName(metric.name);
+    valueCell(row, metric.value, metric.unit);
+    row.insertCell().textContent = metric.value === null ? "" : metric.unit;
+  }
+  return renderCard(section, { label: "Analysis", state }, table, report);
+}
+
+const signed = (value: number, unit: string) => `${value > 0 ? "+" : ""}${formatValue(value, unit)}`;
+
+/**
+ * A comparison card: the baseline value, then each candidate's value and difference.
+ * `candidates` labels the columns, in the order the inputs were given.
+ */
+export function renderComparison(
+  section: ComparisonSection,
+  candidates: string[],
+  report?: ReportStatus,
+): HTMLDetailsElement {
+  const statuses = section.metrics.flatMap((metric) => metric.candidates.map((candidate) => candidate.status));
+  const state: BadgeState = statuses.some((status) => status === "failed" || status === "missing")
+    ? "error"
+    : statuses.includes("not compared") || section.warnings.length > 0
+      ? "warning"
+      : "ok";
+
+  const table = element("table", "", "metrics comparison");
+  const head = table.createTHead().insertRow();
+  head.append(element("th"), element("th", "Baseline"));
+  candidates.forEach((label, index) => {
+    const th = element("th", `Candidate ${index + 1}`);
+    th.colSpan = 2;
+    th.title = label;
+    head.append(th);
+  });
+  head.append(element("th"));
+
+  const body = table.createTBody();
+  for (const metric of section.metrics) {
+    const row = body.insertRow();
+    row.dataset.metric = shortName(metric.name);
+    row.insertCell().textContent = shortName(metric.name);
+    valueCell(row, metric.baseline, metric.unit);
+    candidates.forEach((_, index) => {
+      const { value, difference, status } = metric.candidates[index] ?? { value: null, difference: null, status: "missing" };
+      if (status === "not compared") {
+        const cell = row.insertCell();
+        cell.textContent = "not compared";
+        cell.colSpan = 2;
+        cell.className = "missing";
+        return;
+      }
+      valueCell(row, value, metric.unit);
+      const delta = row.insertCell();
+      delta.textContent = difference === null ? "" : signed(difference, metric.unit);
+      delta.className = status === "failed" ? "delta failed" : "delta";
+      const allowed = metric.allowed_difference === null ? "" : ` (allowed ±${metric.allowed_difference})`;
+      delta.title = `${status}${allowed}`;
+    });
+    row.insertCell().textContent = metric.unit;
+  }
+
+  const scroll = element("div", "", "table-scroll");
+  scroll.append(table);
+  return renderCard(section, { label: "Comparison", state }, scroll, report);
 }
