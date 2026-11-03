@@ -275,7 +275,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         &warnings,
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
-    let progress = ReportProgress::new(args.output.is_some() && !args.json);
+    let progress = ReportProgress::new(args.output.is_some(), args.json);
     let plot_tests = [KncTest::Vertical, KncTest::Roll]
         .into_iter()
         .filter(|test| args.output.is_some() && baseline.domains.contains_key(knc_key(*test)))
@@ -384,7 +384,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         inputs.extend(baseline.sources.iter().map(PathBuf::as_path));
         inputs.extend(args.candidates.iter().map(PathBuf::as_path));
         inputs.extend(candidate_sources.iter().map(PathBuf::as_path));
-        progress.phase("Writing report bundle…");
+        progress.phase("Writing report bundle", "Writing report bundle…");
         write_report_bundle(output, files, args.force, &inputs)?;
         progress.done("Writing report bundle");
         progress.finish();

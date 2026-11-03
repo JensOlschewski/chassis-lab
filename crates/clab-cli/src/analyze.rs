@@ -205,7 +205,7 @@ fn write_combined_run(
     let Some(output) = &args.output else {
         return Ok(());
     };
-    let progress = ReportProgress::new(!args.json);
+    let progress = ReportProgress::new(true, args.json);
     let mut domains = Vec::new();
     let mut metrics = Vec::new();
     let mut csv = "run,domain,test,metric,unit,value\n".to_owned();
@@ -299,7 +299,7 @@ fn write_combined_run(
         .iter()
         .map(|(name, contents)| (name.as_str(), contents.clone()))
         .collect::<Vec<_>>();
-    progress.phase("Writing report bundle…");
+    progress.phase("Writing report bundle", "Writing report bundle…");
     write_report_bundle(output, files, args.force, &inputs)?;
     progress.done("Writing report bundle");
     progress.finish();
@@ -798,7 +798,7 @@ fn write_knc(
     let Some(output) = &args.output else {
         return Ok(());
     };
-    let progress = ReportProgress::new(!args.json);
+    let progress = ReportProgress::new(true, args.json);
     let mut bundle = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
@@ -812,7 +812,10 @@ fn write_knc(
         bundle["inputs"]["run"] = provenance(run)?;
     }
     let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
-    progress.phase(format!("Generating {} plots…", test.title()));
+    progress.phase(
+        &format!("{} plots", test.title()),
+        format!("Generating {} plots…", test.title()),
+    );
     let plots = knc_plots(
         config,
         test,
@@ -853,7 +856,7 @@ fn write_knc(
     if let Some(run) = run {
         inputs.push(run);
     }
-    progress.phase("Writing report bundle…");
+    progress.phase("Writing report bundle", "Writing report bundle…");
     write_report_bundle(output, files, args.force, &inputs)?;
     progress.done("Writing report bundle");
     progress.finish();

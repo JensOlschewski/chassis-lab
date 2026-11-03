@@ -803,6 +803,41 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         assert_eq!(detail["case"], report["case"]);
         assert_eq!(detail["inputs"]["run"], report["inputs"]["run"]);
     }
+
+    let result = clab()
+        .args([
+            "analyze",
+            "--json",
+            "--force",
+            "-r",
+            output.to_str().unwrap(),
+            config.to_str().unwrap(),
+            run.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let progress: Vec<(String, String)> = String::from_utf8_lossy(&result.stdout)
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter_map(|line| {
+            let event = line.get("progress")?;
+            Some((
+                event["phase"].as_str().unwrap().to_owned(),
+                event["state"].as_str().unwrap().to_owned(),
+            ))
+        })
+        .collect();
+    let event = |phase: &str, state: &str| (phase.to_owned(), state.to_owned());
+    assert!(progress.contains(&event("KnC Vertical plots", "start")));
+    assert!(progress.contains(&event("KnC Vertical plots", "done")));
+    assert_eq!(
+        &progress[progress.len() - 2..],
+        [
+            event("Writing report bundle", "start"),
+            event("Writing report bundle", "done")
+        ]
+    );
 }
 
 #[test]
