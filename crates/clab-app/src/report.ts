@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { setupBrowse } from "./browse";
 import { setupTools } from "./chart";
 import logo from "./assets/flb-logo.svg?url";
 import { Plot, PlotsFile, drawReportPlot } from "./reportplot";
@@ -52,34 +51,24 @@ export function sectionsFromReport(report: ReportFile): Section[] {
   return sections;
 }
 
-export function setupReport() {
-  const form = document.querySelector<HTMLFormElement>("#report-form")!;
-  const status = document.querySelector<HTMLElement>("#report-status")!;
+/** The report body of the Inspect pane: cards and plots of a report folder. */
+export function setupReport(show: (message: string, ok?: boolean) => void) {
   const sectionsRoot = document.querySelector<HTMLElement>("#report-sections")!;
   const viewer = document.querySelector<HTMLElement>("#report-viewer")!;
   const picker = document.querySelector<HTMLSelectElement>("#report-plot")!;
   const chart = document.querySelector<HTMLElement>("#report-chart")!;
-  const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
-  const folder = form.elements.namedItem("folder") as HTMLInputElement;
 
-  let plots: Plot[] = [];
+  let plots: { plot: Plot; test: string }[] = [];
   let axes: string[] = [];
-
-  const show = (message: string, ok = true) => {
-    status.textContent = message;
-    status.classList.toggle("error", !ok);
-  };
 
   const selectedTool = () => document.querySelector<HTMLElement>("#report-tools [aria-pressed=true]")?.dataset.tool;
   const draw = async () => {
-    const plot = plots[Number(picker.value)];
-    if (plot) axes = await drawReportPlot(chart, plot, logo, selectedTool());
+    const entry = plots[Number(picker.value)];
+    if (entry) axes = await drawReportPlot(chart, entry.plot, logo, selectedTool());
   };
 
-  setupBrowse(form);
   setupTools(chart, document.querySelector<HTMLElement>("#report-tools")!, () => axes, show);
   picker.addEventListener("change", () => draw().catch((error) => show(String(error), false)));
-  folder.addEventListener("change", () => form.requestSubmit());
   let resizing: number | undefined;
   window.addEventListener("resize", () => {
     window.clearTimeout(resizing);
@@ -98,7 +87,7 @@ export function setupReport() {
         group.label = titleOf(domain);
         for (const plot of file.plots) {
           group.append(new Option(plot.title, String(plots.length)));
-          plots.push(plot);
+          plots.push({ plot, test: domain.test! });
         }
         groups.push(group);
       } catch {
@@ -109,24 +98,27 @@ export function setupReport() {
     return missing;
   }
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    submit.disabled = true;
-    sectionsRoot.replaceChildren();
-    viewer.hidden = true;
-    show("Opening…");
-    try {
-      const directory = folder.value;
-      const report = JSON.parse(await readFile(directory, "report.json")) as ReportFile;
-      sectionsRoot.replaceChildren(...sectionsFromReport(report).map((section) => renderSection(section)));
-      const missing = await loadPlots(directory, report.domains);
-      viewer.hidden = plots.length === 0;
-      show(missing.length > 0 ? `No plot data for ${missing.join(", ")}; run Analyze with a report folder again.` : "");
-      if (plots.length > 0) await draw();
-    } catch (error) {
-      show(`Failed to open report: ${error}`, false);
-    } finally {
-      submit.disabled = false;
-    }
-  });
+  return {
+    clear() {
+      sectionsRoot.replaceChildren();
+      viewer.hidden = true;
+    },
+    /** Shows the report in `directory`, starting at the plots of `test` if given. The pane must be visible. */
+    async open(directory: string, test?: string) {
+      this.clear();
+      show("Opening…");
+      try {
+        const report = JSON.parse(await readFile(directory, "report.json")) as ReportFile;
+        sectionsRoot.replaceChildren(...sectionsFromReport(report).map((section) => renderSection(section)));
+        const missing = await loadPlots(directory, report.domains);
+        viewer.hidden = plots.length === 0;
+        show(missing.length > 0 ? `No plot data for ${missing.join(", ")}; run Analyze with a report folder again.` : "");
+        const first = plots.findIndex((entry) => entry.test === test);
+        if (first >= 0) picker.value = String(first);
+        if (plots.length > 0) await draw();
+      } catch (error) {
+        show(`Failed to open report: ${error}`, false);
+      }
+    },
+  };
 }

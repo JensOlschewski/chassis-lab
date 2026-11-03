@@ -45,10 +45,56 @@ fn save_image(path: PathBuf, bytes: Vec<u8>) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|error| format!("{}: {error}", path.display()))
 }
 
-/// Whether `path` exists, so the app can confirm before a report replaces a folder.
+/// What a path the user typed points at.
+#[derive(serde::Serialize, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+enum PathKind {
+    Missing,
+    /// A file, opened as signals.
+    Signals,
+    /// A folder with a `report.json`.
+    Report,
+    /// Any other folder.
+    Folder,
+}
+
+fn kind_of(path: &std::path::Path) -> PathKind {
+    if path.is_dir() {
+        if path.join("report.json").is_file() {
+            PathKind::Report
+        } else {
+            PathKind::Folder
+        }
+    } else if path.is_file() {
+        PathKind::Signals
+    } else {
+        PathKind::Missing
+    }
+}
+
+/// Tells Inspect whether a path is a report or signals, and Analyze whether a report folder exists.
 #[tauri::command]
-fn path_exists(path: PathBuf) -> bool {
-    worker::clean_path(&path).exists()
+fn path_kind(path: PathBuf) -> PathKind {
+    kind_of(&worker::clean_path(&path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_paths() {
+        let dir = std::env::temp_dir().join(format!("clab-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("run.h5");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(kind_of(&file), PathKind::Signals);
+        assert_eq!(kind_of(&dir), PathKind::Folder);
+        assert_eq!(kind_of(&dir.join("none")), PathKind::Missing);
+        std::fs::write(dir.join("report.json"), "{}").unwrap();
+        assert_eq!(kind_of(&dir), PathKind::Report);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
 
 /// Reads one file of an opened report folder; see `report::read_file` for the allowed names.
@@ -90,7 +136,7 @@ fn main() {
             run_inspect,
             run_analyze,
             save_image,
-            path_exists,
+            path_kind,
             read_report_file,
             save_session,
             load_session

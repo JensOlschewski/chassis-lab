@@ -32,11 +32,15 @@ interface ReportBadge {
   phases: string[];
 }
 
-export function setupAnalyze() {
+/** `showReport` opens a report folder in Inspect, at the plots of `test` if given. */
+export function setupAnalyze(showReport: (directory: string, test?: string) => void) {
   const form = document.querySelector<HTMLFormElement>("#analyze-form")!;
   const status = document.querySelector<HTMLElement>("#analyze-status")!;
   const sections = document.querySelector<HTMLElement>("#analyze-sections")!;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
+  const reportButton = document.querySelector<HTMLButtonElement>("#analyze-show-report")!;
+  let shown: string | null = null;
+  reportButton.addEventListener("click", () => shown && showReport(shown));
 
   const show = (message: string, ok: boolean) => {
     status.textContent = message;
@@ -73,7 +77,7 @@ export function setupAnalyze() {
     if (!generate.checked) return { report: null, force: false };
     const chosen = clean(folder.value);
     const report = chosen || join(parentOf(input), "report");
-    if (await invoke<boolean>("path_exists", { path: report })) {
+    if ((await invoke<string>("path_kind", { path: report })) !== "missing") {
       const replace = await ask(`The report folder already exists:\n${report}\n\nIts contents will be replaced.`, {
         title: "Replace report folder?",
         kind: "warning",
@@ -107,6 +111,8 @@ export function setupAnalyze() {
       const { report, force } = confirmed;
 
       sections.replaceChildren();
+      sections.classList.remove("finished");
+      reportButton.hidden = true;
       phaseStates.clear();
       reportBadges.length = 0;
       show("Analyzing…", true);
@@ -118,7 +124,11 @@ export function setupAnalyze() {
           if (report) {
             const badge = createBadge("running");
             reportBadges.push({ badge, phases: knc ? [`${section.title} plots`, BUNDLE_PHASE] : [BUNDLE_PHASE] });
-            status = { badge, plots: knc ? join(report, "plots", "knc", String(section.test)) : undefined };
+            status = {
+              badge,
+              plots: knc ? join(report, "plots", "knc", String(section.test)) : undefined,
+              open: knc ? () => showReport(report, String(section.test)) : undefined,
+            };
           }
           sections.append(renderSection(section, status));
         }
@@ -129,6 +139,11 @@ export function setupAnalyze() {
       });
       const { ok, message } = describe(outcome);
       settlePhases(ok);
+      if (ok && report) {
+        shown = report;
+        sections.classList.add("finished");
+        reportButton.hidden = false;
+      }
       show(ok ? message : (errorLine(outcome.stderr) ?? message), ok);
     } catch (error) {
       settlePhases(false);

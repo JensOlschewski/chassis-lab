@@ -161,6 +161,10 @@ button.primary {
 .report-chart { border-color: var(--border); background: #fff; overflow: hidden; }
 #report-viewer { margin-top: 16px; }
 #report-viewer[hidden] { display: none; }
+#inspect-signals[hidden], #inspect-report[hidden] { display: none; }
+#analyze-show-report { align-self: flex-start; margin-top: 8px; }
+#analyze-sections:not(.finished) .show-plots { display: none; }
+.show-plots { margin-left: 12px; padding: 2px 8px; font-size: 0.75rem; }
 .tools { display: flex; flex-direction: column; gap: 6px; }
 .tools button[aria-pressed=true] { border-color: var(--text); }
 .info { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font-size: 0.8125rem; }

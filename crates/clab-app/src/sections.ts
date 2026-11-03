@@ -47,6 +47,8 @@ const labeled = (label: string, badge: HTMLElement) => {
 export interface ReportStatus {
   badge: HTMLElement;
   plots?: string;
+  /** Opens this section's plots; its button shows once the run succeeded. */
+  open?: () => void;
 }
 
 /** A foldable card, always closed at first; its badges show whether it needs a look. */
@@ -79,6 +81,15 @@ export function renderSection(section: Section, report?: ReportStatus): HTMLDeta
     section.warnings.forEach((warning) => list.append(element("li", warning)));
     card.append(list);
   }
-  if (report?.plots) card.append(element("p", `Plots: ${report.plots}`, "location"));
+  if (report?.plots) {
+    const location = element("p", `Plots: ${report.plots}`, "location");
+    if (report.open) {
+      const button = element("button", "Show plots", "show-plots");
+      button.type = "button";
+      button.addEventListener("click", report.open);
+      location.append(button);
+    }
+    card.append(location);
+  }
   return card;
 }

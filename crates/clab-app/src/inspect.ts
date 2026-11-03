@@ -1,5 +1,7 @@
+import { invoke } from "@tauri-apps/api/core";
 import { setupBrowse } from "./browse";
 import { AXIS, Curve, SignalInfo, Signals, Summary, drawChart, labelOf, setupTools } from "./chart";
+import { setupReport } from "./report";
 import { describe, errorLine, run } from "./worker";
 
 interface Choice {
@@ -43,7 +45,9 @@ function createSelect(options: Choice[], selected: string): HTMLSelectElement {
 }
 
 export function setupInspect() {
-  const form = document.querySelector<HTMLFormElement>("#inspect-form")!;
+  const pathForm = document.querySelector<HTMLFormElement>("#inspect-form")!;
+  const form = document.querySelector<HTMLFormElement>("#inspect-signals")!;
+  const reportRoot = document.querySelector<HTMLElement>("#inspect-report")!;
   const status = document.querySelector<HTMLElement>("#inspect-status")!;
   const chart = document.querySelector<HTMLElement>("#inspect-chart")!;
   const plot = document.querySelector<HTMLElement>("#inspect-plot")!;
@@ -51,7 +55,7 @@ export function setupInspect() {
   const info = document.querySelector<HTMLElement>("#inspect-info")!;
   const curvesRoot = document.querySelector<HTMLElement>("#curves")!;
   const addButton = document.querySelector<HTMLButtonElement>("#add-curve")!;
-  const file = form.elements.namedItem("file") as HTMLInputElement;
+  const file = pathForm.elements.namedItem("file") as HTMLInputElement;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
 
   let choices: Choice[] = [];
@@ -61,6 +65,14 @@ export function setupInspect() {
   const show = (message: string, ok = true) => {
     status.textContent = message;
     status.classList.toggle("error", !ok);
+  };
+
+  const report = setupReport(show);
+
+  /** Only one body shows at a time: signals form and chart, or the report. */
+  const showBody = (body: "signals" | "report" | "none") => {
+    form.hidden = body !== "signals";
+    reportRoot.hidden = body !== "report";
   };
 
   const showInfo = (summary: Summary) => {
@@ -169,7 +181,7 @@ export function setupInspect() {
       plot ? [{ x, y, panel, color: colorFor(index) }] : [],
     );
 
-  setupBrowse(form);
+  setupBrowse(pathForm);
   setupTools(chart, document.querySelector<HTMLElement>("#inspect-tools")!, () => axes, show);
 
   addButton.addEventListener("click", () => {
@@ -178,8 +190,9 @@ export function setupInspect() {
     changed();
   });
 
-  /** Drops the previous file's rows and disables plotting until signals load. */
+  /** Drops the previous file's rows, or report, and disables plotting until signals load. */
   const clear = () => {
+    report.clear();
     plotted = false;
     plot.hidden = true;
     submit.disabled = true;
@@ -191,6 +204,7 @@ export function setupInspect() {
   /** Lists the file's signals and starts with one default row; false if that failed. */
   async function loadSignals(): Promise<boolean> {
     clear();
+    showBody("signals");
     show("Loading signals…");
     try {
       const { summary, signals } = await inspect<{ summary: Summary; signals: SignalInfo[] }>(file.value, []);
@@ -211,8 +225,21 @@ export function setupInspect() {
     }
   }
 
+  /** Opens whatever the field points at: a signals file or a report folder. */
+  async function open(test?: string): Promise<void> {
+    clear();
+    showBody("none");
+    show("");
+    const kind = await invoke<string>("path_kind", { path: file.value });
+    if (kind === "signals") await loadSignals();
+    else if (kind === "report") {
+      showBody("report");
+      await report.open(file.value, test);
+    } else show(kind === "folder" ? "Not a report folder: report.json is missing" : "Not found", false);
+  }
+
   file.addEventListener("change", async () => {
-    await loadSignals();
+    await open();
     changed();
   });
 
@@ -246,6 +273,12 @@ export function setupInspect() {
   });
 
   return {
+    /** Shows a report folder (or signals file) from elsewhere in the app; the pane must be visible. */
+    async show(path: string, test?: string): Promise<void> {
+      file.value = path;
+      await open(test);
+      changed();
+    },
     get: (): InspectState => ({ file: file.value.trim() || null, curves: savedCurves(), plotted }),
     /** A file that fails to load keeps its path; the error is shown as for a manual pick. */
     async set(state: InspectState): Promise<void> {
@@ -253,6 +286,7 @@ export function setupInspect() {
       footer.textContent = "";
       if (!state.file) {
         clear();
+        showBody("none");
         return show("");
       }
       if (!(await loadSignals()) || state.curves.length === 0) return;
