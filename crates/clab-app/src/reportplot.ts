@@ -31,6 +31,8 @@ export interface Plot {
   y_limits: [number, number] | null;
   footer: string;
   gradient: Gradient | null;
+  /** Report metrics this plot shows, highlighted in the table. */
+  metrics?: string[];
   panels: PlotPanel[];
 }
 

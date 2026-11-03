@@ -164,6 +164,7 @@ button.primary {
 #inspect-signals[hidden], #inspect-report[hidden] { display: none; }
 #analyze-show-report { align-self: flex-start; margin-top: 8px; }
 #analyze-sections:not(.finished) .show-plots { display: none; }
+.metrics tr.highlight { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .show-plots { margin-left: 12px; padding: 2px 8px; font-size: 0.75rem; }
 .tools { display: flex; flex-direction: column; gap: 6px; }
 .tools button[aria-pressed=true] { border-color: var(--text); }

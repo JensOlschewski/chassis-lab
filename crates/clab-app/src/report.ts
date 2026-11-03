@@ -64,7 +64,19 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
   const selectedTool = () => document.querySelector<HTMLElement>("#report-tools [aria-pressed=true]")?.dataset.tool;
   const draw = async () => {
     const entry = plots[Number(picker.value)];
-    if (entry) axes = await drawReportPlot(chart, entry.plot, logo, selectedTool());
+    if (!entry) return;
+    highlight(entry.plot.metrics ?? []);
+    axes = await drawReportPlot(chart, entry.plot, logo, selectedTool());
+  };
+
+  /** Marks the table rows of `metrics`, opening their cards. */
+  const highlight = (metrics: string[]) => {
+    sectionsRoot.querySelectorAll("tr.highlight").forEach((row) => row.classList.remove("highlight"));
+    for (const metric of metrics) {
+      const row = sectionsRoot.querySelector<HTMLElement>(`tr[data-metric="${metric}"]`);
+      row?.classList.add("highlight");
+      row?.closest("details")?.setAttribute("open", "");
+    }
   };
 
   setupTools(chart, document.querySelector<HTMLElement>("#report-tools")!, () => axes, show);
