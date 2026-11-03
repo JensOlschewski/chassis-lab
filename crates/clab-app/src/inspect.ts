@@ -1,7 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
 import { setupBrowse } from "./browse";
-import { AXIS, Curve, SignalInfo, Signals, Summary, drawChart, labelOf } from "./chart";
+import { AXIS, Curve, SignalInfo, Signals, Summary, drawChart, labelOf, setupTools } from "./chart";
 import { describe, errorLine, run } from "./worker";
 
 interface Choice {
@@ -42,55 +40,6 @@ function createSelect(options: Choice[], selected: string): HTMLSelectElement {
   select.replaceChildren(...options.map(({ value, text }) => new Option(text, value)));
   select.value = selected;
   return select;
-}
-
-/** Buttons beside the chart replace Plotly's own toolbar. */
-function setupTools(
-  chart: HTMLElement,
-  tools: HTMLElement,
-  axes: () => string[],
-  report: (message: string, ok?: boolean) => void,
-): void {
-  const buttons = [...tools.querySelectorAll<HTMLButtonElement>("button")];
-  tools.addEventListener("click", async (event) => {
-    const button = (event.target as HTMLElement).closest("button");
-    if (!button) return;
-    const { default: Plotly } = await import("plotly.js-basic-dist-min");
-    const tool = button.dataset.tool!;
-    if (tool === "export") {
-      try {
-        const path = await save({ defaultPath: "plot.png", filters: [{ name: "PNG", extensions: ["png"] }] });
-        if (!path) return;
-        // Export on white with dark text, whatever the app theme is.
-        const paint = (background: string, text: string) =>
-          Plotly.relayout(chart, {
-            paper_bgcolor: background,
-            plot_bgcolor: background,
-            "font.color": text,
-            ...Object.fromEntries(axes().map((axis) => [`${axis}.linecolor`, text])),
-          });
-        await paint("white", "black");
-        let image: string;
-        try {
-          image = await Plotly.toImage(chart, { format: "png", scale: 2 });
-        } finally {
-          await paint("transparent", getComputedStyle(document.body).color);
-        }
-        const bytes = new Uint8Array(await (await fetch(image)).arrayBuffer());
-        await invoke("save_image", { path, bytes: Array.from(bytes) });
-        report(`Saved ${path}`);
-      } catch (error) {
-        report(String(error), false);
-      }
-      return;
-    }
-    if (tool === "fit") {
-      await Plotly.relayout(chart, Object.fromEntries(axes().map((axis) => [`${axis}.autorange`, true])));
-      return;
-    }
-    await Plotly.relayout(chart, { dragmode: tool });
-    buttons.forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
-  });
 }
 
 export function setupInspect() {
