@@ -13,7 +13,6 @@
       <button class="nav-item" data-pane="convert" aria-current="page">Convert</button>
       <button class="nav-item" data-pane="inspect">Inspect</button>
       <button class="nav-item" data-pane="analyze">Analyze</button>
-      <button class="nav-item" data-pane="report">Report</button>
       <button class="nav-item" data-pane="compare" disabled>Compare <small>soon</small></button>
 
       <section class="session" aria-label="Session">
@@ -78,35 +77,58 @@
       </section>
       <section id="inspect" class="pane wide" hidden>
         <h2>Inspect</h2>
-        <p class="hint">Plot raw signals from a converted HDF5 file.</p>
+        <p class="hint">Plot raw signals from a converted HDF5 file, or browse the metrics and plots of a report folder.</p>
         <form id="inspect-form">
           <label>
-            Input file
+            Input file or report folder
             <span class="path-row">
-              <input name="file" required placeholder=".h5 or .hdf5" />
-              <button type="button" data-browse="file" data-target="file">Browse…</button>
+              <input name="file" required placeholder=".h5 or .hdf5 file, or a report folder" />
+              <button type="button" data-browse="file" data-target="file">File…</button>
+              <button type="button" data-browse="directory" data-target="file">Folder…</button>
             </span>
             <small class="embedded-note" data-embedded-for="file" hidden></small>
           </label>
+        </form>
+        <p id="inspect-status" class="status" role="status"></p>
+
+        <form id="inspect-signals" hidden>
           <dl id="inspect-info" class="info" hidden></dl>
 
           <div id="curves" class="curves"></div>
           <button type="button" id="add-curve" disabled>+ Add curve</button>
 
           <button type="submit" class="primary" disabled>Plot</button>
+
+          <div id="inspect-plot" class="plot" hidden>
+            <div id="inspect-chart" class="chart"></div>
+            <div id="inspect-tools" class="tools">
+              <button type="button" data-tool="zoom" aria-pressed="true">Zoom</button>
+              <button type="button" data-tool="pan" aria-pressed="false">Pan</button>
+              <button type="button" data-tool="fit">Fit</button>
+              <button type="button" data-tool="export">Export</button>
+            </div>
+          </div>
+          <p id="inspect-footer" class="footer"></p>
         </form>
 
-        <p id="inspect-status" class="status" role="status"></p>
-        <div id="inspect-plot" class="plot" hidden>
-          <div id="inspect-chart" class="chart"></div>
-          <div id="inspect-tools" class="tools">
-            <button type="button" data-tool="zoom" aria-pressed="true">Zoom</button>
-            <button type="button" data-tool="pan" aria-pressed="false">Pan</button>
-            <button type="button" data-tool="fit">Fit</button>
-            <button type="button" data-tool="export">Export</button>
+        <div id="inspect-report" hidden>
+          <div id="report-sections"></div>
+          <div id="report-viewer" hidden>
+            <label>
+              Plot
+              <select id="report-plot"></select>
+            </label>
+            <div class="plot">
+              <div id="report-chart" class="chart report-chart"></div>
+              <div id="report-tools" class="tools">
+                <button type="button" data-tool="zoom" aria-pressed="true">Zoom</button>
+                <button type="button" data-tool="pan" aria-pressed="false">Pan</button>
+                <button type="button" data-tool="fit">Fit</button>
+                <button type="button" data-tool="export">Export</button>
+              </div>
+            </div>
           </div>
         </div>
-        <p id="inspect-footer" class="footer"></p>
       </section>
       <section id="analyze" class="pane" hidden>
         <h2>Analyze</h2>
@@ -126,51 +148,22 @@
               <button type="button" data-browse="file" data-target="input" data-extensions="toml,h5,hdf5">Browse…</button>
             </span>
           </label>
-          <label>
-            Report folder <span class="optional">optional</span>
-            <span class="path-row">
-              <input name="report" />
-              <button type="button" data-browse="directory" data-target="report">Browse…</button>
-            </span>
-          </label>
-          <label class="check"><input type="checkbox" name="force" /> Replace existing report files</label>
+          <label class="check"><input type="checkbox" name="generate" checked /> Generate report</label>
+          <fieldset id="analyze-report">
+            <label>
+              Report folder
+              <span class="path-row">
+                <input name="report" placeholder="default: report folder next to the input" />
+                <button type="button" data-browse="directory" data-target="report">Browse…</button>
+              </span>
+            </label>
+          </fieldset>
           <button type="submit" class="primary">Analyze</button>
         </form>
 
         <p id="analyze-status" class="status" role="status"></p>
+        <button type="button" id="analyze-show-report" hidden>Show report</button>
         <div id="analyze-sections"></div>
-      </section>
-      <section id="report" class="pane wide" hidden>
-        <h2>Report</h2>
-        <p class="hint">Browse the metrics and interactive plots of a report folder written by Analyze.</p>
-        <form id="report-form">
-          <label>
-            Report folder
-            <span class="path-row">
-              <input name="folder" required />
-              <button type="button" data-browse="directory" data-target="folder">Browse…</button>
-            </span>
-          </label>
-          <button type="submit" class="primary">Open</button>
-        </form>
-
-        <p id="report-status" class="status" role="status"></p>
-        <div id="report-sections"></div>
-        <div id="report-viewer" hidden>
-          <label>
-            Plot
-            <select id="report-plot"></select>
-          </label>
-          <div class="plot">
-            <div id="report-chart" class="chart report-chart"></div>
-            <div id="report-tools" class="tools">
-              <button type="button" data-tool="zoom" aria-pressed="true">Zoom</button>
-              <button type="button" data-tool="pan" aria-pressed="false">Pan</button>
-              <button type="button" data-tool="fit">Fit</button>
-              <button type="button" data-tool="export">Export</button>
-            </div>
-          </div>
-        </div>
       </section>
     </main>
 

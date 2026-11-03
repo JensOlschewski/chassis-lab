@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 /** Result of one clab worker run. */
 export interface Outcome {
@@ -9,6 +9,13 @@ export interface Outcome {
 
 export const run = <Request>(command: string, request: Request) =>
   invoke<Outcome>(command, { request });
+
+/** Like `run`, for commands that print one result per stdout line: `onLine` gets each line as clab prints it, `stdout` stays empty. */
+export const runStreaming = <Request>(command: string, request: Request, onLine: (line: string) => void) => {
+  const channel = new Channel<string>();
+  channel.onmessage = onLine;
+  return invoke<Outcome>(command, { request, onLine: channel });
+};
 
 /** The `error: …` line of a failed run, else its last stderr line. */
 export function errorLine(stderr: string): string | undefined {

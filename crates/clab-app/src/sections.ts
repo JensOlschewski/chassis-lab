@@ -10,7 +10,11 @@ export interface Section {
   title: string;
   metrics: Metric[];
   warnings: string[];
+  domain?: string;
+  test?: string | null;
 }
+
+export type BadgeState = "ok" | "warning" | "error" | "running";
 
 export const element = <K extends keyof HTMLElementTagNameMap>(tag: K, text = "", className = "") => {
   const node = document.createElement(tag);
@@ -19,17 +23,44 @@ export const element = <K extends keyof HTMLElementTagNameMap>(tag: K, text = ""
   return node;
 };
 
-const BADGE_GLYPH = { ok: "✓", warning: "!", error: "✕" };
+const BADGE_GLYPH = { ok: "✓", warning: "!", error: "✕", running: "" };
 
-/** A foldable card; sections that need a look (warnings, missing values) start open. */
-export function renderSection(section: Section): HTMLDetailsElement {
+export function setBadge(badge: HTMLElement, state: BadgeState) {
+  badge.className = `badge ${state}`;
+  badge.textContent = BADGE_GLYPH[state];
+}
+
+export function createBadge(state: BadgeState) {
+  const badge = element("span");
+  setBadge(badge, state);
+  return badge;
+}
+
+const labeled = (label: string, badge: HTMLElement) => {
+  const node = element("span", "", "state");
+  node.title = label;
+  node.append(element("span", label), badge);
+  return node;
+};
+
+/** The report badge is the caller's to update as the report is written; `plots` is where this section's plots land. */
+export interface ReportStatus {
+  badge: HTMLElement;
+  plots?: string;
+  /** Opens this section's plots; its button shows once the run succeeded. */
+  open?: () => void;
+}
+
+/** A foldable card, always closed at first; its badges show whether it needs a look. */
+export function renderSection(section: Section, report?: ReportStatus): HTMLDetailsElement {
   const missing = section.metrics.some((metric) => metric.value === null);
   const state = missing ? "error" : section.warnings.length > 0 ? "warning" : "ok";
 
   const card = element("details", "", "section");
-  card.open = state !== "ok";
   const summary = element("summary", "");
-  summary.append(element("span", section.title), element("span", BADGE_GLYPH[state], `badge ${state}`));
+  summary.append(element("span", section.title));
+  if (report) summary.append(labeled("Report", report.badge));
+  summary.append(labeled("Analysis", createBadge(state)));
   card.append(summary);
 
   const table = element("table", "", "metrics");
@@ -49,6 +80,16 @@ export function renderSection(section: Section): HTMLDetailsElement {
     const list = element("ul", "", "warnings");
     section.warnings.forEach((warning) => list.append(element("li", warning)));
     card.append(list);
+  }
+  if (report?.plots) {
+    const location = element("p", `Plots: ${report.plots}`, "location");
+    if (report.open) {
+      const button = element("button", "Show plots", "show-plots");
+      button.type = "button";
+      button.addEventListener("click", report.open);
+      location.append(button);
+    }
+    card.append(location);
   }
   return card;
 }

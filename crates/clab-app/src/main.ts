@@ -1,7 +1,6 @@
 import { setupAnalyze } from "./analyze";
 import { setupConvert } from "./convert";
 import { setupInspect } from "./inspect";
-import { setupReport } from "./report";
 import { setupSession } from "./session";
 
 const navItems = document.querySelectorAll<HTMLButtonElement>(".nav-item");
@@ -17,6 +16,10 @@ function showPane(id: string): void {
 
 navItems.forEach((item) => item.addEventListener("click", () => showPane(item.dataset.pane!)));
 
-setupAnalyze();
-setupReport();
-setupSession(setupConvert(), setupInspect());
+const inspect = setupInspect();
+setupAnalyze((directory, test) => {
+  // Plotly needs a visible container to size the chart.
+  showPane("inspect");
+  void inspect.show(directory, test);
+});
+setupSession(setupConvert(), inspect);

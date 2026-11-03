@@ -96,6 +96,8 @@ h2 { margin: 0 0 4px; font-size: 1.4rem; font-weight: 600; }
 form { display: flex; flex-direction: column; gap: 16px; }
 label { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; font-weight: 500; }
 label[hidden] { display: none; }
+fieldset { display: flex; flex-direction: column; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
+fieldset:disabled { opacity: 0.5; }
 .optional,
 .embedded-note { font-weight: 400; color: var(--muted); }
 .row { display: flex; gap: 16px; }
@@ -133,6 +135,7 @@ button.primary {
 
 .status { min-height: 1.4em; margin: 20px 0 8px; font-weight: 500; }
 .status.error { color: var(--error); }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .output {
   margin: 0;
@@ -158,6 +161,10 @@ button.primary {
 .report-chart { border-color: var(--border); background: #fff; overflow: hidden; }
 #report-viewer { margin-top: 16px; }
 #report-viewer[hidden] { display: none; }
+#inspect-signals[hidden], #inspect-report[hidden] { display: none; }
+#analyze-show-report { align-self: flex-start; margin-top: 8px; }
+#analyze-sections:not(.finished) .show-plots { display: none; }
+.show-plots { margin-left: 12px; padding: 2px 8px; font-size: 0.75rem; }
 .tools { display: flex; flex-direction: column; gap: 6px; }
 .tools button[aria-pressed=true] { border-color: var(--text); }
 .info { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font-size: 0.8125rem; }
@@ -175,6 +182,9 @@ button.primary {
 .badge.ok { background: #2e7d32; }
 .badge.warning { background: #b26a00; }
 .badge.error { background: #b3261e; }
+.badge.running { box-sizing: border-box; border: 2px solid var(--border); border-top-color: var(--accent); background: transparent; animation: spin 0.8s linear infinite; }
+.state { display: inline-flex; align-items: center; gap: 6px; margin-left: 16px; color: var(--muted); font-size: 0.75rem; font-weight: 400; }
+.location { margin: 0; padding: 8px 12px; color: var(--muted); font-size: 0.8125rem; word-break: break-all; }
 .metrics { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
 .metrics td { padding: 3px 12px; }
 .metrics td:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
