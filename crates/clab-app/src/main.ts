@@ -1,6 +1,7 @@
 import { setupAnalyze } from "./analyze";
 import { setupConvert } from "./convert";
 import { setupInspect } from "./inspect";
+import { setupReport } from "./report";
 import { setupSession } from "./session";
 
 const navItems = document.querySelectorAll<HTMLButtonElement>(".nav-item");
@@ -17,4 +18,5 @@ function showPane(id: string): void {
 navItems.forEach((item) => item.addEventListener("click", () => showPane(item.dataset.pane!)));
 
 setupAnalyze();
+setupReport();
 setupSession(setupConvert(), setupInspect());

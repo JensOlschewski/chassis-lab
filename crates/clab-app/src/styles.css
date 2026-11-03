@@ -155,6 +155,9 @@ button.primary {
 .plot { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
 .plot[hidden] { display: none; }
 .chart { flex: 1; min-width: 0; height: 480px; border: 1px solid var(--text); border-radius: var(--radius); }
+.report-chart { border-color: var(--border); background: #fff; overflow: hidden; }
+#report-viewer { margin-top: 16px; }
+#report-viewer[hidden] { display: none; }
 .tools { display: flex; flex-direction: column; gap: 6px; }
 .tools button[aria-pressed=true] { border-color: var(--text); }
 .info { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font-size: 0.8125rem; }
