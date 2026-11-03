@@ -173,7 +173,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       return { config: saved("config"), input: saved("input"), generate: generate.checked, report: saved("report") };
     },
     /** Restore saved report results as historical, never as a new analysis. */
-    async set(state: AnalyzeState, inspectPath?: string | null): Promise<void> {
+    async set(state: AnalyzeState): Promise<void> {
       const current = ++revision;
       field("config").value = state.config ?? "";
       field("input").value = state.input ?? "";
@@ -188,19 +188,15 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       reportBadges.length = 0;
       show("", true);
 
-      // Older sessions can have the report in Inspect but no Analyze report
-      // destination. Only associate that report if both source paths match.
-      const directory = state.report ?? inspectPath;
+      const directory = state.report;
       if (!directory) return;
       try {
         if ((await invoke<string>("path_kind", { path: directory })) !== "report") {
-          if (current === revision && state.report) show("Saved report is unavailable. Run Analyze to generate it.", false);
+          if (current === revision) show("Saved report is unavailable. Run Analyze to generate it.", false);
           return;
         }
         const report = await readReport(directory);
-        if (current !== revision) return;
-        if (report.command !== "analyze") return;
-        if (!state.report && (report.inputs?.config?.path !== state.config || report.inputs?.run?.path !== state.input)) return;
+        if (current !== revision || report.command !== "analyze") return;
         const cards = sectionsFromReport(report).map((section) => renderSection(section, {
           badge: createBadge("ok"),
           plots: section.domain === "knc" ? join(directory, "plots", "knc", String(section.test)) : undefined,
@@ -208,12 +204,11 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         }));
         sections.replaceChildren(...cards);
         sections.classList.add("finished");
-        folder.value = directory;
         shown = directory;
         reportButton.hidden = false;
         show("Saved report results (full catalog). Not rerun or checked against current inputs.", true);
       } catch (error) {
-        if (current === revision && state.report) show(`Could not restore saved report: ${error}`, false);
+        if (current === revision) show(`Could not restore saved report: ${error}`, false);
       }
     },
   };

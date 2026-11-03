@@ -38,7 +38,7 @@ const baseName = (path: string) => path.split(/[\\/]/).pop()!;
 export function setupSession(
   convert: Pane<ConvertState>,
   inspect: Pane<InspectState>,
-  analyze: { get(): AnalyzeState; set(state: AnalyzeState, inspectPath?: string | null): Promise<void> },
+  analyze: Pane<AnalyzeState>,
 ): void {
   const name = document.querySelector<HTMLElement>("#session-name")!;
   const embed = document.querySelector<HTMLInputElement>("#session-embed")!;
@@ -81,7 +81,7 @@ export function setupSession(
   async function apply(session: SessionFile): Promise<void> {
     embed.checked = session.embed;
     convert.set(session.convert);
-    await analyze.set(session.analyze, session.inspect.file);
+    await analyze.set(session.analyze);
     await inspect.set(session.inspect);
   }
 

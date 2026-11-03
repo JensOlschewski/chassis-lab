@@ -34,8 +34,6 @@ pub struct Session {
     embed: bool,
     convert: ConvertState,
     inspect: InspectState,
-    /// Absent in sessions saved before the Analyze tab was stored.
-    #[serde(default)]
     analyze: AnalyzeState,
 }
 
@@ -48,17 +46,6 @@ struct AnalyzeState {
     input: Option<PathBuf>,
     generate: bool,
     report: Option<PathBuf>,
-}
-
-impl Default for AnalyzeState {
-    fn default() -> Self {
-        Self {
-            config: None,
-            input: None,
-            generate: true,
-            report: None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -76,8 +63,7 @@ struct ConvertState {
 struct InspectState {
     file: Option<PathBuf>,
     curves: Vec<Curve>,
-    /// Whether the chart was drawn; absent in sessions saved before this field.
-    #[serde(default)]
+    /// Whether the chart was drawn.
     plotted: bool,
 }
 
@@ -504,22 +490,6 @@ mod tests {
     }
 
     #[test]
-    fn loads_sessions_saved_without_analyze() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.clab");
-        let mut manifest = serde_json::to_value(session(dir.path(), false)).unwrap();
-        manifest.as_object_mut().unwrap().remove("analyze");
-        write_archive_with(
-            &path,
-            &[(MANIFEST, &serde_json::to_vec(&manifest).unwrap())],
-        );
-
-        let loaded = load(&path, &dir.path().join("cache")).unwrap();
-
-        assert_eq!(loaded.analyze, AnalyzeState::default());
-    }
-
-    #[test]
     fn round_trips_embedded_inputs() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.clab");
@@ -654,25 +624,6 @@ mod tests {
         );
 
         assert!(load(&path, &dir.path().join("cache")).is_err());
-    }
-
-    #[test]
-    fn loads_sessions_saved_without_plotted() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.clab");
-        let mut manifest = serde_json::to_value(session(dir.path(), false)).unwrap();
-        manifest["inspect"]
-            .as_object_mut()
-            .unwrap()
-            .remove("plotted");
-        write_archive_with(
-            &path,
-            &[(MANIFEST, &serde_json::to_vec(&manifest).unwrap())],
-        );
-
-        let loaded = load(&path, &dir.path().join("cache")).unwrap();
-
-        assert!(!loaded.inspect.plotted);
     }
 
     #[test]

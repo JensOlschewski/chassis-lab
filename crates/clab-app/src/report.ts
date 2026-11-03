@@ -19,7 +19,6 @@ interface ReportDomain {
 
 interface ReportFile {
   command?: string;
-  inputs?: { config?: { path: string }; run?: { path: string } };
   domains: ReportDomain[];
   metrics: ReportMetric[];
   warnings: string[];
