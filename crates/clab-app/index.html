@@ -13,6 +13,7 @@
       <button class="nav-item" data-pane="convert" aria-current="page">Convert</button>
       <button class="nav-item" data-pane="inspect">Inspect</button>
       <button class="nav-item" data-pane="analyze">Analyze</button>
+      <button class="nav-item" data-pane="report">Report</button>
       <button class="nav-item" data-pane="compare" disabled>Compare <small>soon</small></button>
 
       <section class="session" aria-label="Session">
@@ -138,6 +139,38 @@
 
         <p id="analyze-status" class="status" role="status"></p>
         <div id="analyze-sections"></div>
+      </section>
+      <section id="report" class="pane wide" hidden>
+        <h2>Report</h2>
+        <p class="hint">Browse the metrics and interactive plots of a report folder written by Analyze.</p>
+        <form id="report-form">
+          <label>
+            Report folder
+            <span class="path-row">
+              <input name="folder" required />
+              <button type="button" data-browse="directory" data-target="folder">Browse…</button>
+            </span>
+          </label>
+          <button type="submit" class="primary">Open</button>
+        </form>
+
+        <p id="report-status" class="status" role="status"></p>
+        <div id="report-sections"></div>
+        <div id="report-viewer" hidden>
+          <label>
+            Plot
+            <select id="report-plot"></select>
+          </label>
+          <div class="plot">
+            <div id="report-chart" class="chart report-chart"></div>
+            <div id="report-tools" class="tools">
+              <button type="button" data-tool="zoom" aria-pressed="true">Zoom</button>
+              <button type="button" data-tool="pan" aria-pressed="false">Pan</button>
+              <button type="button" data-tool="fit">Fit</button>
+              <button type="button" data-tool="export">Export</button>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
 

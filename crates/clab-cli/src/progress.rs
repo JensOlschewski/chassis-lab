@@ -2,7 +2,9 @@
 //! that run after `analyze`/`compare` print their metrics table. Those phases
 //! are otherwise silent, which makes a slow run with `--report` look stuck.
 //!
-//! Silent unless stderr is a terminal, so piped/CI output is unchanged.
+//! Silent unless stderr is a terminal, so piped/CI output is unchanged. With
+//! `--json` it prints one `{"progress":{"phase":…,"state":…}}` stdout line per
+//! phase change instead, where `state` is `start`, `done` or `error`.
 
 use std::io::{IsTerminal, Write};
 use std::time::Duration;
@@ -13,6 +15,24 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 pub(crate) struct ReportProgress {
     bar: Option<ProgressBar>,
     multi: Option<MultiProgress>,
+    json: bool,
+}
+
+#[derive(Clone, Copy)]
+enum PhaseState {
+    Start,
+    Done,
+    Error,
+}
+
+impl PhaseState {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Done => "done",
+            Self::Error => "error",
+        }
+    }
 }
 
 fn spinner_style() -> ProgressStyle {
@@ -21,12 +41,14 @@ fn spinner_style() -> ProgressStyle {
 
 impl ReportProgress {
     /// `active` is whether this run will reach the slow phases at all
-    /// (i.e. a report output was requested).
-    pub(crate) fn new(active: bool) -> Self {
-        if !active || !std::io::stderr().is_terminal() {
+    /// (i.e. a report output was requested). `json` reports phases as JSON
+    /// lines instead of a spinner.
+    pub(crate) fn new(active: bool, json: bool) -> Self {
+        if !active || json || !std::io::stderr().is_terminal() {
             return Self {
                 bar: None,
                 multi: None,
+                json: active && json,
             };
         }
 
@@ -39,11 +61,22 @@ impl ReportProgress {
         Self {
             bar: Some(bar),
             multi: Some(multi),
+            json: false,
         }
     }
 
-    /// Start a new phase, replacing the spinner's message.
-    pub(crate) fn phase(&self, message: impl Into<String>) {
+    fn emit(&self, label: &str, state: PhaseState) {
+        if self.json {
+            println!(
+                "{}",
+                serde_json::json!({"progress": {"phase": label, "state": state.name()}})
+            );
+        }
+    }
+
+    /// Start a new phase named `label`, replacing the spinner's message.
+    pub(crate) fn phase(&self, label: &str, message: impl Into<String>) {
+        self.emit(label, PhaseState::Start);
         if let Some(bar) = &self.bar {
             bar.set_message(message.into());
         }
@@ -57,10 +90,11 @@ impl ReportProgress {
         }
     }
 
-    /// Mark the current phase done and leave its checkmark in scrollback.
-    pub(crate) fn done(&self, message: &str) {
+    /// Mark the phase `label` done and leave its checkmark in scrollback.
+    pub(crate) fn done(&self, label: &str) {
+        self.emit(label, PhaseState::Done);
         if let Some(bar) = &self.bar {
-            bar.println(format!("  \x1b[32m✓\x1b[0m {message}"));
+            bar.println(format!("  \x1b[32m✓\x1b[0m {label}"));
         }
     }
 
@@ -82,6 +116,9 @@ impl ReportProgress {
             return Ok(Vec::new());
         }
         let labels = jobs.iter().map(|(label, _)| *label).collect::<Vec<_>>();
+        for label in &labels {
+            self.emit(&format!("{label} plots"), PhaseState::Start);
+        }
         let bars = self.parallel_phases(&labels);
         let result = std::thread::scope(|scope| {
             let (sender, receiver) = std::sync::mpsc::channel();
@@ -102,6 +139,8 @@ impl ReportProgress {
             for (index, result) in receiver {
                 if result.is_ok() {
                     self.parallel_done(bars.get(index), labels[index]);
+                } else {
+                    self.emit(&format!("{} plots", labels[index]), PhaseState::Error);
                 }
                 results.push((index, result));
             }
@@ -142,6 +181,7 @@ impl ReportProgress {
     }
 
     fn parallel_done(&self, child: Option<&ProgressBar>, label: &str) {
+        self.emit(&format!("{label} plots"), PhaseState::Done);
         if let Some(child) = child {
             child.println(format!("  \x1b[32m✓\x1b[0m {label} plots"));
             child.finish_and_clear();
@@ -166,7 +206,7 @@ mod tests {
     #[test]
     fn plot_phases_run_concurrently_and_preserve_input_order() {
         let barrier = Barrier::new(2);
-        let results = ReportProgress::new(false)
+        let results = ReportProgress::new(false, false)
             .plot_phases(vec![("Vertical", 2), ("Roll", 1)], |value| {
                 barrier.wait();
                 Ok(value)
@@ -178,7 +218,7 @@ mod tests {
     #[test]
     fn plot_phases_join_other_jobs_before_returning_an_error() {
         let finished = AtomicBool::new(false);
-        let result = ReportProgress::new(false).plot_phases(
+        let result = ReportProgress::new(false, false).plot_phases(
             vec![("Vertical", false), ("Roll", true)],
             |fail| {
                 if fail {
@@ -194,10 +234,12 @@ mod tests {
 
     #[test]
     fn plot_phases_return_thread_panics_as_errors() {
-        let result =
-            ReportProgress::new(false).plot_phases(vec![("Vertical", ())], |_| -> Result<()> {
+        let result = ReportProgress::new(false, false).plot_phases(
+            vec![("Vertical", ())],
+            |_| -> Result<()> {
                 panic!("render panicked");
-            });
+            },
+        );
         assert_eq!(result.unwrap_err().to_string(), "KnC plot worker panicked");
     }
 }

@@ -3,6 +3,7 @@
 mod analyze;
 mod convert;
 mod inspect;
+mod report;
 mod session;
 mod worker;
 
@@ -40,6 +41,12 @@ fn save_image(path: PathBuf, bytes: Vec<u8>) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|error| format!("{}: {error}", path.display()))
 }
 
+/// Reads one file of an opened report folder; see `report::read_file` for the allowed names.
+#[tauri::command]
+fn read_report_file(directory: PathBuf, name: String) -> Result<String, String> {
+    report::read_file(&worker::clean_path(&directory), &name)
+}
+
 #[tauri::command]
 fn save_session(path: PathBuf, session: session::Session) -> Result<(), String> {
     session::save(&path, &session)
@@ -73,6 +80,7 @@ fn main() {
             run_inspect,
             run_analyze,
             save_image,
+            read_report_file,
             save_session,
             load_session
         ])
