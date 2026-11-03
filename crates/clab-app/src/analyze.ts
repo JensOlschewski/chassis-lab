@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { setupBrowse } from "./browse";
+import { readReport, sectionsFromReport } from "./report";
 import { BadgeState, Section, createBadge, renderSection, setBadge } from "./sections";
 import { describe, errorLine, runStreaming } from "./worker";
 
@@ -48,6 +49,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
   const reportButton = document.querySelector<HTMLButtonElement>("#analyze-show-report")!;
   let shown: string | null = null;
+  let revision = 0;
   reportButton.addEventListener("click", () => shown && showReport(shown));
 
   const show = (message: string, ok: boolean) => {
@@ -118,6 +120,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       const confirmed = await confirmReport(input);
       if (!confirmed) return;
       const { report, force } = confirmed;
+      revision++;
 
       sections.replaceChildren();
       sections.classList.remove("finished");
@@ -169,8 +172,9 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
     get(): AnalyzeState {
       return { config: saved("config"), input: saved("input"), generate: generate.checked, report: saved("report") };
     },
-    /** Restores the form; results of an earlier run are dropped, not restored. */
-    set(state: AnalyzeState): void {
+    /** Restore saved report results as historical, never as a new analysis. */
+    async set(state: AnalyzeState, inspectPath?: string | null): Promise<void> {
+      const current = ++revision;
       field("config").value = state.config ?? "";
       field("input").value = state.input ?? "";
       generate.checked = state.generate;
@@ -180,7 +184,37 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       sections.classList.remove("finished");
       reportButton.hidden = true;
       shown = null;
+      phaseStates.clear();
+      reportBadges.length = 0;
       show("", true);
+
+      // Older sessions can have the report in Inspect but no Analyze report
+      // destination. Only associate that report if both source paths match.
+      const directory = state.report ?? inspectPath;
+      if (!directory) return;
+      try {
+        if ((await invoke<string>("path_kind", { path: directory })) !== "report") {
+          if (current === revision && state.report) show("Saved report is unavailable. Run Analyze to generate it.", false);
+          return;
+        }
+        const report = await readReport(directory);
+        if (current !== revision) return;
+        if (report.command !== "analyze") return;
+        if (!state.report && (report.inputs?.config?.path !== state.config || report.inputs?.run?.path !== state.input)) return;
+        const cards = sectionsFromReport(report).map((section) => renderSection(section, {
+          badge: createBadge("ok"),
+          plots: section.domain === "knc" ? join(directory, "plots", "knc", String(section.test)) : undefined,
+          open: section.domain === "knc" ? () => showReport(directory, String(section.test)) : undefined,
+        }));
+        sections.replaceChildren(...cards);
+        sections.classList.add("finished");
+        folder.value = directory;
+        shown = directory;
+        reportButton.hidden = false;
+        show("Saved report results (full catalog). Not rerun or checked against current inputs.", true);
+      } catch (error) {
+        if (current === revision && state.report) show(`Could not restore saved report: ${error}`, false);
+      }
     },
   };
 }

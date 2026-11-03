@@ -116,11 +116,23 @@ fn sessions_cache(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(cache.join("sessions"))
 }
 
-/// Embedded inputs are extracted into the app cache so they can be read by path.
+#[derive(serde::Serialize)]
+struct LoadedSession {
+    session: session::Session,
+    embedded_paths: Vec<PathBuf>,
+}
+
+/// Embedded inputs and reports are extracted so the viewers can read them by path.
 #[tauri::command]
-fn load_session(app: AppHandle, path: PathBuf) -> Result<session::Session, String> {
+fn load_session(app: AppHandle, path: PathBuf) -> Result<LoadedSession, String> {
     let root = sessions_cache(&app)?;
-    session::load(&path, &session::cache_dir(&root, &path))
+    let cache = session::cache_dir(&root, &path);
+    let session = session::load(&path, &cache)?;
+    let embedded_paths = session.embedded_paths(&cache);
+    Ok(LoadedSession {
+        session,
+        embedded_paths,
+    })
 }
 
 fn main() {

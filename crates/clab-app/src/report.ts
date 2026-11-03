@@ -18,12 +18,19 @@ interface ReportDomain {
 }
 
 interface ReportFile {
+  command?: string;
+  inputs?: { config?: { path: string }; run?: { path: string } };
   domains: ReportDomain[];
   metrics: ReportMetric[];
   warnings: string[];
 }
 
 const readFile = (directory: string, name: string) => invoke<string>("read_report_file", { directory, name });
+
+/** Read the saved report, never recompute results from its source files. */
+export async function readReport(directory: string): Promise<ReportFile> {
+  return JSON.parse(await readFile(directory, "report.json")) as ReportFile;
+}
 
 const keyOf = ({ domain, test }: { domain: string; test?: string | null }) => (test ? `${domain}::${test}` : domain);
 
@@ -33,12 +40,14 @@ const titleOf = (domain: ReportDomain) =>
 /** Cards from `report.json`: metrics and warnings grouped by domain and test, as in the Analyze tab. */
 export function sectionsFromReport(report: ReportFile): Section[] {
   const warnings = [...report.warnings];
-  const sections = report.domains.map((domain) => {
+  const sections: Section[] = report.domains.map((domain) => {
     const key = keyOf(domain);
     const prefix = `${key}: `;
     const own = warnings.filter((warning) => warning.startsWith(prefix));
     own.forEach((warning) => warnings.splice(warnings.indexOf(warning), 1));
     return {
+      domain: domain.domain,
+      test: domain.test,
       title: titleOf(domain),
       metrics: report.metrics
         .filter((metric) => keyOf(metric) === key)
@@ -120,7 +129,7 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
       this.clear();
       show("Opening…");
       try {
-        const report = JSON.parse(await readFile(directory, "report.json")) as ReportFile;
+        const report = await readReport(directory);
         sectionsRoot.replaceChildren(...sectionsFromReport(report).map((section) => renderSection(section)));
         const missing = await loadPlots(directory, report.domains);
         viewer.hidden = plots.length === 0;

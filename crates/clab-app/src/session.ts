@@ -38,14 +38,14 @@ const baseName = (path: string) => path.split(/[\\/]/).pop()!;
 export function setupSession(
   convert: Pane<ConvertState>,
   inspect: Pane<InspectState>,
-  analyze: Pane<AnalyzeState>,
+  analyze: { get(): AnalyzeState; set(state: AnalyzeState, inspectPath?: string | null): Promise<void> },
 ): void {
   const name = document.querySelector<HTMLElement>("#session-name")!;
   const embed = document.querySelector<HTMLInputElement>("#session-embed")!;
 
   let path: string | null = null;
   let saved = "";
-  /** Input paths that point into the opened session's extracted copies. */
+  /** Paths that point into the opened session's extracted files or reports. */
   let embeddedPaths = new Set<string>();
 
   const collect = (): SessionFile => ({
@@ -58,7 +58,7 @@ export function setupSession(
   const isDirty = () => JSON.stringify(collect()) !== saved;
 
   /** Input paths by form field name. */
-  const inputPaths = () => ({ input: convert.get().input, file: inspect.get().file });
+  const inputPaths = () => ({ input: convert.get().input, file: inspect.get().file, report: analyze.get().report });
   const isEmbedded = (input: string | null) => input !== null && embeddedPaths.has(input);
 
   const refresh = () => {
@@ -81,7 +81,7 @@ export function setupSession(
   async function apply(session: SessionFile): Promise<void> {
     embed.checked = session.embed;
     convert.set(session.convert);
-    analyze.set(session.analyze);
+    await analyze.set(session.analyze, session.inspect.file);
     await inspect.set(session.inspect);
   }
 
@@ -109,11 +109,11 @@ export function setupSession(
     const selected = await open({ filters: FILTERS });
     if (!selected) return;
     try {
-      const session = await invoke<SessionFile>("load_session", { path: selected });
-      path = selected;
-      embeddedPaths = new Set(
-        session.embed ? [session.convert.input, session.inspect.file].filter((p): p is string => p !== null) : [],
+      const { session, embedded_paths } = await invoke<{ session: SessionFile; embedded_paths: string[] }>(
+        "load_session", { path: selected },
       );
+      path = selected;
+      embeddedPaths = new Set(embedded_paths);
       await apply(session);
       markSaved();
     } catch (error) {
@@ -123,7 +123,7 @@ export function setupSession(
 
   async function saveSession(asNew: boolean): Promise<void> {
     if (!embed.checked && Object.values(inputPaths()).some(isEmbedded)) {
-      await fail("Embedded files have no original location. Keep Embed on, or choose the files again.");
+      await fail("Embedded files and reports have no original location. Keep Embed on, or choose them again.");
       return;
     }
     const target = !asNew && path ? path : await save({ filters: FILTERS, defaultPath: path ?? "session.clab" });

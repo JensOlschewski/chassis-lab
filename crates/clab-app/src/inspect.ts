@@ -226,15 +226,16 @@ export function setupInspect() {
   }
 
   /** Opens whatever the field points at: a signals file or a report folder. */
-  async function open(test?: string): Promise<void> {
+  async function open(test?: string): Promise<"signals" | "report" | undefined> {
     clear();
     showBody("none");
     show("");
     const kind = await invoke<string>("path_kind", { path: file.value });
-    if (kind === "signals") await loadSignals();
+    if (kind === "signals") return (await loadSignals()) ? "signals" : undefined;
     else if (kind === "report") {
       showBody("report");
       await report.open(file.value, test);
+      return "report";
     } else show(kind === "folder" ? "Not a report folder: report.json is missing" : "Not found", false);
   }
 
@@ -289,7 +290,7 @@ export function setupInspect() {
         showBody("none");
         return show("");
       }
-      if (!(await loadSignals()) || state.curves.length === 0) return;
+      if ((await open()) !== "signals" || state.curves.length === 0) return;
 
       curvesRoot.replaceChildren();
       state.curves.forEach((curve) => addRow(curve));

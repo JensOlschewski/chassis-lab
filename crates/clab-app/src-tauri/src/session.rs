@@ -1,5 +1,5 @@
 //! `.clab` session files: a zip archive holding `session.json` and, when the
-//! session embeds its inputs, copies of them under `inputs/`.
+//! session embeds its files and reports, copies of them under `inputs/`.
 //!
 //! A session file is untrusted input: unknown fields, other versions and
 //! unexpected archive entries are rejected.
@@ -22,7 +22,7 @@ type Result<T> = std::result::Result<T, String>;
 const VERSION: u32 = 1;
 const MANIFEST: &str = "session.json";
 const INPUTS: &str = "inputs";
-const MAX_ENTRIES: usize = 8;
+const MAX_ENTRIES: usize = 10_000;
 const MAX_MANIFEST_BYTES: u64 = 1 << 20;
 const MAX_EXTRACTED_BYTES: u64 = 64 << 30;
 
@@ -30,7 +30,7 @@ const MAX_EXTRACTED_BYTES: u64 = 64 << 30;
 #[serde(deny_unknown_fields)]
 pub struct Session {
     version: u32,
-    /// Whether input files are copied into the archive on save.
+    /// Whether input files and existing report folders are copied on save.
     embed: bool,
     convert: ConvertState,
     inspect: InspectState,
@@ -39,8 +39,8 @@ pub struct Session {
     analyze: AnalyzeState,
 }
 
-/// The Analyze form. Paths only: results are never stored, and `--force` is
-/// asked again on every run.
+/// The Analyze form. Result cards are never stored, and `--force` is asked
+/// again on every run. Existing report folders can be embedded separately.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AnalyzeState {
@@ -91,12 +91,25 @@ struct Curve {
 }
 
 impl Session {
-    /// Paths that are copied into the archive when embedding.
+    pub fn embedded_paths(&self, cache: &Path) -> Vec<PathBuf> {
+        [
+            &self.convert.input,
+            &self.inspect.file,
+            &self.analyze.report,
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|path| self.embed && path.starts_with(cache))
+        .cloned()
+        .collect()
+    }
+
+    /// Inputs or an Inspect report folder, copied when embedding.
     fn inputs_mut(&mut self) -> [&mut Option<PathBuf>; 2] {
         [&mut self.convert.input, &mut self.inspect.file]
     }
 
-    /// Paths that are never copied: stored relative to the session file where possible.
+    /// Linked paths, including the report destination when it is not embedded.
     fn linked_mut(&mut self) -> [&mut Option<PathBuf>; 4] {
         [
             &mut self.convert.output,
@@ -138,7 +151,7 @@ pub fn save(path: &Path, session: &Session) -> Result<()> {
                 // entry name stable when a loaded copy is saved again.
                 let entry = format!("{INPUTS}/{index}/{}", name.to_string_lossy());
                 *slot = Some(PathBuf::from(&entry));
-                files.push((entry, source));
+                collect_files(&source, &entry, &mut files)?;
             }
         }
     } else {
@@ -152,8 +165,34 @@ pub fn save(path: &Path, session: &Session) -> Result<()> {
         .into_iter()
         .for_each(|slot| relativize(slot, dir));
 
+    // An Analyze report is also an output destination: a folder that has not
+    // been generated yet remains linked rather than making Save fail.
+    if session.embed
+        && let Some(source) = &session.analyze.report
+    {
+        match fs::symlink_metadata(source) {
+            Ok(metadata) => {
+                if !metadata.is_dir() || metadata.is_symlink() {
+                    return Err(describe(
+                        source,
+                        "expected a report folder, not a file or link",
+                    ));
+                }
+                let name = source
+                    .file_name()
+                    .ok_or_else(|| describe(source, "not a report folder"))?;
+                let entry = format!("{INPUTS}/2/{}", name.to_string_lossy());
+                collect_files(source, &entry, &mut files)?;
+                manifest.analyze.report = Some(entry.into());
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(describe(source, error)),
+        }
+    }
+
     let mut temp = NamedTempFile::new_in(dir).map_err(|error| describe(dir, error))?;
-    write_archive(temp.as_file_mut(), &manifest, &files).map_err(|error| describe(path, error))?;
+    write_archive(temp.as_file_mut(), &manifest, &files)
+        .map_err(|error| format!("Could not save session {}: {error}", path.display()))?;
     temp.persist(path)
         .map_err(|error| describe(path, error.error))?;
     Ok(())
@@ -171,6 +210,9 @@ pub fn load(path: &Path, cache: &Path) -> Result<Session> {
     let mut session = read_manifest(&mut archive)?;
     let dir = parent_dir(path);
     if session.embed {
+        for path in session.inputs_mut().into_iter().flatten() {
+            input_path(&path.to_string_lossy())?;
+        }
         extract(&mut archive, cache)?;
         session
             .inputs_mut()
@@ -182,11 +224,58 @@ pub fn load(path: &Path, cache: &Path) -> Result<Session> {
             .into_iter()
             .for_each(|slot| resolve(slot, dir));
     }
+    // An embedded Analyze report is an archive entry; a linked one resolves below.
+    if session.embed
+        && let Some(report) = &mut session.analyze.report
+        && report.starts_with(INPUTS)
+    {
+        input_path(&report.to_string_lossy())?;
+        *report = cache.join(&report);
+    }
     session
         .linked_mut()
         .into_iter()
         .for_each(|slot| resolve(slot, dir));
     Ok(session)
+}
+
+/// Collect plain files only; never follow links out of a report tree.
+/// Directory entries preserve empty folders and stable names across resaves.
+fn collect_files(source: &Path, entry: &str, files: &mut Vec<(String, PathBuf)>) -> Result<()> {
+    input_path(entry).map_err(|error| describe(source, error))?;
+    if entry.split('/').count() > 128 {
+        return Err(describe(source, "embedded folder nesting is too deep"));
+    }
+    let metadata = fs::symlink_metadata(source).map_err(|error| describe(source, error))?;
+    if metadata.is_symlink() || !(metadata.is_file() || metadata.is_dir()) {
+        return Err(describe(
+            source,
+            "only regular files and folders can be embedded; links are not allowed",
+        ));
+    }
+    if files.len() + 1 >= MAX_ENTRIES {
+        return Err(describe(source, "too many embedded entries"));
+    }
+    files.push((
+        if metadata.is_dir() {
+            format!("{entry}/")
+        } else {
+            entry.into()
+        },
+        source.into(),
+    ));
+    if metadata.is_dir() {
+        let children = fs::read_dir(source).map_err(|error| describe(source, error))?;
+        for child in children {
+            let child = child.map_err(|error| describe(source, error))?;
+            let name = child.file_name();
+            let name = name
+                .to_str()
+                .ok_or_else(|| describe(&child.path(), "filename is not UTF-8"))?;
+            collect_files(&child.path(), &format!("{entry}/{name}"), files)?;
+        }
+    }
+    Ok(())
 }
 
 fn write_archive(
@@ -200,10 +289,23 @@ fn write_archive(
     let mut zip = ZipWriter::new(file);
     zip.start_file(MANIFEST, options)?;
     serde_json::to_writer_pretty(&mut zip, manifest)?;
+    let mut total = 0;
     for (name, source) in files {
+        if name.ends_with('/') {
+            zip.add_directory(name, options)?;
+            continue;
+        }
         let mut input = File::open(source).map_err(|error| describe(source, error))?;
         zip.start_file(name, options)?;
-        io::copy(&mut input, &mut zip)?;
+        let copied = io::copy(
+            &mut (&mut input).take(MAX_EXTRACTED_BYTES - total + 1),
+            &mut zip,
+        )
+        .map_err(|error| describe(source, error))?;
+        total += copied;
+        if total > MAX_EXTRACTED_BYTES {
+            return Err(describe(source, "embedded files and reports are too large").into());
+        }
     }
     zip.finish()?;
     Ok(())
@@ -242,7 +344,7 @@ fn extract(archive: &mut ZipArchive<File>, cache: &Path) -> Result<()> {
 
     let mut total = 0;
     for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let entry = archive.by_index(index).map_err(|error| error.to_string())?;
         let name = entry
             .name()
             .map_err(|error| error.to_string())?
@@ -251,22 +353,31 @@ fn extract(archive: &mut ZipArchive<File>, cache: &Path) -> Result<()> {
             continue;
         }
         let relative = input_path(&name)?;
-        if entry.is_dir() {
-            continue;
-        }
         if entry.is_symlink() {
             return Err(format!("{name}: links are not allowed"));
         }
-        total += entry.size();
-        if total > MAX_EXTRACTED_BYTES {
-            return Err("embedded inputs are too large".into());
+        if entry.is_dir() {
+            fs::create_dir_all(cache.join(relative))
+                .map_err(|error| describe(&cache.join(relative), error))?;
+            continue;
+        }
+        if entry.size() > MAX_EXTRACTED_BYTES - total {
+            return Err("embedded files and reports are too large".into());
         }
 
         let target = cache.join(relative);
         fs::create_dir_all(target.parent().unwrap_or(cache))
             .map_err(|error| describe(&target, error))?;
-        let mut out = File::create(&target).map_err(|error| describe(&target, error))?;
-        io::copy(&mut entry, &mut out).map_err(|error| describe(&target, error))?;
+        let mut out = File::options()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .map_err(|error| describe(&target, error))?;
+        total += io::copy(&mut entry.take(MAX_EXTRACTED_BYTES - total + 1), &mut out)
+            .map_err(|error| describe(&target, error))?;
+        if total > MAX_EXTRACTED_BYTES {
+            return Err("embedded files and reports are too large".into());
+        }
     }
     Ok(())
 }
@@ -275,7 +386,9 @@ fn extract(archive: &mut ZipArchive<File>, cache: &Path) -> Result<()> {
 fn input_path(name: &str) -> Result<&Path> {
     let path = Path::new(name);
     let mut components = path.components();
-    let valid = components.next() == Some(Component::Normal(INPUTS.as_ref()))
+    let valid = !name.contains(['\\', ':'])
+        && !name.split('/').any(|part| matches!(part, "." | ".."))
+        && components.next() == Some(Component::Normal(INPUTS.as_ref()))
         && components.all(|part| matches!(part, Component::Normal(_)));
     if valid {
         Ok(path)
@@ -443,6 +556,104 @@ mod tests {
             raw_manifest(&second).inspect.file,
             Some(PathBuf::from("inputs/1/run.h5"))
         );
+    }
+
+    /// Inspect shows `report`, Analyze wrote `analysis`; no other input is set.
+    fn report_session(dir: &Path) -> Session {
+        for report in ["report", "analysis"] {
+            let root = dir.join(report);
+            fs::create_dir_all(root.join("plots/knc")).unwrap();
+            fs::create_dir(root.join("empty")).unwrap();
+            fs::write(root.join("report.json"), report).unwrap();
+            fs::write(root.join("plots/knc/a.pdf"), b"pdf").unwrap();
+        }
+        let mut session = session(dir, true);
+        session.convert.input = None;
+        session.inspect.file = Some(dir.join("report"));
+        session.analyze.report = Some(dir.join("analysis"));
+        session
+    }
+
+    #[test]
+    fn round_trips_embedded_report_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.clab");
+        let cache = dir.path().join("cache");
+
+        save(&path, &report_session(dir.path())).unwrap();
+        let loaded = load(&path, &cache).unwrap();
+
+        let inspect = loaded.inspect.file.clone().unwrap();
+        let analyze = loaded.analyze.report.clone().unwrap();
+        assert_eq!(inspect, cache.join("inputs/1/report"));
+        assert_eq!(analyze, cache.join("inputs/2/analysis"));
+        assert_eq!(fs::read(inspect.join("report.json")).unwrap(), b"report");
+        assert_eq!(fs::read(analyze.join("report.json")).unwrap(), b"analysis");
+        assert_eq!(fs::read(inspect.join("plots/knc/a.pdf")).unwrap(), b"pdf");
+        assert!(inspect.join("empty").is_dir());
+        assert_eq!(loaded.embedded_paths(&cache), vec![inspect, analyze]);
+    }
+
+    #[test]
+    fn keeps_report_entry_names_stable_across_resaves() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("a.clab");
+        let second = dir.path().join("b.clab");
+
+        save(&first, &report_session(dir.path())).unwrap();
+        save(&second, &load(&first, &dir.path().join("cache")).unwrap()).unwrap();
+
+        assert_eq!(raw_manifest(&second), raw_manifest(&first));
+        assert_eq!(
+            raw_manifest(&second).analyze.report,
+            Some(PathBuf::from("inputs/2/analysis"))
+        );
+    }
+
+    #[test]
+    fn keeps_unwritten_analyze_report_linked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.clab");
+        let mut session = report_session(dir.path());
+        session.analyze.report = Some(dir.path().join("not-yet"));
+
+        save(&path, &session).unwrap();
+
+        assert_eq!(
+            raw_manifest(&path).analyze.report,
+            Some(PathBuf::from("not-yet"))
+        );
+        let loaded = load(&path, &dir.path().join("cache")).unwrap();
+        assert_eq!(loaded.analyze.report, Some(dir.path().join("not-yet")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_links_in_report_and_names_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.clab");
+        let session = report_session(dir.path());
+        let link = dir.path().join("report/secret");
+        std::os::unix::fs::symlink("/etc/passwd", &link).unwrap();
+
+        let error = save(&path, &session).unwrap_err();
+
+        assert!(error.contains(&link.display().to_string()), "{error}");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn rejects_embedded_report_path_escaping_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.clab");
+        let mut manifest = report_session(dir.path());
+        manifest.analyze.report = Some(PathBuf::from("inputs/../../escape"));
+        write_archive_with(
+            &path,
+            &[(MANIFEST, &serde_json::to_vec(&manifest).unwrap())],
+        );
+
+        assert!(load(&path, &dir.path().join("cache")).is_err());
     }
 
     #[test]
