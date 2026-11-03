@@ -131,6 +131,7 @@ PLOT_SPECS = (
         "wheel_center_z",
         "wheel_center_x",
         gradient=GradientDisplay("wheel recession angle", "deg", "angle"),
+        metric="wheel_recession_angle_{corner}_deg",
     ),
     PlotSpec(
         "knc_vertical_wcz_vs_wcy",
@@ -147,6 +148,7 @@ PLOT_SPECS = (
         branch={"edge_width": 100, "edge_percentile": 0.95},
         transform=_wheel_recession_angle,
         from_gradient=_recession_angle,
+        metric="wheel_recession_angle_{corner}_deg",
     ),
     PlotSpec(
         "knc_vertical_wheel_load",
@@ -155,6 +157,7 @@ PLOT_SPECS = (
         "wheel_load",
         optional=True,
         gradient=GradientDisplay("suspension rate", "N/mm"),
+        metric="suspension_rate_{corner}_n_per_mm",
     ),
     PlotSpec(
         "knc_vertical_suspension_rate",
@@ -165,6 +168,7 @@ PLOT_SPECS = (
         transform=gradient_curve,
         optional=True,
         y_limits=(0, 100),
+        metric="suspension_rate_{corner}_n_per_mm",
     ),
     PlotSpec(
         "knc_vertical_ride_rate",
@@ -176,6 +180,7 @@ PLOT_SPECS = (
         transform=gradient_curve,
         optional=True,
         y_limits=(0, 100),
+        metric="ride_rate_{corner}_n_per_mm",
     ),
     PlotSpec(
         "knc_vertical_tire_rate",
@@ -186,6 +191,7 @@ PLOT_SPECS = (
         transform=gradient_curve,
         optional=True,
         denominator_signal="tire_deflection",
+        metric="tire_rate_{corner}_n_per_mm",
     ),
     PlotSpec(
         "knc_vertical_toe",
@@ -194,6 +200,7 @@ PLOT_SPECS = (
         "toe",
         optional=True,
         gradient=GradientDisplay("bump steer", "deg/mm"),
+        metric="bump_steer_{corner}_deg_per_mm",
     ),
     PlotSpec(
         "knc_vertical_camber",
@@ -202,6 +209,7 @@ PLOT_SPECS = (
         "camber",
         optional=True,
         gradient=GradientDisplay("bump camber", "deg/mm"),
+        metric="bump_camber_{corner}_deg_per_mm",
     ),
     PlotSpec(
         "knc_vertical_spin",
@@ -210,6 +218,7 @@ PLOT_SPECS = (
         "spin",
         optional=True,
         gradient=GradientDisplay("bump spin", "deg/mm"),
+        metric="bump_spin_{corner}_deg_per_mm",
     ),
     PlotSpec(
         "knc_vertical_wpz_vs_cpx",
@@ -235,6 +244,7 @@ PLOT_SPECS = (
         transform=_wheel_recession_angle,
         from_gradient=_recession_angle,
         optional=True,
+        metric="brake_support_angle_{corner}_deg",
     ),
     PlotSpec(
         "knc_vertical_ride_frequency",
@@ -243,6 +253,7 @@ PLOT_SPECS = (
         "ride_frequency",
         optional=True,
         y_limits=(0, 2),
+        metric="ride_frequency_{corner}_hz",
     ),
 )
 

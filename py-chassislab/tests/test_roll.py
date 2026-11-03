@@ -11,6 +11,7 @@ from chassis_lab.knc_kernel import BranchOptions, index_curves, signal_values
 from chassis_lab.knc_plot_kernel import _curve_xy, _new_axle_figure
 from chassis_lab.knc_roll_kernel import (
     AXLE_PLOT_SPECS,
+    CORNER_METRICS,
     PLOT_SPECS,
     _branch_roll_center,
     _derive_roll_moments,
@@ -922,3 +923,10 @@ def test_roll_plot_series_json_is_versioned_deterministic_and_paired() -> None:
     axle = json.loads(reports[axle_name])
     assert len(axle["panels"]) == 3
     assert axle["gradient"] is None
+
+
+def test_plot_metrics_name_catalog_metrics() -> None:
+    catalog = {f"{m.name}_{{corner}}_{m.suffix}" for m in CORNER_METRICS}
+    named = {spec.metric for spec in PLOT_SPECS if spec.metric}
+    assert named
+    assert named <= catalog

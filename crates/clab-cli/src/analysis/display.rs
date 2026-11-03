@@ -61,7 +61,7 @@ pub(crate) fn show_metric(domain: &str, test: Option<&str>, metric: &str) -> boo
     console_metric_order(domain, test, metric).is_some()
 }
 
-/// Console order follows each KnC test's requested list; reports keep catalog order.
+/// Console order follows each KnC test's requested list; reports list these first, then the rest.
 pub(crate) fn console_metric_order(
     domain: &str,
     test: Option<&str>,

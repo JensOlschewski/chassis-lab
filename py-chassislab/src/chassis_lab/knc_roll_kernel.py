@@ -158,6 +158,7 @@ def _plot_spec(
     y: str,
     gradient: GradientDisplay | None = None,
     x_at: str = "self",
+    metric: str | None = None,
 ) -> PlotSpec:
     return PlotSpec(
         f"knc_roll_{name}",
@@ -171,12 +172,17 @@ def _plot_spec(
         gradient_unit=(
             "deg" if x in ("roll_angle", "suspension_roll_angle") else "mm"
         ),
+        metric=metric,
     )
 
 
 PLOT_SPECS = (
     _plot_spec(
-        "toe", "wheel_center_z", "toe", GradientDisplay("roll steer", "deg/mm")
+        "toe",
+        "wheel_center_z",
+        "toe",
+        GradientDisplay("roll steer", "deg/mm"),
+        metric="roll_steer_{corner}_deg_per_mm",
     ),
     _plot_spec(
         "toe_vs_roll_angle",
@@ -191,12 +197,14 @@ PLOT_SPECS = (
         "toe",
         GradientDisplay("roll steer", "deg/deg"),
         "axle",
+        metric="roll_steer_{corner}_deg_per_deg",
     ),
     _plot_spec(
         "camber",
         "wheel_center_z",
         "camber",
         GradientDisplay("roll camber", "deg/mm"),
+        metric="roll_camber_{corner}_deg_per_mm",
     ),
     _plot_spec(
         "camber_vs_roll_angle",
@@ -211,12 +219,14 @@ PLOT_SPECS = (
         "camber",
         GradientDisplay("roll camber", "deg/deg"),
         "axle",
+        metric="roll_camber_{corner}_deg_per_deg",
     ),
     _plot_spec(
         "wheel_load",
         "wheel_center_z",
         "wheel_load",
         GradientDisplay("roll suspension rate", "N/mm"),
+        metric="roll_suspension_rate_{corner}_n_per_mm",
     ),
     PlotSpec(
         "knc_roll_suspension_rate",
@@ -227,6 +237,7 @@ PLOT_SPECS = (
         transform=gradient_curve,
         optional=True,
         sweep=ROLL_ANGLE,
+        metric="roll_suspension_rate_{corner}_n_per_mm",
     ),
     PlotSpec(
         "knc_roll_ride_rate",
@@ -237,6 +248,7 @@ PLOT_SPECS = (
         transform=gradient_curve,
         optional=True,
         sweep=ROLL_ANGLE,
+        metric="roll_ride_rate_{corner}_n_per_mm",
     ),
     _plot_spec(
         "wheel_load_vs_roll_angle", "roll_angle", "wheel_load", x_at="total"
