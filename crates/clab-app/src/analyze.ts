@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { pick, setupBrowse } from "./browse";
+import { swatch } from "./colors";
 import { readReport, sectionsFromReport } from "./report";
 import {
   BadgeState,
@@ -120,11 +121,13 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   /** Tells the session that the input rows changed; each field reports its own edits. */
   const changed = () => inputsRoot.dispatchEvent(new Event("change", { bubbles: true }));
 
-  /** Labels rows by role and switches the form between Analyze and Compare. */
+  /** Labels rows by role, in their plot colors, and switches the form between Analyze and Compare. */
   const syncRows = () => {
     rows().forEach((row, index) => {
       const role = index === 0 ? "Baseline" : `Candidate ${index}`;
-      row.querySelector<HTMLElement>(".role")!.textContent = comparing() ? role : "Input";
+      const label = row.querySelector<HTMLElement>(".role")!;
+      if (comparing()) label.replaceChildren(swatch(index), ` ${role}`);
+      else label.textContent = "Input";
       row.querySelector("input")!.ariaLabel = comparing() ? role : "Input";
       row.querySelector<HTMLButtonElement>("[data-remove]")!.hidden = !comparing();
     });

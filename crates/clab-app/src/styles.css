@@ -8,6 +8,7 @@
   --accent: #c15f3c;
   --accent-text: #ffffff;
   --error: #b3261e;
+  --ok: #2e7d32;
   --radius: 8px;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--text);
@@ -22,6 +23,7 @@
     --text: #ece9df;
     --muted: #9c9a8e;
     --error: #f2a29b;
+    --ok: #8fd19e;
   }
 }
 
@@ -202,7 +204,11 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .comparison td:nth-child(n+2) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .comparison td:nth-child(3) { color: inherit; }
 .comparison td:last-child { text-align: left; color: var(--muted); }
-.comparison td.delta { color: var(--muted); }
+.input-row .swatch,
+.comparison th .swatch { display: inline-block; box-shadow: 0 0 0 1px var(--border); }
+.comparison td.delta,
+.comparison td.tolerance { color: var(--muted); }
+.comparison td.passed { color: var(--ok); }
 .comparison td.missing,
 .comparison td.failed { color: var(--error); }
 .warnings { margin: 8px 0; padding: 0 12px 0 32px; color: var(--muted); font-size: 0.8125rem; }

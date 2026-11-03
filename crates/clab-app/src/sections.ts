@@ -1,3 +1,4 @@
+import { swatch } from "./colors";
 import { formatValue } from "./format";
 
 export interface Metric {
@@ -136,8 +137,16 @@ export function renderSection(section: Section, report?: ReportStatus): HTMLDeta
 
 const signed = (value: number, unit: string) => `${value > 0 ? "+" : ""}${formatValue(value, unit)}`;
 
+/** A header cell with the series color used in the plots; 0 is the baseline. */
+const seriesHeader = (text: string, index: number) => {
+  const th = element("th", "");
+  th.append(swatch(index), ` ${text}`);
+  return th;
+};
+
 /**
- * A comparison card: the baseline value, then each candidate's value and difference.
+ * A comparison card: the baseline value, the allowed difference when tolerances apply,
+ * then each candidate's value and its difference from the baseline, colored by status.
  * `candidates` labels the columns, in the order the inputs were given.
  */
 export function renderComparison(
@@ -152,11 +161,14 @@ export function renderComparison(
       ? "warning"
       : "ok";
 
+  const withTolerances = section.metrics.some((metric) => metric.allowed_difference !== null);
+
   const table = element("table", "", "metrics comparison");
   const head = table.createTHead().insertRow();
-  head.append(element("th"), element("th", "Baseline"));
+  head.append(element("th"), seriesHeader("Baseline", 0));
+  if (withTolerances) head.append(element("th", "Tolerance"));
   candidates.forEach((label, index) => {
-    const th = element("th", `Candidate ${index + 1}`);
+    const th = seriesHeader(`Candidate ${index + 1}`, index + 1);
     th.colSpan = 2;
     th.title = label;
     head.append(th);
@@ -169,8 +181,16 @@ export function renderComparison(
     row.dataset.metric = shortName(metric.name);
     row.insertCell().textContent = shortName(metric.name);
     valueCell(row, metric.baseline, metric.unit);
+    if (withTolerances) {
+      const tolerance = row.insertCell();
+      tolerance.className = "tolerance";
+      if (metric.allowed_difference !== null) {
+        tolerance.textContent = `±${formatValue(metric.allowed_difference, metric.unit)}`;
+        tolerance.title = String(metric.allowed_difference);
+      }
+    }
     candidates.forEach((_, index) => {
-      const { value, difference, status } = metric.candidates[index] ?? { value: null, difference: null, status: "missing" };
+      const { value, status } = metric.candidates[index] ?? { value: null, status: "missing" };
       if (status === "not compared") {
         const cell = row.insertCell();
         cell.textContent = "not compared";
@@ -178,12 +198,14 @@ export function renderComparison(
         cell.className = "missing";
         return;
       }
-      valueCell(row, value, metric.unit);
+      const verdict = status === "passed" || status === "failed" ? ` ${status}` : "";
+      valueCell(row, value, metric.unit).className += verdict;
+      // clab reports the absolute difference; the sign shows which way the candidate moved.
       const delta = row.insertCell();
+      const difference = value !== null && metric.baseline !== null ? value - metric.baseline : null;
       delta.textContent = difference === null ? "" : signed(difference, metric.unit);
-      delta.className = status === "failed" ? "delta failed" : "delta";
-      const allowed = metric.allowed_difference === null ? "" : ` (allowed ±${metric.allowed_difference})`;
-      delta.title = `${status}${allowed}`;
+      delta.className = `delta${verdict}`;
+      delta.title = status;
     });
     row.insertCell().textContent = metric.unit;
   }
