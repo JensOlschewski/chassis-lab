@@ -264,7 +264,7 @@ fn denied(code: ErrorCode) -> anyhow::Error {
 
 fn unreachable(reason: String) -> anyhow::Error {
     anyhow!(
-        "the license server gave no answer ({reason}): check the internet connection or try again later"
+        "no answer from the server ({reason}): check the internet connection or try again later"
     )
 }
 
@@ -335,14 +335,15 @@ impl<S: Server> Gate<S> {
             hostname: self.hostname.clone(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
         };
-        let response =
-            self.server
-                .register(&request)
-                .map_err(|refusal| match refusal {
-                    Refusal::Denied(code) => denied(code),
-                    Refusal::Unreachable(reason) => unreachable(reason)
-                        .context("the first run registers this installation online"),
-                })?;
+        let response = self
+            .server
+            .register(&request)
+            .map_err(|refusal| match refusal {
+                Refusal::Denied(code) => denied(code),
+                Refusal::Unreachable(reason) => {
+                    unreachable(reason).context("the first run needs an internet connection")
+                }
+            })?;
         let claims = self.accept(&install_id, &response.token)?;
         self.store.save(&State {
             install_id,
@@ -582,7 +583,7 @@ mod tests {
     fn a_first_run_offline_fails_clearly_and_saves_nothing() {
         let f = fixture(START);
         let error = f.gate.require().unwrap_err();
-        assert!(message(&error).contains("first run registers"), "{error:#}");
+        assert!(message(&error).contains("first run needs"), "{error:#}");
         assert!(f.gate.store.load().is_none());
     }
 

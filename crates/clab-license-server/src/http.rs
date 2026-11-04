@@ -13,7 +13,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const REGISTRATIONS_PER_HOUR: usize = 5;
+const REGISTRATIONS_PER_HOUR: usize = 20;
 const HOUR: u64 = 3600;
 /// Above this many tracked addresses, idle ones are dropped.
 const TRACKED_ADDRESSES: usize = 1024;

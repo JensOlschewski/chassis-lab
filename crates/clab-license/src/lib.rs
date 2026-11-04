@@ -144,8 +144,8 @@ impl fmt::Display for ErrorCode {
             Self::SeatInUse => "the license is already activated on another machine",
             Self::NotActivated => "the license is not activated on this machine",
             Self::InvalidRequest => "the request was rejected as invalid",
-            Self::RegistrationClosed => "the server accepts no new registrations",
-            Self::RateLimited => "too many registrations from this address; try again later",
+            Self::RegistrationClosed => "the server accepts no new installations",
+            Self::RateLimited => "too many requests from this address; try again later",
         })
     }
 }

@@ -44,7 +44,7 @@ is the base64 Ed25519 signature of exactly those bytes.
 `403 {"error": code}` means the license is not usable and the client must drop
 its token: `invalid_key` (unknown, revoked, or a blocked machine), `seat_in_use`,
 `not_activated`, `registration_closed`. `400` is a malformed request, `429`
-(`rate_limited`) means more than 5 registrations from one address in an hour. Anything else (other statuses, no connection)
+(`rate_limited`) means more than 20 registrations from one address in an hour. Anything else (other statuses, no connection)
 means only that the server could not answer, so a client keeps its token until
 `valid_until`.
 
