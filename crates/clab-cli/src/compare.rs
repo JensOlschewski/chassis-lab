@@ -181,9 +181,57 @@ fn display_label(labels: &[Option<String>], index: usize) -> String {
     })
 }
 
+/// A run's `[meta] name` as label; `None` when absent (`undefined`) or unusable.
+pub(crate) fn meta_label(name: &str) -> Option<String> {
+    parse_label(name)
+        .ok()
+        .flatten()
+        .filter(|name| name != "undefined")
+}
+
+/// Explicit labels, else run names; a run name clashing with another label
+/// falls back to its default.
+fn resolve_labels(explicit: Vec<Option<String>>, names: &[&str]) -> Vec<Option<String>> {
+    let mut labels = explicit;
+    let derived: Vec<bool> = labels.iter().map(Option::is_none).collect();
+    for (label, name) in labels.iter_mut().zip(names) {
+        if label.is_none() {
+            *label = meta_label(name);
+        }
+    }
+    loop {
+        let shown: Vec<_> = (0..labels.len())
+            .map(|index| display_label(&labels, index))
+            .collect();
+        let clashes: Vec<_> = (0..labels.len())
+            .filter(|&index| {
+                derived[index]
+                    && labels[index].is_some()
+                    && shown.iter().filter(|label| **label == shown[index]).count() > 1
+            })
+            .collect();
+        if clashes.is_empty() {
+            return labels;
+        }
+        for index in clashes {
+            labels[index] = None;
+        }
+    }
+}
+
 pub(crate) fn compare(args: CompareArgs) -> Result<()> {
-    let labels = parse_labels(&args.labels, args.candidates.len() + 1)?;
+    let explicit = parse_labels(&args.labels, args.candidates.len() + 1)?;
     let baseline = load_input(&args.config, &args.baseline)?;
+    let loaded = args
+        .candidates
+        .iter()
+        .map(|path| load_input(&args.config, path))
+        .collect::<Result<Vec<_>>>()?;
+    let names: Vec<_> = std::iter::once(&baseline)
+        .chain(&loaded)
+        .map(|input| input.config.name.as_str())
+        .collect();
+    let labels = resolve_labels(explicit, &names);
     let tolerances = args.tolerances.then(|| ComparisonTolerances {
         svc: baseline
             .config
@@ -205,7 +253,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     let mut candidate_sources = Vec::new();
     let mut unavailable_domains = Vec::new();
     for (index, path) in args.candidates.iter().enumerate() {
-        let candidate = load_input(&args.config, path)?;
+        let candidate = &loaded[index];
         let mut metrics = Vec::new();
         let mut domains = Vec::new();
         for (name, base_domain) in &baseline.domains {
@@ -1132,7 +1180,7 @@ fn provenance(path: &Path) -> Result<serde_json::Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Metric, comparison_status, parse_labels, render_status};
+    use super::{Metric, comparison_status, parse_labels, render_status, resolve_labels};
     use std::path::PathBuf;
 
     fn labels(values: &[&str]) -> Vec<String> {
@@ -1161,6 +1209,26 @@ mod tests {
         assert!(message(&["", "Baseline"], 2).contains("more than one input"));
         assert!(message(&["a\nb", "c"], 2).contains("control characters"));
         assert!(message(&[&"x".repeat(65), "c"], 2).contains("longer than 64"));
+    }
+
+    #[test]
+    fn resolves_run_names_below_explicit_labels() {
+        let some = |value: &str| Some(value.to_owned());
+        assert_eq!(
+            resolve_labels(
+                vec![None, some("x"), None],
+                &["run a", "run b", "undefined"]
+            ),
+            vec![some("run a"), some("x"), None]
+        );
+        assert_eq!(
+            resolve_labels(vec![None, None, None], &["same", "same", "other"]),
+            vec![None, None, some("other")]
+        );
+        assert_eq!(
+            resolve_labels(vec![some("foo"), None], &["n", "foo"]),
+            vec![some("foo"), None]
+        );
     }
 
     #[test]

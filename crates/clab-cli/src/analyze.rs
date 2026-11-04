@@ -69,7 +69,7 @@ pub(crate) fn analyze(mut args: AnalyzeArgs) -> Result<()> {
             if !args.input.is_file() {
                 bail!("run manifest cannot be found: {}", args.input.display());
             }
-            analyze_run(&args)
+            analyze_run(&mut args)
         }
         Some("json") => {
             validate_input_file(&args.input)?;
@@ -83,7 +83,7 @@ pub(crate) fn analyze(mut args: AnalyzeArgs) -> Result<()> {
     }
 }
 
-fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
+fn analyze_run(args: &mut AnalyzeArgs) -> Result<()> {
     clab_core::config::validate_run_input_files(&args.input).map_err(|error| {
         anyhow::anyhow!(
             "failed to load config/run '{}': {error}",
@@ -98,6 +98,10 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
                 args.input.display()
             )
         })?;
+    if args.label.is_none() {
+        args.label = crate::compare::meta_label(&config.name);
+    }
+    let args = &*args;
     let has_svc = !config.simulation_json.as_os_str().is_empty();
     let mut sources = Vec::new();
     if has_svc && is_hdf5(&config.simulation_json) {
