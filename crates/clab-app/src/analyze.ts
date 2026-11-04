@@ -310,7 +310,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       if (!directory) return;
       try {
         if ((await invoke<string>("path_kind", { path: directory })) !== "report") {
-          if (current === revision) show("Saved report is unavailable. Run Analyze to generate it.", false);
+          if (current === revision) show("Saved report is unavailable. Run it again to generate it.", false);
           return;
         }
         const report = await readReport(directory);
