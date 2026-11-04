@@ -26,7 +26,7 @@ const BLANK: SessionFile = {
   embed: false,
   convert: { input: null, domain: "svc", test: null, output: null, force: false },
   inspect: { file: null, curves: [], plotted: false },
-  analyze: { config: null, input: null, generate: true, report: null },
+  analyze: { config: null, inputs: [], tolerances: false, generate: true, report: null },
 };
 
 const baseName = (path: string) => path.split(/[\\/]/).pop()!;

@@ -43,7 +43,9 @@ pub struct Session {
 #[serde(deny_unknown_fields)]
 struct AnalyzeState {
     config: Option<PathBuf>,
-    input: Option<PathBuf>,
+    /// One input is analyzed; more are compared, the first being the baseline.
+    inputs: Vec<PathBuf>,
+    tolerances: bool,
     generate: bool,
     report: Option<PathBuf>,
 }
@@ -96,13 +98,15 @@ impl Session {
     }
 
     /// Linked paths, including the report destination when it is not embedded.
-    fn linked_mut(&mut self) -> [&mut Option<PathBuf>; 4] {
+    fn linked_mut(&mut self) -> impl Iterator<Item = &mut PathBuf> {
         [
             &mut self.convert.output,
             &mut self.analyze.config,
-            &mut self.analyze.input,
             &mut self.analyze.report,
         ]
+        .into_iter()
+        .flatten()
+        .chain(&mut self.analyze.inputs)
     }
 }
 
@@ -144,12 +148,10 @@ pub fn save(path: &Path, session: &Session) -> Result<()> {
         manifest
             .inputs_mut()
             .into_iter()
-            .for_each(|slot| relativize(slot, dir));
+            .flatten()
+            .for_each(|path| relativize(path, dir));
     }
-    manifest
-        .linked_mut()
-        .into_iter()
-        .for_each(|slot| relativize(slot, dir));
+    manifest.linked_mut().for_each(|path| relativize(path, dir));
 
     // An Analyze report is also an output destination: a folder that has not
     // been generated yet remains linked rather than making Save fail.
@@ -203,12 +205,14 @@ pub fn load(path: &Path, cache: &Path) -> Result<Session> {
         session
             .inputs_mut()
             .into_iter()
-            .for_each(|slot| resolve(slot, cache));
+            .flatten()
+            .for_each(|path| resolve(path, cache));
     } else {
         session
             .inputs_mut()
             .into_iter()
-            .for_each(|slot| resolve(slot, dir));
+            .flatten()
+            .for_each(|path| resolve(path, dir));
     }
     // An embedded Analyze report is an archive entry; a linked one resolves below.
     if session.embed
@@ -218,10 +222,7 @@ pub fn load(path: &Path, cache: &Path) -> Result<Session> {
         input_path(&report.to_string_lossy())?;
         *report = cache.join(&report);
     }
-    session
-        .linked_mut()
-        .into_iter()
-        .for_each(|slot| resolve(slot, dir));
+    session.linked_mut().for_each(|path| resolve(path, dir));
     Ok(session)
 }
 
@@ -390,18 +391,14 @@ fn parent_dir(path: &Path) -> &Path {
 }
 
 /// Stores paths below `dir` relative to it; others stay absolute.
-fn relativize(slot: &mut Option<PathBuf>, dir: &Path) {
-    if let Some(path) = slot
-        && let Ok(relative) = path.strip_prefix(dir)
-    {
+fn relativize(path: &mut PathBuf, dir: &Path) {
+    if let Ok(relative) = path.strip_prefix(dir) {
         *path = relative.to_path_buf();
     }
 }
 
-fn resolve(slot: &mut Option<PathBuf>, base: &Path) {
-    if let Some(path) = slot
-        && path.is_relative()
-    {
+fn resolve(path: &mut PathBuf, base: &Path) {
+    if path.is_relative() {
         *path = base.join(&path);
     }
 }
@@ -439,7 +436,8 @@ mod tests {
             },
             analyze: AnalyzeState {
                 config: Some(dir.join("config.toml")),
-                input: Some(dir.join("data/run.toml")),
+                inputs: vec![dir.join("data/run.toml"), PathBuf::from("/elsewhere/b.h5")],
+                tolerances: true,
                 generate: true,
                 report: Some(PathBuf::from("/elsewhere/report")),
             },
@@ -482,7 +480,13 @@ mod tests {
         assert_eq!(stored.inspect.file, Some(PathBuf::from("run.h5")));
         assert_eq!(stored.convert.output, Some(PathBuf::from("/elsewhere/out")));
         assert_eq!(stored.analyze.config, Some(PathBuf::from("config.toml")));
-        assert_eq!(stored.analyze.input, Some(PathBuf::from("data/run.toml")));
+        assert_eq!(
+            stored.analyze.inputs,
+            [
+                PathBuf::from("data/run.toml"),
+                PathBuf::from("/elsewhere/b.h5")
+            ]
+        );
         assert_eq!(
             stored.analyze.report,
             Some(PathBuf::from("/elsewhere/report"))

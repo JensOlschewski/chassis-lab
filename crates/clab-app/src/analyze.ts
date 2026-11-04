@@ -1,18 +1,43 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { setupBrowse } from "./browse";
+import { pick, setupBrowse } from "./browse";
+import { swatch } from "./colors";
 import { readReport, sectionsFromReport } from "./report";
-import { BadgeState, Section, createBadge, renderSection, setBadge } from "./sections";
+import {
+  BadgeState,
+  ComparisonSection,
+  ReportStatus,
+  Section,
+  createBadge,
+  renderComparison,
+  renderSection,
+  setBadge,
+} from "./sections";
 import { describe, errorLine, runStreaming } from "./worker";
 
 type PhaseState = "start" | "done" | "error";
 
-/** One `--json` stdout line: a result `section`, a `progress` event, or something else (`report`). */
-export function parseLine(line: string): { section?: Section; progress?: { phase: string; state: PhaseState } } {
+/** One `--json` stdout line: a result `section`, a `progress` event, the closing `comparison`, or something else (`report`). */
+export function parseLine(line: string): {
+  section?: Section & ComparisonSection;
+  progress?: { phase: string; state: PhaseState };
+  comparison?: { status: string };
+} {
   return line.startsWith("{") ? JSON.parse(line) : {};
 }
 
 const BUNDLE_PHASE = "Writing report bundle";
+const INPUT_EXTENSIONS = ["toml", "h5", "hdf5", "json"];
+
+/** `clab compare` exits with 1 only when tolerance checks failed; its report is still written. */
+const TOLERANCE_FAILURE = 1;
+
+/** Final status of a comparison that exited normally. */
+const COMPARISON_MESSAGES: Record<string, string> = {
+  passed: "Compared: all metrics within tolerance",
+  incomplete: "Compared: some metrics or domains are missing",
+  informational: "Compared: differences only, no tolerances applied",
+};
 
 /** Pasted paths often carry whitespace or the quotes added by "Copy as path". */
 const clean = (path: string) => path.trim().replace(/^"|"$/g, "").trim();
@@ -36,7 +61,9 @@ interface ReportBadge {
 /** The form as stored in a session file: paths only, never results. */
 export interface AnalyzeState {
   config: string | null;
-  input: string | null;
+  /** One input is analyzed; more are compared, the first being the baseline. */
+  inputs: string[];
+  tolerances: boolean;
   generate: boolean;
   report: string | null;
 }
@@ -46,6 +73,9 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   const form = document.querySelector<HTMLFormElement>("#analyze-form")!;
   const status = document.querySelector<HTMLElement>("#analyze-status")!;
   const sections = document.querySelector<HTMLElement>("#analyze-sections")!;
+  const inputsRoot = document.querySelector<HTMLElement>("#analyze-inputs")!;
+  const addInput = document.querySelector<HTMLButtonElement>("#add-input")!;
+  const tolerancesOption = document.querySelector<HTMLElement>("#analyze-tolerances")!;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
   const reportButton = document.querySelector<HTMLButtonElement>("#analyze-show-report")!;
   let shown: string | null = null;
@@ -78,16 +108,78 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
 
   const reportOptions = form.querySelector<HTMLFieldSetElement>("#analyze-report")!;
   const generate = form.elements.namedItem("generate") as HTMLInputElement;
+  const tolerances = form.elements.namedItem("tolerances") as HTMLInputElement;
   const folder = form.elements.namedItem("report") as HTMLInputElement;
   // Disabled controls stay out of FormData, so an unchecked box sends no report folder.
   const syncGenerate = () => (reportOptions.disabled = !generate.checked);
   generate.addEventListener("change", syncGenerate);
 
+  const rows = () => [...inputsRoot.querySelectorAll<HTMLElement>(".input-row")];
+  const inputFields = () => rows().map((row) => row.querySelector<HTMLInputElement>("input")!);
+  const comparing = () => rows().length > 1;
+
+  /** Tells the session that the input rows changed; each field reports its own edits. */
+  const changed = () => inputsRoot.dispatchEvent(new Event("change", { bubbles: true }));
+
+  /** Labels rows by role, in their plot colors, and switches the form between Analyze and Compare. */
+  const syncRows = () => {
+    rows().forEach((row, index) => {
+      const role = index === 0 ? "Baseline" : `Candidate ${index}`;
+      const label = row.querySelector<HTMLElement>(".role")!;
+      if (comparing()) label.replaceChildren(swatch(index), ` ${role}`);
+      else label.textContent = "Input";
+      row.querySelector("input")!.ariaLabel = comparing() ? role : "Input";
+      row.querySelector<HTMLButtonElement>("[data-remove]")!.hidden = !comparing();
+    });
+    tolerancesOption.hidden = !comparing();
+    submit.textContent = comparing() ? "Compare" : "Analyze";
+  };
+
+  function addRow(path = ""): HTMLInputElement {
+    const row = document.createElement("div");
+    row.className = "input-row";
+    const role = document.createElement("span");
+    role.className = "role";
+    const input = document.createElement("input");
+    input.required = true;
+    input.placeholder = "run .toml, .h5, or SVC .json";
+    input.value = path;
+    const browse = document.createElement("button");
+    browse.type = "button";
+    browse.textContent = "Browse…";
+    browse.addEventListener("click", async () => {
+      const selected = await pick(false, INPUT_EXTENSIONS);
+      if (!selected) return;
+      input.value = selected;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.ariaLabel = "Remove input";
+    remove.dataset.remove = "";
+    remove.addEventListener("click", () => {
+      row.remove();
+      syncRows();
+      changed();
+    });
+    row.append(role, input, browse, remove);
+    inputsRoot.append(row);
+    syncRows();
+    return input;
+  }
+
+  addInput.addEventListener("click", () => {
+    addRow().focus();
+    changed();
+  });
+
   /** The report folder to write, `null` for none; `undefined` when the user cancels a confirmation. */
-  async function confirmReport(input: string): Promise<{ report: string | null; force: boolean } | undefined> {
+  async function confirmReport(input: string, compare: boolean): Promise<{ report: string | null; force: boolean } | undefined> {
     if (!generate.checked) return { report: null, force: false };
     const chosen = clean(folder.value);
-    const report = chosen || join(parentOf(input), "report");
+    // A comparison next to the baseline must not replace its analysis report.
+    const report = chosen || join(parentOf(input), compare ? "comparison" : "report");
     if ((await invoke<string>("path_kind", { path: report })) !== "missing") {
       const replace = await ask(`The report folder already exists:\n${report}\n\nIts contents will be replaced.`, {
         title: "Replace report folder?",
@@ -99,7 +191,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       return { report, force: true };
     }
     if (!chosen) {
-      const create = await ask(`No report folder was given. Create it next to the input?\n${report}`, {
+      const create = await ask(`No report folder was given. Create it next to the ${compare ? "baseline" : "input"}?\n${report}`, {
         title: "Create report folder?",
         okLabel: "Create",
         cancelLabel: "Cancel",
@@ -110,14 +202,22 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
     return { report, force: false };
   }
 
+  /** Where a KnC section's plots land; analysis plots also open in Inspect. */
+  const kncStatus = (report: string, section: { test?: string | null }, compare: boolean, badge: HTMLElement): ReportStatus => {
+    const test = String(section.test);
+    return compare
+      ? { badge, plots: join(report, "plots", "knc", test, "comparison") }
+      : { badge, plots: join(report, "plots", "knc", test), open: () => showReport(report, test) };
+  };
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     submit.disabled = true;
     try {
-      const data = new FormData(form);
-      const config = clean(String(data.get("config") ?? ""));
-      const input = clean(String(data.get("input") ?? ""));
-      const confirmed = await confirmReport(input);
+      const config = clean(String(new FormData(form).get("config") ?? ""));
+      const inputs = inputFields().map((field) => clean(field.value));
+      const compare = inputs.length > 1;
+      const confirmed = await confirmReport(inputs[0], compare);
       if (!confirmed) return;
       const { report, force } = confirmed;
       revision++;
@@ -125,38 +225,46 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       sections.replaceChildren();
       sections.classList.remove("finished");
       reportButton.hidden = true;
+      shown = null;
       phaseStates.clear();
       reportBadges.length = 0;
-      show("Analyzing…", true);
-      const outcome = await runStreaming("run_analyze", { config, input, report, force }, (line) => {
-        const { section, progress } = parseLine(line);
+      show(compare ? "Comparing…" : "Analyzing…", true);
+      let comparison: string | undefined;
+      const request = { config, inputs, tolerances: compare && tolerances.checked, report, force };
+      const outcome = await runStreaming("run_analyze", request, (line) => {
+        const parsed = parseLine(line);
+        const { section, progress } = parsed;
         if (section) {
           const knc = section.domain === "knc";
-          let status;
+          let status: ReportStatus | undefined;
           if (report) {
             const badge = createBadge("running");
             reportBadges.push({ badge, phases: knc ? [`${section.title} plots`, BUNDLE_PHASE] : [BUNDLE_PHASE] });
-            status = {
-              badge,
-              plots: knc ? join(report, "plots", "knc", String(section.test)) : undefined,
-              open: knc ? () => showReport(report, String(section.test)) : undefined,
-            };
+            status = knc ? kncStatus(report, section, compare, badge) : { badge };
           }
-          sections.append(renderSection(section, status));
+          sections.append(compare ? renderComparison(section, inputs.slice(1), status) : renderSection(section, status));
         }
         if (progress) {
           phaseStates.set(progress.phase, progress.state);
           refreshBadges();
         }
+        if (parsed.comparison) comparison = parsed.comparison.status;
       });
+      const toleranceFailed = compare && outcome.exit_code === TOLERANCE_FAILURE;
       const { ok, message } = describe(outcome);
-      settlePhases(ok);
-      if (ok && report) {
-        shown = report;
+      const completed = ok || toleranceFailed;
+      settlePhases(completed);
+      if (completed && report) {
         sections.classList.add("finished");
-        reportButton.hidden = false;
+        // Inspect shows analysis reports only so far.
+        if (!compare) {
+          shown = report;
+          reportButton.hidden = false;
+        }
       }
-      show(ok ? message : (errorLine(outcome.stderr) ?? message), ok);
+      if (toleranceFailed) show("Compared: tolerance checks failed", false);
+      else if (ok && compare) show(COMPARISON_MESSAGES[comparison ?? ""] ?? "Compared", comparison !== "incomplete");
+      else show(ok ? message : (errorLine(outcome.stderr) ?? message), ok);
     } catch (error) {
       settlePhases(false);
       show(`Failed to run clab: ${error}`, false);
@@ -168,15 +276,25 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement;
   const saved = (name: string) => clean(field(name).value) || null;
 
+  addRow();
+
   return {
     get(): AnalyzeState {
-      return { config: saved("config"), input: saved("input"), generate: generate.checked, report: saved("report") };
+      return {
+        config: saved("config"),
+        inputs: inputFields().map((input) => clean(input.value)).filter(Boolean),
+        tolerances: tolerances.checked,
+        generate: generate.checked,
+        report: saved("report"),
+      };
     },
     /** Restore saved report results as historical, never as a new analysis. */
     async set(state: AnalyzeState): Promise<void> {
       const current = ++revision;
       field("config").value = state.config ?? "";
-      field("input").value = state.input ?? "";
+      inputsRoot.replaceChildren();
+      (state.inputs.length > 0 ? state.inputs : [""]).forEach((input) => addRow(input));
+      tolerances.checked = state.tolerances;
       generate.checked = state.generate;
       folder.value = state.report ?? "";
       syncGenerate();
@@ -192,11 +310,16 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       if (!directory) return;
       try {
         if ((await invoke<string>("path_kind", { path: directory })) !== "report") {
-          if (current === revision) show("Saved report is unavailable. Run Analyze to generate it.", false);
+          if (current === revision) show("Saved report is unavailable. Run it again to generate it.", false);
           return;
         }
         const report = await readReport(directory);
-        if (current !== revision || report.command !== "analyze") return;
+        if (current !== revision) return;
+        if (report.command === "compare") {
+          show(`Saved comparison report: ${directory}. Run Compare to show its results here.`, true);
+          return;
+        }
+        if (report.command !== "analyze") return;
         const cards = sectionsFromReport(report).map((section) => renderSection(section, {
           badge: createBadge("ok"),
           plots: section.domain === "knc" ? join(directory, "plots", "knc", String(section.test)) : undefined,

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { setupBrowse } from "./browse";
+import { colorFor } from "./colors";
 import { AXIS, Curve, SignalInfo, Signals, Summary, drawChart, labelOf, setupTools } from "./chart";
 import { setupReport } from "./report";
 import { describe, errorLine, run } from "./worker";
@@ -25,9 +26,6 @@ export interface InspectState {
   plotted: boolean;
 }
 
-/** Same order as the Python reports: black baseline, then the compare palette. */
-const CURVE_COLORS = ["#000000", "#e41a1c", "#377eb8", "#e7298a", "#00a6a6", "#ff7f00", "#6a3d9a"];
-const colorFor = (index: number) => CURVE_COLORS[index % CURVE_COLORS.length];
 
 async function inspect<T>(file: string, signals: string[]): Promise<T> {
   const outcome = await run("run_inspect", { file, signals });
