@@ -63,6 +63,8 @@ export interface AnalyzeState {
   config: string | null;
   /** One input is analyzed; more are compared, the first being the baseline. */
   inputs: string[];
+  /** Legend name per input, in order; empty keeps the default. */
+  names: string[];
   tolerances: boolean;
   generate: boolean;
   report: string | null;
@@ -115,32 +117,41 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   generate.addEventListener("change", syncGenerate);
 
   const rows = () => [...inputsRoot.querySelectorAll<HTMLElement>(".input-row")];
-  const inputFields = () => rows().map((row) => row.querySelector<HTMLInputElement>("input")!);
+  const pathField = (row: HTMLElement) => row.querySelector<HTMLInputElement>(".path")!;
+  const nameField = (row: HTMLElement) => row.querySelector<HTMLInputElement>(".name")!;
   const comparing = () => rows().length > 1;
+  /** The Baseline/Candidate N role of the `index`th row, which names its column unless the user did. */
+  const roleOf = (index: number) => (index === 0 ? "Baseline" : `Candidate ${index}`);
 
   /** Tells the session that the input rows changed; each field reports its own edits. */
   const changed = () => inputsRoot.dispatchEvent(new Event("change", { bubbles: true }));
 
-  /** Labels rows by role, in their plot colors, and switches the form between Analyze and Compare. */
+  /** Marks rows with their plot colors, and switches the form between Analyze and Compare. */
   const syncRows = () => {
     rows().forEach((row, index) => {
-      const role = index === 0 ? "Baseline" : `Candidate ${index}`;
-      const label = row.querySelector<HTMLElement>(".role")!;
-      if (comparing()) label.replaceChildren(swatch(index), ` ${role}`);
-      else label.textContent = "Input";
-      row.querySelector("input")!.ariaLabel = comparing() ? role : "Input";
+      const marker = row.querySelector<HTMLElement>(".role")!;
+      marker.hidden = !comparing();
+      marker.replaceChildren(swatch(index));
+      pathField(row).ariaLabel = comparing() ? roleOf(index) : "Input";
       row.querySelector<HTMLButtonElement>("[data-remove]")!.hidden = !comparing();
     });
     tolerancesOption.hidden = !comparing();
     submit.textContent = comparing() ? "Compare" : "Analyze";
   };
 
-  function addRow(path = ""): HTMLInputElement {
+  function addRow(path = "", name = ""): HTMLInputElement {
     const row = document.createElement("div");
     row.className = "input-row";
     const role = document.createElement("span");
     role.className = "role";
+    const label = document.createElement("input");
+    label.className = "name";
+    label.placeholder = "name (optional)";
+    label.ariaLabel = "Name";
+    label.maxLength = 64;
+    label.value = name;
     const input = document.createElement("input");
+    input.className = "path";
     input.required = true;
     input.placeholder = "run .toml, .h5, or SVC .json";
     input.value = path;
@@ -163,7 +174,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       syncRows();
       changed();
     });
-    row.append(role, input, browse, remove);
+    row.append(role, label, input, browse, remove);
     inputsRoot.append(row);
     syncRows();
     return input;
@@ -215,7 +226,9 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
     submit.disabled = true;
     try {
       const config = clean(String(new FormData(form).get("config") ?? ""));
-      const inputs = inputFields().map((field) => clean(field.value));
+      const inputs = rows().map((row) => clean(pathField(row).value));
+      const names = rows().map((row) => nameField(row).value.trim());
+      const series = inputs.map((path, index) => ({ path, name: names[index] || roleOf(index) }));
       const compare = inputs.length > 1;
       const confirmed = await confirmReport(inputs[0], compare);
       if (!confirmed) return;
@@ -230,7 +243,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       reportBadges.length = 0;
       show(compare ? "Comparing…" : "Analyzing…", true);
       let comparison: string | undefined;
-      const request = { config, inputs, tolerances: compare && tolerances.checked, report, force };
+      const request = { config, inputs, names, tolerances: compare && tolerances.checked, report, force };
       const outcome = await runStreaming("run_analyze", request, (line) => {
         const parsed = parseLine(line);
         const { section, progress } = parsed;
@@ -242,7 +255,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
             reportBadges.push({ badge, phases: knc ? [`${section.title} plots`, BUNDLE_PHASE] : [BUNDLE_PHASE] });
             status = knc ? kncStatus(report, section, compare, badge) : { badge };
           }
-          sections.append(compare ? renderComparison(section, inputs.slice(1), status) : renderSection(section, status));
+          sections.append(compare ? renderComparison(section, series, status) : renderSection(section, status));
         }
         if (progress) {
           phaseStates.set(progress.phase, progress.state);
@@ -280,9 +293,11 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
 
   return {
     get(): AnalyzeState {
+      const filled = rows().filter((row) => clean(pathField(row).value));
       return {
         config: saved("config"),
-        inputs: inputFields().map((input) => clean(input.value)).filter(Boolean),
+        inputs: filled.map((row) => clean(pathField(row).value)),
+        names: filled.map((row) => nameField(row).value.trim()),
         tolerances: tolerances.checked,
         generate: generate.checked,
         report: saved("report"),
@@ -293,7 +308,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       const current = ++revision;
       field("config").value = state.config ?? "";
       inputsRoot.replaceChildren();
-      (state.inputs.length > 0 ? state.inputs : [""]).forEach((input) => addRow(input));
+      (state.inputs.length > 0 ? state.inputs : [""]).forEach((input, index) => addRow(input, state.names[index]));
       tolerances.checked = state.tolerances;
       generate.checked = state.generate;
       folder.value = state.report ?? "";

@@ -137,21 +137,28 @@ export function renderSection(section: Section, report?: ReportStatus): HTMLDeta
 
 const signed = (value: number, unit: string) => `${value > 0 ? "+" : ""}${formatValue(value, unit)}`;
 
+/** One compared input: its column header and the file behind it. */
+export interface Series {
+  name: string;
+  path: string;
+}
+
 /** A header cell with the series color used in the plots; 0 is the baseline. */
-const seriesHeader = (text: string, index: number) => {
+const seriesHeader = ({ name, path }: Series, index: number) => {
   const th = element("th", "");
-  th.append(swatch(index), ` ${text}`);
+  th.append(swatch(index), ` ${name}`);
+  th.title = path;
   return th;
 };
 
 /**
  * A comparison card: the baseline value, the allowed difference when tolerances apply,
  * then each candidate's value and its difference from the baseline, colored by status.
- * `candidates` labels the columns, in the order the inputs were given.
+ * `series` lists the inputs in the order they were given, the baseline first.
  */
 export function renderComparison(
   section: ComparisonSection,
-  candidates: string[],
+  [baseline, ...candidates]: Series[],
   report?: ReportStatus,
 ): HTMLDetailsElement {
   const statuses = section.metrics.flatMap((metric) => metric.candidates.map((candidate) => candidate.status));
@@ -165,12 +172,11 @@ export function renderComparison(
 
   const table = element("table", "", "metrics comparison");
   const head = table.createTHead().insertRow();
-  head.append(element("th"), seriesHeader("Baseline", 0));
+  head.append(element("th"), seriesHeader(baseline, 0));
   if (withTolerances) head.append(element("th", "Tolerance"));
-  candidates.forEach((label, index) => {
-    const th = seriesHeader(`Candidate ${index + 1}`, index + 1);
+  candidates.forEach((candidate, index) => {
+    const th = seriesHeader(candidate, index + 1);
     th.colSpan = 2;
-    th.title = label;
     head.append(th);
   });
   head.append(element("th"));

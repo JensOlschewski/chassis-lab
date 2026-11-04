@@ -45,6 +45,9 @@ struct AnalyzeState {
     config: Option<PathBuf>,
     /// One input is analyzed; more are compared, the first being the baseline.
     inputs: Vec<PathBuf>,
+    /// Legend name per input, in order; empty keeps the default.
+    #[serde(default)]
+    names: Vec<String>,
     tolerances: bool,
     generate: bool,
     report: Option<PathBuf>,
@@ -437,6 +440,7 @@ mod tests {
             analyze: AnalyzeState {
                 config: Some(dir.join("config.toml")),
                 inputs: vec![dir.join("data/run.toml"), PathBuf::from("/elsewhere/b.h5")],
+                names: vec!["foo".into(), String::new()],
                 tolerances: true,
                 generate: true,
                 report: Some(PathBuf::from("/elsewhere/report")),
@@ -487,6 +491,7 @@ mod tests {
                 PathBuf::from("/elsewhere/b.h5")
             ]
         );
+        assert_eq!(stored.analyze.names, ["foo", ""]);
         assert_eq!(
             stored.analyze.report,
             Some(PathBuf::from("/elsewhere/report"))
