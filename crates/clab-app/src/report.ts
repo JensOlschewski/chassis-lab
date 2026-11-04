@@ -65,13 +65,19 @@ export const roleOf = (index: number) => (index === 0 ? "Baseline" : `Candidate 
 
 const keyOf = ({ domain, test }: { domain: string; test?: string | null }) => (test ? `${domain}::${test}` : domain);
 
+/** The order of the live results; `report.json` lists domains sorted by key instead. */
+const DOMAIN_ORDER = ["svc", "knc::vertical", "knc::roll"];
+
+const inResultOrder = (domains: ReportDomain[]) =>
+  [...domains].sort((a, b) => DOMAIN_ORDER.indexOf(keyOf(a)) - DOMAIN_ORDER.indexOf(keyOf(b)));
+
 const titleOf = (domain: ReportDomain) =>
   domain.domain === "svc" ? "SVC" : `KnC ${domain.test!.charAt(0).toUpperCase()}${domain.test!.slice(1)}`;
 
 /** Cards from `report.json`: metrics and warnings grouped by domain and test, as in the Analyze tab. */
 export function sectionsFromReport(report: AnalysisFile): Section[] {
   const warnings = [...report.warnings];
-  const sections: Section[] = report.domains.map((domain) => {
+  const sections: Section[] = inResultOrder(report.domains).map((domain) => {
     const key = keyOf(domain);
     const prefix = `${key}: `;
     const own = warnings.filter((warning) => warning.startsWith(prefix));
@@ -97,7 +103,7 @@ export function comparisonFromReport(report: CompareFile): { series: Series[]; s
     path: input.path,
     name: label ?? roleOf(index),
   }));
-  const sections = report.domains.map((domain) => {
+  const sections = inResultOrder(report.domains).map((domain) => {
     const key = keyOf(domain);
     const rows = report.candidates.map((candidate) => ({
       skipped: candidate.domains.some((entry) => keyOf(entry) === key && entry.status === "not compared"),
