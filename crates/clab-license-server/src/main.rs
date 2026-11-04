@@ -31,6 +31,9 @@ enum Command {
         /// How long a token stays valid without a new online check.
         #[arg(long, default_value_t = 7)]
         grace_days: u64,
+        /// Pass `false` to stop new installations from registering; existing ones keep working.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        open_registration: bool,
     },
     /// Create the signing key. Refuses to replace an existing one.
     Keygen,
@@ -41,8 +44,12 @@ enum Command {
         #[arg(long)]
         person: String,
     },
-    /// Make a license stop working at the next online check.
+    /// Make a license stop working at the next online check, and block its machine.
     Revoke { id: i64 },
+    /// Let the machine of a revoked license register again.
+    Unblock { id: i64 },
+    /// Set the person a license belongs to.
+    Name { id: i64, person: String },
     /// Free the seat of a license, for example after a machine change.
     Unbind { id: i64 },
     /// Remove a license for good, for example one created by mistake. Prefer `revoke`.
@@ -120,10 +127,17 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let data = cli.data;
     match cli.command {
-        Command::Serve { listen, grace_days } => {
-            let app = http::router(open(&data, grace_days)?);
+        Command::Serve {
+            listen,
+            grace_days,
+            open_registration,
+        } => {
+            let app = http::router(open(&data, grace_days)?, open_registration);
             let listener = tokio::net::TcpListener::bind(&listen).await?;
-            eprintln!("listening on {listen}, grace {grace_days} days");
+            let registration = if open_registration { "open" } else { "closed" };
+            eprintln!(
+                "listening on {listen}, grace {grace_days} days, registration {registration}"
+            );
             axum::serve(listener, app)
                 .with_graceful_shutdown(shutdown())
                 .await?;
@@ -137,8 +151,22 @@ async fn main() -> Result<()> {
         Command::Revoke { id } => {
             let store = open(&data, 0)?;
             let person = person(&store, id)?;
-            store.revoke(id)?;
-            println!("revoked license {id} ({person})");
+            store.revoke(id, http::now())?;
+            println!("revoked license {id} ({person}); its machine is blocked");
+        }
+        Command::Unblock { id } => {
+            let store = open(&data, 0)?;
+            let person = person(&store, id)?;
+            if !store.unblock(id)? {
+                bail!("license {id} ({person}) has no blocked machine");
+            }
+            println!("unblocked the machine of license {id} ({person})");
+        }
+        Command::Name { id, person: name } => {
+            let store = open(&data, 0)?;
+            person(&store, id)?;
+            store.rename(id, &name)?;
+            println!("license {id} belongs to {name}");
         }
         Command::Unbind { id } => {
             let store = open(&data, 0)?;
@@ -153,18 +181,23 @@ async fn main() -> Result<()> {
             println!("deleted license {id} ({person})");
         }
         Command::List => {
-            let now = http::now();
+            let now = http::now() as i64;
+            let ago = |at: Option<i64>| {
+                at.map_or("-".to_owned(), |at| {
+                    format!("{}d ago", (now - at).max(0) / 86_400)
+                })
+            };
             for license in open(&data, 0)?.list()? {
-                let seat = match (&license.hostname, license.activated_at) {
-                    (Some(host), Some(at)) => {
-                        format!("{host}, {} days ago", (now as i64 - at).max(0) / 86_400)
-                    }
-                    _ => "free".to_owned(),
-                };
-                let state = if license.revoked { "revoked" } else { "active" };
                 println!(
-                    "{:>4}  {:<24} {:<8} {seat}",
-                    license.id, license.person, state
+                    "{:>4}  {:<24} {:<8} {:<6} {:<20} {:<15} {:<8} {}",
+                    license.id,
+                    license.person,
+                    if license.revoked { "revoked" } else { "active" },
+                    if license.auto { "auto" } else { "manual" },
+                    license.hostname.as_deref().unwrap_or("-"),
+                    license.last_ip.as_deref().unwrap_or("-"),
+                    ago(license.last_seen),
+                    license.version.as_deref().unwrap_or("-"),
                 );
             }
         }
