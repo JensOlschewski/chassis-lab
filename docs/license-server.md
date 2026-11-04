@@ -45,6 +45,7 @@ licenses create --person "Ada Lovelace"   # prints the key once
 licenses list
 licenses revoke 3
 licenses unbind 3                         # frees the seat after a machine change
+licenses delete 3                         # removes a license made by mistake; prefer revoke
 ```
 
 Keys are stored as SHA-256 hashes and cannot be shown again.

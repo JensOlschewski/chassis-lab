@@ -135,6 +135,14 @@ impl Store {
         )? > 0)
     }
 
+    /// The key then behaves like an unknown one.
+    pub fn delete(&self, id: i64) -> rusqlite::Result<bool> {
+        Ok(self
+            .connection
+            .execute("delete from licenses where id = ?1", [id])?
+            > 0)
+    }
+
     pub fn list(&self) -> rusqlite::Result<Vec<Listed>> {
         self.connection
             .prepare(
@@ -407,6 +415,20 @@ mod tests {
         assert!(store.unbind(id).unwrap());
         assert!(store.activate(&key, "b", "laptop", NOW).is_ok());
         assert!(!store.unbind(999).unwrap());
+    }
+
+    #[test]
+    fn a_deleted_license_is_unknown() {
+        let store = store();
+        let (id, key) = store.create("Ada").unwrap();
+        store.activate(&key, "a", "pc", NOW).ok().unwrap();
+        assert!(store.delete(id).unwrap());
+        assert!(store.list().unwrap().is_empty());
+        assert_eq!(
+            denied(store.validate(&key, "a", NOW)),
+            ErrorCode::InvalidKey
+        );
+        assert!(!store.delete(id).unwrap());
     }
 
     #[test]

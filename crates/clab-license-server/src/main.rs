@@ -45,6 +45,8 @@ enum Command {
     Revoke { id: i64 },
     /// Free the seat of a license, for example after a machine change.
     Unbind { id: i64 },
+    /// Remove a license for good, for example one created by mistake. Prefer `revoke`.
+    Delete { id: i64 },
     /// Show all licenses.
     List,
 }
@@ -97,6 +99,13 @@ fn open(data: &Path, grace_days: u64) -> Result<Store> {
     )?)
 }
 
+fn person(store: &Store, id: i64) -> Result<String> {
+    match store.list()?.into_iter().find(|license| license.id == id) {
+        Some(license) => Ok(license.person),
+        None => bail!("no license {id}"),
+    }
+}
+
 async fn shutdown() {
     use tokio::signal::unix::{SignalKind, signal};
     let mut terminate = signal(SignalKind::terminate()).expect("SIGTERM handler");
@@ -126,14 +135,22 @@ async fn main() -> Result<()> {
             println!("license {id} for {person}\n{key}");
         }
         Command::Revoke { id } => {
-            if !open(&data, 0)?.revoke(id)? {
-                bail!("no license {id}");
-            }
+            let store = open(&data, 0)?;
+            let person = person(&store, id)?;
+            store.revoke(id)?;
+            println!("revoked license {id} ({person})");
         }
         Command::Unbind { id } => {
-            if !open(&data, 0)?.unbind(id)? {
-                bail!("no license {id}");
-            }
+            let store = open(&data, 0)?;
+            let person = person(&store, id)?;
+            store.unbind(id)?;
+            println!("freed the seat of license {id} ({person})");
+        }
+        Command::Delete { id } => {
+            let store = open(&data, 0)?;
+            let person = person(&store, id)?;
+            store.delete(id)?;
+            println!("deleted license {id} ({person})");
         }
         Command::List => {
             let now = http::now();
