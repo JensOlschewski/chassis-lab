@@ -79,22 +79,50 @@ pub fn new_install_id() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// First start of an installation: the server creates a license for it.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterRequest {
+    pub install_id: String,
+    /// Salted hash of the OS machine ID; only the hash leaves the machine.
+    pub fingerprint: String,
+    pub hostname: String,
+    pub version: String,
+}
+
+/// The key is needed later for `validate`; the server stores it only hashed.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterResponse {
+    pub key: String,
+    pub token: Token,
+}
+
+/// Binds a manually issued key to this installation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActivateRequest {
     pub key: String,
     pub install_id: String,
+    pub fingerprint: String,
     pub hostname: String,
+    pub version: String,
 }
 
-/// Used for `validate` and `deactivate`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidateRequest {
+    pub key: String,
+    pub install_id: String,
+    pub hostname: String,
+    pub version: String,
+}
+
+/// Used for `deactivate`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeatRequest {
     pub key: String,
     pub install_id: String,
 }
 
-/// Why the server refused. Denials arrive as HTTP 403 and mean the license is
-/// not usable; any other failure only means the server could not answer.
+/// Why the server refused. HTTP 403 means the license is not usable and a client
+/// drops its token; any other status only means the server could not answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -106,6 +134,10 @@ pub enum ErrorCode {
     NotActivated,
     /// A field is missing or too long (HTTP 400).
     InvalidRequest,
+    /// The server accepts no new registrations (HTTP 403).
+    RegistrationClosed,
+    /// Too many registrations from one address (HTTP 429).
+    RateLimited,
 }
 
 impl fmt::Display for ErrorCode {
@@ -115,6 +147,8 @@ impl fmt::Display for ErrorCode {
             Self::SeatInUse => "the license is already activated on another machine",
             Self::NotActivated => "the license is not activated on this machine",
             Self::InvalidRequest => "the request was rejected as invalid",
+            Self::RegistrationClosed => "the server accepts no new registrations",
+            Self::RateLimited => "too many registrations from this address; try again later",
         })
     }
 }
