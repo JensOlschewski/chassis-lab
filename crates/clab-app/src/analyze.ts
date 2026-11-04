@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { pick, setupBrowse } from "./browse";
 import { swatch } from "./colors";
-import { readReport, sectionsFromReport } from "./report";
+import { readReport, roleOf, sectionsFromReport } from "./report";
 import {
   BadgeState,
   ComparisonSection,
@@ -121,7 +121,6 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   const nameField = (row: HTMLElement) => row.querySelector<HTMLInputElement>(".name")!;
   const comparing = () => rows().length > 1;
   /** The Baseline/Candidate N role of the `index`th row, which names its column unless the user did. */
-  const roleOf = (index: number) => (index === 0 ? "Baseline" : `Candidate ${index}`);
 
   /** Tells the session that the input rows changed; each field reports its own edits. */
   const changed = () => inputsRoot.dispatchEvent(new Event("change", { bubbles: true }));
@@ -269,11 +268,8 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       settlePhases(completed);
       if (completed && report) {
         sections.classList.add("finished");
-        // Inspect shows analysis reports only so far.
-        if (!compare) {
-          shown = report;
-          reportButton.hidden = false;
-        }
+        shown = report;
+        reportButton.hidden = false;
       }
       if (toleranceFailed) show("Compared: tolerance checks failed", false);
       else if (ok && compare) show(COMPARISON_MESSAGES[comparison ?? ""] ?? "Compared", comparison !== "incomplete");
@@ -331,7 +327,9 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         const report = await readReport(directory);
         if (current !== revision) return;
         if (report.command === "compare") {
-          show(`Saved comparison report: ${directory}. Run Compare to show its results here.`, true);
+          shown = directory;
+          reportButton.hidden = false;
+          show(`Saved comparison report: ${directory}. Show it in Inspect, or run Compare again.`, true);
           return;
         }
         if (report.command !== "analyze") return;
