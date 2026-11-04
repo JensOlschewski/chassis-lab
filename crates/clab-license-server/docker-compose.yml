@@ -1,0 +1,20 @@
+services:
+  clab-license:
+    image: clab-license:latest
+    container_name: clab-license
+    restart: unless-stopped
+    user: "1000:1000"
+    volumes:
+      - ./data:/data
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.clab-license.rule=Host(`clab.license.mariecolette.de`)
+      - traefik.http.routers.clab-license.entrypoints=websecure
+      - traefik.http.routers.clab-license.tls.certresolver=le
+      - traefik.http.services.clab-license.loadbalancer.server.port=8080
+
+networks:
+  proxy:
+    external: true

@@ -23,3 +23,7 @@ target/
 .claude
 .DS_Store
 /report/
+
+# License server state
+signing.key
+licenses.db*

@@ -3,12 +3,16 @@ members = [
     "crates/clab-converter",
     "crates/clab-core",
     "crates/clab-cli",
+    "crates/clab-license",
+    "crates/clab-license-server",
     "crates/clab-app/src-tauri",
 ]
 default-members = [
     "crates/clab-converter",
     "crates/clab-core",
     "crates/clab-cli",
+    "crates/clab-license",
+    "crates/clab-license-server",
 ]
 resolver = "3"
 
