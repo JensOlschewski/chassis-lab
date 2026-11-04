@@ -7,9 +7,6 @@ use std::fmt;
 
 pub use ed25519_dalek;
 
-/// Clients ask the server again once their token is older than this.
-pub const REFRESH_AFTER_SECS: u64 = 24 * 60 * 60;
-
 /// What the server vouches for. The token is only issued for a valid license.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Claims {

@@ -20,8 +20,7 @@ behind Traefik. Client and server share the token format through the
   never decide anything.
 - The server answers with a signed token. `valid_until` is the end of the grace
   period (`--grace-days`, default 7): a client that cannot reach the server may
-  keep running until then. Clients ask again once their token is older than one
-  day.
+  keep running until then. Clients ask the server on every run.
 - Revoking a license makes `validate` fail at the client's next online check.
 
 ## API
@@ -59,11 +58,12 @@ need none.
   (`~/.config/clab` on Linux), mode `0600`: install ID, key, token.
 - No state: the command registers the installation. Offline, this fails with a
   clear error.
-- A token younger than one day is trusted. An older one is renewed with
-  `validate`. A `403` removes the token and the command fails with
+- Every run calls `validate` and stores the renewed token, so a revocation
+  takes effect at once. A `403` removes the token and the command fails with
   `no valid license: run 'clab license activate <KEY>'`. If the server cannot be
   reached, the command runs until the token's `valid_until`.
-- `clab license activate <KEY> | status | deactivate`. `status` works offline.
+- `clab license activate <KEY> | status | deactivate`. `status` asks the server too and falls back to the
+  stored token offline.
 
 ## Administration
 

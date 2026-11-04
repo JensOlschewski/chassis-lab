@@ -1,15 +1,14 @@
 //! License gate and the `clab license` commands.
 //!
 //! The server decides who may run `clab`. This module keeps the signed token it
-//! hands out, asks again once the token is a day old, and tolerates an
+//! hands out, checks it with the server on every run, and tolerates an
 //! unreachable server until the token's `valid_until`.
 
 use anyhow::{Context, Result, anyhow, bail};
 use clab_license::ed25519_dalek::VerifyingKey;
 use clab_license::{
-    ActivateRequest, Claims, ErrorBody, ErrorCode, REFRESH_AFTER_SECS, RegisterRequest,
-    RegisterResponse, SeatRequest, Token, ValidateRequest, decode_public_key, new_install_id,
-    verify,
+    ActivateRequest, Claims, ErrorBody, ErrorCode, RegisterRequest, RegisterResponse, SeatRequest,
+    Token, ValidateRequest, decode_public_key, new_install_id, verify,
 };
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
@@ -22,7 +21,7 @@ const SERVER: &str = "https://clab.license.mariecolette.de";
 const PUBLIC_KEY: &str = "MK1RsG6OxxmXlJOTpn/cAPdz8m/UAOb/f5uB9pJjZBs=";
 const FINGERPRINT_SALT: &str = "clab-license-v1";
 const NO_LICENSE: &str = "no valid license: run 'clab license activate <KEY>'";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Subcommand)]
 pub enum LicenseCommand {
@@ -278,17 +277,20 @@ struct Gate<S> {
 impl<S: Server> Gate<S> {
     /// Returns the claims of a usable license, or the reason there is none.
     fn require(&self) -> Result<Claims> {
-        let Some(mut state) = self.store.load() else {
-            return self.register();
-        };
+        match self.store.load() {
+            Some(state) => self.check(state).map(|(claims, _)| claims),
+            None => self.register(),
+        }
+    }
+
+    /// Asks the server on every call, so a revocation takes effect at once. An
+    /// unreachable server is tolerated until the token's `valid_until`. The flag
+    /// tells whether the server answered.
+    fn check(&self, mut state: State) -> Result<(Claims, bool)> {
         let Some(token) = state.token.clone() else {
             bail!(NO_LICENSE);
         };
         let claims = self.accept(&state.install_id, &token).context(NO_LICENSE)?;
-        let age = self.now.checked_sub(claims.issued_at);
-        if age.is_some_and(|age| age < REFRESH_AFTER_SECS) {
-            return Ok(claims);
-        }
         let request = ValidateRequest {
             key: state.key.clone(),
             install_id: state.install_id.clone(),
@@ -300,14 +302,14 @@ impl<S: Server> Gate<S> {
                 let claims = self.accept(&state.install_id, &token)?;
                 state.token = Some(token);
                 self.store.save(&state)?;
-                Ok(claims)
+                Ok((claims, true))
             }
             Err(Refusal::Denied(code)) => {
                 state.token = None;
                 self.store.save(&state)?;
                 Err(denied(code))
             }
-            Err(Refusal::Unreachable(_)) if self.now < claims.valid_until => Ok(claims),
+            Err(Refusal::Unreachable(_)) if self.now < claims.valid_until => Ok((claims, false)),
             Err(Refusal::Unreachable(reason)) => Err(unreachable(reason)
                 .context("the license check is overdue and the grace period has ended")),
         }
@@ -392,32 +394,31 @@ impl<S: Server> Gate<S> {
         }
     }
 
-    /// Works offline: it reports what the stored token says.
+    /// Asks the server; when it is unreachable, reports what the stored token says.
     fn status(&self) -> String {
         let Some(state) = self.store.load() else {
             return "not licensed yet: the next analysis registers this installation".to_owned();
         };
-        let Some(token) = &state.token else {
+        if state.token.is_none() {
             return NO_LICENSE.to_owned();
-        };
-        let claims = match self.accept(&state.install_id, token) {
-            Ok(claims) => claims,
-            Err(error) => return format!("{NO_LICENSE} ({error})"),
-        };
-        let left = claims.valid_until.saturating_sub(self.now);
-        let validity = if left == 0 {
-            "expired: connect to the internet".to_owned()
-        } else {
-            format!(
-                "works offline for another {}d {}h",
-                left / 86_400,
-                left % 86_400 / 3_600
-            )
-        };
-        format!(
-            "licensed to {} (license {}), {validity}",
-            claims.licensee, claims.license_id
-        )
+        }
+        match self.check(state) {
+            Ok((claims, true)) => format!(
+                "licensed to {} (license {}), confirmed by the server",
+                claims.licensee, claims.license_id
+            ),
+            Ok((claims, false)) => {
+                let left = claims.valid_until.saturating_sub(self.now);
+                format!(
+                    "licensed to {} (license {}), server unreachable: works offline for another {}d {}h",
+                    claims.licensee,
+                    claims.license_id,
+                    left / 86_400,
+                    left % 86_400 / 3_600
+                )
+            }
+            Err(error) => format!("{error:#}"),
+        }
     }
 }
 
@@ -565,14 +566,12 @@ mod tests {
     }
 
     #[test]
-    fn the_first_run_registers_and_later_runs_stay_offline() {
+    fn the_first_run_registers() {
         let f = fixture(START);
         *f.gate.server.register.borrow_mut() = Some(Ok("CLAB-NEW".into()));
         assert_eq!(f.gate.require().unwrap().licensee, "Ada");
         let state = f.gate.store.load().unwrap();
         assert_eq!(state.key, "CLAB-NEW");
-        assert_eq!(f.gate.server.calls.get(), 1);
-        assert!(f.gate.require().is_ok());
         assert_eq!(f.gate.server.calls.get(), 1);
     }
 
@@ -594,21 +593,14 @@ mod tests {
     }
 
     #[test]
-    fn a_day_old_token_is_refreshed() {
-        let f = fixture(START + DAY);
+    fn every_run_asks_the_server_and_stores_the_new_token() {
+        let f = fixture(START + 10);
         saved(&f.gate, Some(token("inst", START)));
-        *f.gate.server.validate.borrow_mut() = Some(Ok(token("inst", START + DAY)));
-        assert_eq!(f.gate.require().unwrap().issued_at, START + DAY);
+        *f.gate.server.validate.borrow_mut() = Some(Ok(token("inst", START + 10)));
+        assert_eq!(f.gate.require().unwrap().issued_at, START + 10);
+        assert_eq!(f.gate.server.calls.get(), 1);
         let stored = f.gate.store.load().unwrap().token.unwrap();
-        assert!(stored.payload.contains(&(START + DAY).to_string()));
-    }
-
-    #[test]
-    fn a_token_just_under_a_day_old_is_not_refreshed() {
-        let f = fixture(START + DAY - 1);
-        saved(&f.gate, Some(token("inst", START)));
-        assert!(f.gate.require().is_ok());
-        assert_eq!(f.gate.server.calls.get(), 0);
+        assert!(stored.payload.contains(&(START + 10).to_string()));
     }
 
     #[test]
@@ -698,17 +690,22 @@ mod tests {
     }
 
     #[test]
-    fn status_reads_the_token_without_the_server() {
+    fn status_asks_the_server_and_falls_back_to_the_token() {
         let f = fixture(START + DAY);
         assert!(f.gate.status().starts_with("not licensed yet"));
         saved(&f.gate, Some(token("inst", START)));
         assert_eq!(
             f.gate.status(),
-            "licensed to Ada (license 3), works offline for another 6d 0h"
+            "licensed to Ada (license 3), server unreachable: works offline for another 6d 0h"
         );
-        saved(&f.gate, None);
+        *f.gate.server.validate.borrow_mut() = Some(Ok(token("inst", START + DAY)));
+        assert_eq!(
+            f.gate.status(),
+            "licensed to Ada (license 3), confirmed by the server"
+        );
+        *f.gate.server.validate.borrow_mut() = Some(Err(Refusal::Denied(ErrorCode::InvalidKey)));
+        assert!(f.gate.status().starts_with(NO_LICENSE));
         assert_eq!(f.gate.status(), NO_LICENSE);
-        assert_eq!(f.gate.server.calls.get(), 0);
     }
 
     #[cfg(unix)]
