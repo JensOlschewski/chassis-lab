@@ -9,6 +9,9 @@ use crate::worker::clean_path;
 pub struct AnalyzeRequest {
     config: PathBuf,
     inputs: Vec<PathBuf>,
+    /// Legend name per input, in order; empty keeps the default.
+    #[serde(default)]
+    names: Vec<String>,
     /// Apply configured tolerances; only a comparison has any.
     tolerances: bool,
     report: Option<PathBuf>,
@@ -28,6 +31,17 @@ impl AnalyzeRequest {
         let mut args: Vec<OsString> = vec![command.into(), "--json".into()];
         if compare && self.tolerances {
             args.push("--tolerances".into());
+        }
+        if self.names.iter().any(|name| !name.trim().is_empty()) {
+            if self.names.len() != self.inputs.len() {
+                return Err("Every input needs a name field".into());
+            }
+            // `--label=` keeps a name that starts with `-` from reading as a flag.
+            args.extend(
+                self.names
+                    .iter()
+                    .map(|name| format!("--label={name}").into()),
+            );
         }
         if let Some(report) = &self.report {
             args.extend(["--report".into(), clean_path(report).into()]);
@@ -49,6 +63,7 @@ mod tests {
         AnalyzeRequest {
             config: PathBuf::from("\"/data/config.toml\" "),
             inputs: inputs.iter().map(PathBuf::from).collect(),
+            names: Vec::new(),
             tolerances: true,
             report: report.map(PathBuf::from),
             force,
@@ -107,6 +122,49 @@ mod tests {
             request(&inputs, Some("/out"), false).args().unwrap(),
             expected.map(OsString::from)
         );
+    }
+
+    #[test]
+    fn names_are_passed_as_labels_in_input_order() {
+        let mut named = request(&["/data/base.h5", "/data/a.h5"], None, false);
+        named.names = vec!["foo".into(), "".into()];
+        let args = named.args().unwrap();
+        let labels: Vec<_> = args
+            .iter()
+            .filter(|arg| arg.to_string_lossy().starts_with("--label="))
+            .collect();
+        assert_eq!(labels, ["--label=foo", "--label="]);
+        assert!(
+            args.iter().position(|arg| arg == "--label=foo")
+                < args.iter().position(|arg| arg == "/data/config.toml")
+        );
+    }
+
+    #[test]
+    fn blank_names_pass_no_labels() {
+        let mut blank = request(&["/data/base.h5", "/data/a.h5"], None, false);
+        blank.names = vec![" ".into(), "".into()];
+        assert!(
+            !blank
+                .args()
+                .unwrap()
+                .iter()
+                .any(|arg| arg.to_string_lossy().starts_with("--label"))
+        );
+    }
+
+    #[test]
+    fn a_single_input_passes_its_name() {
+        let mut single = request(&["/data/run.toml"], None, false);
+        single.names = vec!["foo".into()];
+        assert!(single.args().unwrap().contains(&"--label=foo".into()));
+    }
+
+    #[test]
+    fn mismatched_names_are_rejected() {
+        let mut named = request(&["/data/base.h5", "/data/a.h5"], None, false);
+        named.names = vec!["foo".into()];
+        assert!(named.args().is_err());
     }
 
     #[test]
