@@ -94,7 +94,8 @@ impl Store {
 }
 
 /// `Denied` is the server's verdict (HTTP 403): the license is not usable.
-/// `Unreachable` covers every other outcome and decides nothing.
+/// `Unreachable` covers every other outcome, including refused requests such as
+/// a rate limit, and decides nothing.
 #[derive(Debug)]
 enum Refusal {
     Denied(ErrorCode),
@@ -262,7 +263,9 @@ fn denied(code: ErrorCode) -> anyhow::Error {
 }
 
 fn unreachable(reason: String) -> anyhow::Error {
-    anyhow!("cannot reach the license server ({reason}): connect to the internet and try again")
+    anyhow!(
+        "the license server gave no answer ({reason}): check the internet connection or try again later"
+    )
 }
 
 struct Gate<S> {
