@@ -1133,6 +1133,8 @@ fn convention(
 }
 
 pub(crate) struct PlotOptions<'a> {
+    /// Legend name of an analyzed input; a comparison names its series itself.
+    pub label: Option<&'a str>,
     pub footer: &'a str,
     pub debug: Option<&'a str>,
     pub workers: usize,
@@ -1154,7 +1156,7 @@ pub(crate) fn curve_plots(
     options: PlotOptions<'_>,
     progress: &ReportProgress,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
-    let source_label = source_label(measurement);
+    let source_label = options.label.unwrap_or_else(|| source_label(measurement));
     let curves = serde_json::to_string(curves)?;
     let knc = test.config(config);
     let gradient = knc.map(|config| effective_gradient_points(&config.window));

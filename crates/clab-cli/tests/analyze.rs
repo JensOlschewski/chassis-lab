@@ -182,6 +182,42 @@ fn analyze_json_prints_one_line_per_section() {
 }
 
 #[test]
+fn writes_label_to_report_and_rejects_invalid_label() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let config = examples.join("config.toml");
+    let input = examples.join("input/raw-measurement/example-measurement-svc.json");
+    let directory = tempdir().unwrap();
+    let output = directory.path().join("analysis");
+    let run = |label: &str, report: bool| {
+        let mut command = clab();
+        command.args([
+            "analyze",
+            config.to_str().unwrap(),
+            input.to_str().unwrap(),
+            "--label",
+            label,
+        ]);
+        if report {
+            command.args(["-r", output.to_str().unwrap()]);
+        }
+        command.output().unwrap()
+    };
+    let result = run(" foo ", true);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["label"], "foo");
+
+    let result = run("a\nb", false);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("control characters"));
+}
+
+#[test]
 fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");

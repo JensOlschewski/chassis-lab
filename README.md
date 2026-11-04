@@ -49,17 +49,16 @@ shared across simulation and measurement runs.
 Configuration is modular. `config.toml` references setup, mappings, and optional
 tolerance files.
 
-`run.toml` defines input files and case metadata for each analysis or
-comparison.
-
 | File                        | Purpose                                                             |
 | --------------------------- | ------------------------------------------------------------------- |
 | `config.toml`               | Main configuration file                                             |
-| `setup.toml`                | Test setup.                                                         |
+| `setup.toml`                | General test setup.                                                 |
 | `simulation-mappings.toml`  | Maps simulation source signals to ChassisLab signals and units      |
-| `measurement-mappings.toml` | Same, for measurement sources.                                      |
+| `measurement-mappings.toml` | Maps measurement source signals to ChassisLab signals and units     |
 | `tolerances.toml`           | Optional absolute and relative tolerances used by (`--tolerances`). |
-| `run.toml`                  | Run collection for `analyze` or `compare`.                          |
+
+`run.toml` defines input files and case metadata for each analysis or
+comparison.
 
 ## Commands `>_`
 
@@ -67,22 +66,16 @@ comparison.
 
 Convert raw simulation or measurement data to HDF5. Default output is `INPUT.h5`
 
-- Use `--output` for an explicit file.
-- Use `--force` to replace an existing output.
+```bash
+clab convert input.h5
+```
+
+- `--output` for an explicit file.
+- `--force` to replace an existing output.
 - `--domain` (`-d`) is required and defines test domain > (`svc`|`knc`)
 - `--test` (`-t`) is required for `knc` > (`vertical`|`roll`|`static`)
 
-```bash
-clab convert examples/input/raw-measurement/example-measurement-knc-vertical.acd \
-    -d knc -t vertical \
-    --output examples/input/generated-measurement-knc-vertical.h5
-```
-
 ### 🔍 clab inspect
-
-`--list` to show signals and \
-`--match TEXT` to filter them \
-`--mapping svc|knc` displays mapping requirements without opening an input file
 
 Inspect a measurement HDF5 file:
 
@@ -96,44 +89,54 @@ Create a mapping template for KnC vertical analysis:
 clab inspect --mapping knc --test vertical --template
 ```
 
+`--list` to show signals and \
+`--match TEXT` to filter them \
+`--mapping svc|knc` displays mapping requirements without opening an input file
+
+Convert measurement example
+
+```bash
+clab convert examples/input/raw-measurement/example-measurement-knc-roll.acd \
+         --domain knc --test roll \
+         -o examples/input/generated-measurement-knc-roll.h5
+```
+
 ### 📊 clab analyze
 
 Analyze one normalized input or run manifest to calculate metrics and curves.
-
-- Use `--report PATH` to write a report bundle with `report.json`, `metrics.csv`,
-  and a browsable `index.html` overview. KnC reports also include JSON details
-  and PDF plots.
-- A run manifest may combine `[input.svc]`, `[input.knc.vertical]` and
-  `[input.knc.roll]`; each KnC test writes its own `knc-<test>.json`.
-- Use `--debug` for measurement branch detection diagnostics (needs `--report`).
-- Use `--verbose` (`-v`) to print default-value warnings.
-- Use `--force` to replace an existing report bundle.
 
 ```bash
 clab analyze examples/config.toml examples/input/run-simulation.toml
 ```
 
-The measurement example adds KnC roll (real Ford varb roll measurement,
-trimmed to mapped channels):
+- `--report PATH` (`-r`) write a report bundle,
+- `--label NAME` to explictly name the input in plot legends and report
+- `--debug` for measurement branch detection diagnostics (needs `--report`).
+- `--verbose` (`-v`) to print default-value warnings.
+- `--force` to replace an existing report bundle.
+
+Create report and label.
 
 ```bash
-clab convert examples/input/raw-measurement/example-measurement-knc-roll.acd -d knc -t roll \
-    -o examples/input/generated-measurement-knc-roll.h5
-clab analyze examples/config.toml examples/input/run-measurement.toml
+clab analyze examples/config.toml examples/input/run-simulation.toml \
+    --report reports/simulation \
+    --label "Simulation"
 ```
 
 ### ⚖️ clab compare
 
-Compare compatible SVC or KnC baseline and candidate inputs.
+Compare inputs.
 
-- Use `--tolerances` (`-t`) for pass/fail status from config tolerances (without
-  it, metrics are informational only).
-- Use `--report PATH` to write a report bundle with `report.json`, `metrics.csv`,
-  and a browsable `index.html` linking available KnC PDF plots.
-- Use `--debug` for measurement rate-filter diagnostics (needs `--report`).
-- Use `--force` to replace an existing report bundle.
+- `--tolerances` (`-t`) for pass/fail status from config tolerances
+- `--report PATH` (`-r`) write a report bundle,
+- `--label NAME` once per input, baseline first
+- `--debug` for measurement branch detection diagnostics (needs `--report`).
+- `--force` to replace an existing report bundle.
 
 ```bash
- clab compare examples/config.toml BASELINE CANDIDATE \
-   --tolerances --report reports/compare
+ clab compare examples/config.toml \
+    examples/input/run-simulation.toml \
+    examples/input/run-measurement.toml \
+   --tolerances --report reports/compare \
+   --label "Simulation" --label "Measurement"
 ```

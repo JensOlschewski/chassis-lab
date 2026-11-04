@@ -31,12 +31,16 @@ pub(crate) struct CompareArgs {
     /// Candidate SVC JSON, normalized HDF5, or run TOML manifests.
     #[arg(required = true, num_args = 1..)]
     candidates: Vec<PathBuf>,
+    /// Directory for report bundle.
+    #[arg(short = 'r', long = "report")]
+    output: Option<PathBuf>,
+    /// Legend name per input in order, baseline first; repeat once per input.
+    /// An empty name keeps the default ("Baseline", "Curve N").
+    #[arg(short, long = "label")]
+    labels: Vec<String>,
     /// Apply validation tolerances from configuration.
     #[arg(short, long)]
     tolerances: bool,
-    /// Directory for deterministic report bundle.
-    #[arg(short = 'r', long = "report")]
-    output: Option<PathBuf>,
     /// Replace report bundle already in output directory.
     #[arg(long)]
     force: bool,
@@ -130,8 +134,104 @@ struct ComparisonTolerances {
 
 type GroupedMetrics<'a> = Vec<(Option<&'a str>, &'a str, Vec<(usize, &'a Metric)>)>;
 
+const MAX_LABEL_CHARS: usize = 64;
+
+/// A trimmed label, `None` when blank so the default applies.
+pub(crate) fn parse_label(label: &str) -> Result<Option<String>> {
+    let label = label.trim();
+    if label.chars().count() > MAX_LABEL_CHARS {
+        bail!("label '{label}' is longer than {MAX_LABEL_CHARS} characters");
+    }
+    if label.chars().any(char::is_control) {
+        bail!(
+            "label '{}' contains control characters",
+            label.escape_debug()
+        );
+    }
+    Ok((!label.is_empty()).then(|| label.to_owned()))
+}
+
+/// Explicit label per input (baseline first), `None` where the default applies.
+fn parse_labels(labels: &[String], inputs: usize) -> Result<Vec<Option<String>>> {
+    if !labels.is_empty() && labels.len() != inputs {
+        bail!(
+            "expected {inputs} --label values (one per input, baseline first), got {}",
+            labels.len()
+        );
+    }
+    let mut parsed = labels
+        .iter()
+        .map(|label| parse_label(label))
+        .collect::<Result<Vec<_>>>()?;
+    parsed.resize(inputs, None);
+    let mut seen = std::collections::BTreeSet::new();
+    for index in 0..inputs {
+        let label = display_label(&parsed, index);
+        if !seen.insert(label.clone()) {
+            bail!("label '{label}' is used by more than one input");
+        }
+    }
+    Ok(parsed)
+}
+
+fn display_label(labels: &[Option<String>], index: usize) -> String {
+    labels[index].clone().unwrap_or_else(|| match index {
+        0 => "Baseline".to_owned(),
+        _ => format!("Curve {index}"),
+    })
+}
+
+/// A run's `[meta] name` as label; `None` when absent (`undefined`) or unusable.
+pub(crate) fn meta_label(name: &str) -> Option<String> {
+    parse_label(name)
+        .ok()
+        .flatten()
+        .filter(|name| name != "undefined")
+}
+
+/// Explicit labels, else run names; a run name clashing with another label
+/// falls back to its default.
+fn resolve_labels(explicit: Vec<Option<String>>, names: &[&str]) -> Vec<Option<String>> {
+    let mut labels = explicit;
+    let derived: Vec<bool> = labels.iter().map(Option::is_none).collect();
+    for (label, name) in labels.iter_mut().zip(names) {
+        if label.is_none() {
+            *label = meta_label(name);
+        }
+    }
+    loop {
+        let shown: Vec<_> = (0..labels.len())
+            .map(|index| display_label(&labels, index))
+            .collect();
+        let clashes: Vec<_> = (0..labels.len())
+            .filter(|&index| {
+                derived[index]
+                    && labels[index].is_some()
+                    && shown.iter().filter(|label| **label == shown[index]).count() > 1
+            })
+            .collect();
+        if clashes.is_empty() {
+            return labels;
+        }
+        for index in clashes {
+            labels[index] = None;
+        }
+    }
+}
+
 pub(crate) fn compare(args: CompareArgs) -> Result<()> {
+    let explicit = parse_labels(&args.labels, args.candidates.len() + 1)?;
     let baseline = load_input(&args.config, &args.baseline)?;
+    let loaded = args
+        .candidates
+        .iter()
+        .map(|path| load_input(&args.config, path))
+        .collect::<Result<Vec<_>>>()?;
+    let names: Vec<_> = std::iter::once(&baseline)
+        .chain(&loaded)
+        .map(|input| input.config.name.as_str())
+        .collect();
+    let labels = resolve_labels(explicit, &names);
     let tolerances = args.tolerances.then(|| ComparisonTolerances {
         svc: baseline
             .config
@@ -153,7 +253,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     let mut candidate_sources = Vec::new();
     let mut unavailable_domains = Vec::new();
     for (index, path) in args.candidates.iter().enumerate() {
-        let candidate = load_input(&args.config, path)?;
+        let candidate = &loaded[index];
         let mut metrics = Vec::new();
         let mut domains = Vec::new();
         for (name, base_domain) in &baseline.domains {
@@ -201,14 +301,14 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     incomplete |= compared.iter().any(|metric| metric.status == "missing");
                     metrics.extend(compared);
                     domains.push(serde_json::json!({"domain": "knc", "test": test.name(), "status": "compared"}));
+                    let label = display_label(&labels, index + 1);
                     knc_candidates.entry(test.name()).or_default().push((
-                        format!("Curve {}", index + 1),
+                        label.clone(),
                         candidate_curves.clone(),
                         candidate_branch.clone(),
                         candidate_mass.clone(),
                         format!(
-                            "Curve {}: {} | {} | {}",
-                            index + 1,
+                            "{label}: {} | {} | {}",
                             candidate.config.name,
                             candidate.config.loadcase,
                             absolute_path(path)?.display()
@@ -235,7 +335,11 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         }
         rows.extend(metrics.iter().cloned().map(|metric| (path.clone(), metric)));
         candidate_sources.extend(candidate.sources.iter().cloned());
-        candidates.push(serde_json::json!({"input": provenance(path)?, "case": {"name": candidate.config.name, "loadcase": candidate.config.loadcase}, "metrics": metrics, "domains": domains}));
+        let mut entry = serde_json::json!({"input": provenance(path)?, "case": {"name": candidate.config.name, "loadcase": candidate.config.loadcase}, "metrics": metrics, "domains": domains});
+        if let Some(label) = &labels[index + 1] {
+            entry["label"] = label.as_str().into();
+        }
+        candidates.push(entry);
     }
     let mut warnings = BTreeMap::new();
     if args.debug {
@@ -307,7 +411,8 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             absolute_path(&args.config)?.display()
         ));
         footer.push(format!(
-            "Baseline: {} | {} | {}",
+            "{}: {} | {} | {}",
+            display_label(&labels, 0),
             baseline.config.name,
             baseline.config.loadcase,
             absolute_path(&args.baseline)?.display()
@@ -335,8 +440,12 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             test,
             (base, base_branch, base_mass),
             &candidates,
-            ("Baseline", &format!("plots/knc/{}/comparison", test.name())),
+            (
+                &display_label(&labels, 0),
+                &format!("plots/knc/{}/comparison", test.name()),
+            ),
             knc::PlotOptions {
+                label: None,
                 footer: &footer.join("\n"),
                 debug: debug.as_deref(),
                 workers,
@@ -347,6 +456,10 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     for group in rendered {
         plots.extend(group);
     }
+    let mut baseline_entry = serde_json::json!({"input": provenance(&args.baseline)?, "case": {"name": baseline.config.name, "loadcase": baseline.config.loadcase}});
+    if let Some(label) = &labels[0] {
+        baseline_entry["label"] = label.as_str().into();
+    }
     let report = serde_json::json!({
         "schema_version": 1, "command": "compare",
         "domain": baseline.domains.values().next().map_or("", ComparedDomain::domain),
@@ -354,7 +467,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             "domain": domain.domain(),
             "test": domain.test().map(KncTest::name),
         })).collect::<Vec<_>>(),
-        "baseline": {"input": provenance(&args.baseline)?, "case": {"name": baseline.config.name, "loadcase": baseline.config.loadcase}},
+        "baseline": baseline_entry,
         "candidates": candidates, "status": status,
     });
     if let Some(output) = &args.output {
@@ -1067,8 +1180,56 @@ fn provenance(path: &Path) -> Result<serde_json::Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Metric, comparison_status, render_status};
+    use super::{Metric, comparison_status, parse_labels, render_status, resolve_labels};
     use std::path::PathBuf;
+
+    fn labels(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn parses_labels_with_defaults_for_blank_or_missing() {
+        assert_eq!(parse_labels(&[], 2).unwrap(), vec![None, None]);
+        assert_eq!(
+            parse_labels(&labels(&[" foo ", ""]), 2).unwrap(),
+            vec![Some("foo".into()), None]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_labels() {
+        let message = |values: &[&str], inputs| {
+            parse_labels(&labels(values), inputs)
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(message(&["foo"], 2).contains("expected 2 --label"));
+        assert!(message(&["foo", "foo"], 2).contains("more than one input"));
+        assert!(message(&["Curve 1", ""], 2).contains("more than one input"));
+        assert!(message(&["", "Baseline"], 2).contains("more than one input"));
+        assert!(message(&["a\nb", "c"], 2).contains("control characters"));
+        assert!(message(&[&"x".repeat(65), "c"], 2).contains("longer than 64"));
+    }
+
+    #[test]
+    fn resolves_run_names_below_explicit_labels() {
+        let some = |value: &str| Some(value.to_owned());
+        assert_eq!(
+            resolve_labels(
+                vec![None, some("x"), None],
+                &["run a", "run b", "undefined"]
+            ),
+            vec![some("run a"), some("x"), None]
+        );
+        assert_eq!(
+            resolve_labels(vec![None, None, None], &["same", "same", "other"]),
+            vec![None, None, some("other")]
+        );
+        assert_eq!(
+            resolve_labels(vec![some("foo"), None], &["n", "foo"]),
+            vec![some("foo"), None]
+        );
+    }
 
     #[test]
     fn colors_console_statuses_only_for_terminals() {

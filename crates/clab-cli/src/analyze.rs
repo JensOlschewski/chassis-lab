@@ -25,9 +25,12 @@ pub(crate) struct AnalyzeArgs {
     config: PathBuf,
     /// Normalized input file or run TOML manifest.
     input: PathBuf,
-    /// Directory for deterministic report bundle.
+    /// Directory for report bundle.
     #[arg(short = 'r', long = "report")]
     output: Option<PathBuf>,
+    /// Legend name of the input in plots and report.json (default: "Simulation" or "Measurement").
+    #[arg(short, long)]
+    label: Option<String>,
     /// Replace report files already in output directory.
     #[arg(long)]
     force: bool,
@@ -49,7 +52,13 @@ struct SvcReferenceReports {
     warnings: Vec<String>,
 }
 
-pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
+pub(crate) fn analyze(mut args: AnalyzeArgs) -> Result<()> {
+    args.label = args
+        .label
+        .as_deref()
+        .map(crate::compare::parse_label)
+        .transpose()?
+        .flatten();
     let extension = args
         .input
         .extension()
@@ -60,7 +69,7 @@ pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
             if !args.input.is_file() {
                 bail!("run manifest cannot be found: {}", args.input.display());
             }
-            analyze_run(&args)
+            analyze_run(&mut args)
         }
         Some("json") => {
             validate_input_file(&args.input)?;
@@ -74,7 +83,7 @@ pub(crate) fn analyze(args: AnalyzeArgs) -> Result<()> {
     }
 }
 
-fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
+fn analyze_run(args: &mut AnalyzeArgs) -> Result<()> {
     clab_core::config::validate_run_input_files(&args.input).map_err(|error| {
         anyhow::anyhow!(
             "failed to load config/run '{}': {error}",
@@ -89,6 +98,10 @@ fn analyze_run(args: &AnalyzeArgs) -> Result<()> {
                 args.input.display()
             )
         })?;
+    if args.label.is_none() {
+        args.label = crate::compare::meta_label(&config.name);
+    }
+    let args = &*args;
     let has_svc = !config.simulation_json.as_os_str().is_empty();
     let mut sources = Vec::new();
     if has_svc && is_hdf5(&config.simulation_json) {
@@ -225,7 +238,7 @@ fn write_combined_run(
         metrics.extend(console_ordered(&report.metrics));
         csv += &knc_csv_rows(&config.name, *test, &report.metrics)?;
     }
-    let bundle = serde_json::json!({
+    let mut bundle = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
         "case": {"name": config.name, "loadcase": config.loadcase},
@@ -234,6 +247,7 @@ fn write_combined_run(
         "metrics": metrics,
         "warnings": warnings,
     });
+    add_label(&mut bundle, args);
     let mut files = vec![
         (
             "report.json".to_owned(),
@@ -244,6 +258,7 @@ fn write_combined_run(
     if let Some(reports) = &svc_reports {
         let mut svc_detail: serde_json::Value = serde_json::from_str(&reports.detail)?;
         svc_detail["case"] = bundle["case"].clone();
+        add_label(&mut svc_detail, args);
         svc_detail["inputs"]["run"] = bundle["inputs"]["run"].clone();
         files.push((
             "svc.json".to_owned(),
@@ -268,6 +283,7 @@ fn write_combined_run(
             &detail,
             report,
             knc::PlotOptions {
+                label: args.label.as_deref(),
                 footer: &footer,
                 debug: debug.as_deref(),
                 workers,
@@ -278,6 +294,7 @@ fn write_combined_run(
     for ((test, path, report, _), plots) in knc_reports.iter().zip(rendered) {
         let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
         detail["case"] = bundle["case"].clone();
+        add_label(&mut detail, args);
         let mut knc_inputs = bundle["inputs"].clone();
         knc_inputs["input"] = provenance(path)?;
         if let Some(static_input) = test
@@ -349,6 +366,13 @@ fn knc_domain(test: KncTest, report: &knc::Reports) -> serde_json::Value {
         "curve_count": report.curve_count,
         "normalization": report.normalization,
     })
+}
+
+/// Records the user's `--label` in a `report.json` body; omitted when unset.
+fn add_label(report: &mut serde_json::Value, args: &AnalyzeArgs) {
+    if let Some(label) = &args.label {
+        report["label"] = label.as_str().into();
+    }
 }
 
 /// Corner PDF plots of one KnC test; roll axle plots arrive with #144.
@@ -506,10 +530,11 @@ fn write_svc_reference(
     run: Option<&Path>,
 ) -> Result<()> {
     let mut reports = svc_reference_reports(reference, &args.config, config)?;
+    add_label(&mut reports.report, args);
     if let Some(run) = run {
         reports.report["inputs"]["run"] = provenance(run)?;
-        reports.detail = serde_json::to_string_pretty(&reports.report)? + "\n";
     }
+    reports.detail = serde_json::to_string_pretty(&reports.report)? + "\n";
     let metrics = reports.report["metrics"].as_array().unwrap();
     show_section(
         args,
@@ -620,6 +645,7 @@ fn write_svc_report(
     );
     if let Some(output) = &args.output {
         let mut bundle = report.report;
+        add_label(&mut bundle, args);
         if let Some(run) = run {
             bundle["inputs"]["run"] = provenance(run)?;
         }
@@ -823,6 +849,7 @@ fn write_knc(
         "metrics": console_ordered(&report.metrics),
         "warnings": report.warnings,
     });
+    add_label(&mut bundle, args);
     if let Some(run) = run {
         bundle["inputs"]["run"] = provenance(run)?;
     }
@@ -837,6 +864,7 @@ fn write_knc(
         &detail,
         &report,
         knc::PlotOptions {
+            label: args.label.as_deref(),
             footer: &footer,
             debug: debug.as_deref(),
             workers: knc::plot_worker_limit(1),
@@ -845,6 +873,7 @@ fn write_knc(
     )?;
     progress.done(&format!("{} plots", test.title()));
     detail["case"] = bundle["case"].clone();
+    add_label(&mut detail, args);
     detail["inputs"] = bundle["inputs"].clone();
     let detail = serde_json::to_string_pretty(&detail)? + "\n";
     let detail_name = format!("knc-{}.json", test.name());
