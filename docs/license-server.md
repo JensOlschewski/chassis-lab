@@ -49,6 +49,22 @@ its token: `invalid_key` (unknown, revoked, or a blocked machine), `seat_in_use`
 means only that the server could not answer, so a client keeps its token until
 `valid_until`.
 
+## Client
+
+`clab convert|analyze|compare|inspect` check the license first
+(`crates/clab-cli/src/license.rs`). `--help`, `--version` and `clab license ...`
+need none.
+
+- State lives in `license.json` in the user config directory
+  (`~/.config/clab` on Linux), mode `0600`: install ID, key, token.
+- No state: the command registers the installation. Offline, this fails with a
+  clear error.
+- A token younger than one day is trusted. An older one is renewed with
+  `validate`. A `403` removes the token and the command fails with
+  `no valid license: run 'clab license activate <KEY>'`. If the server cannot be
+  reached, the command runs until the token's `valid_until`.
+- `clab license activate <KEY> | status | deactivate`. `status` works offline.
+
 ## Administration
 
 Run on the server:

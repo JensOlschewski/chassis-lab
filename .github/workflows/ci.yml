@@ -53,7 +53,7 @@ jobs:
         run: cargo clippy --workspace --exclude clab-app --all-targets --all-features -- -D warnings
 
       - name: Test Rust
-        run: cargo test --workspace --exclude clab-app --locked
+        run: cargo test --workspace --exclude clab-app --locked --features clab-cli/skip-license-gate
 
       - name: Check Python
         run: cd py-chassislab && ruff check . && ruff format --check .
