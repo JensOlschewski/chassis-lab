@@ -205,6 +205,55 @@ fn compares_svc_inputs_and_protects_reports_and_inputs() {
 }
 
 #[test]
+fn writes_labels_to_report_and_rejects_wrong_label_count() {
+    let directory = tempdir().unwrap();
+    let config = config_with_tolerance(directory.path(), 0.0001);
+    let simulation = directory.path().join("simulation.json");
+    let candidate = directory.path().join("candidate.json");
+    write_simulation_json(&simulation, 4000.0);
+    write_simulation_json(&candidate, 4200.0);
+    let output = directory.path().join("labeled-report");
+    let result = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            simulation.to_str().unwrap(),
+            candidate.to_str().unwrap(),
+            "--label",
+            "foo",
+            "--label",
+            "",
+            "-r",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["baseline"]["label"], "foo");
+    assert!(report["candidates"][0].get("label").is_none());
+
+    let result = clab()
+        .args([
+            "compare",
+            config.to_str().unwrap(),
+            simulation.to_str().unwrap(),
+            candidate.to_str().unwrap(),
+            "--label",
+            "foo",
+        ])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("expected 2 --label"));
+}
+
+#[test]
 fn compares_svc_json_and_returns_one_for_failed_tolerance() {
     let directory = tempdir().unwrap();
     let config = config_with_tolerance(directory.path(), 0.0001);
