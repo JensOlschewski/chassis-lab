@@ -86,6 +86,9 @@ jobs:
         run: python3 -m pip install "cmake>=3.26,<4"
 
       - name: Build Linux runtime archive
+        env:
+          # Test build only: the smoke test must not register with the license server.
+          CLAB_CARGO_FLAGS: --features skip-license-gate
         run: packaging/build-embedded-runtime.sh dist/clab-runtime-linux-x86_64
 
       - name: Verify Linux runtime checksum
