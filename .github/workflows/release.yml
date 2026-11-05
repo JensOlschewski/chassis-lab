@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+# Each platform smoke test holds the single seat of its CI license; two runs would collide.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -24,12 +29,15 @@ jobs:
           - os: ubuntu-latest
             platform: linux-x86_64
             target: x86_64-unknown-linux-gnu
+            license_key: CLAB_CI_LICENSE_KEY_LINUX
           - os: windows-latest
             platform: windows-x86_64
             target: x86_64-pc-windows-msvc
+            license_key: CLAB_CI_LICENSE_KEY_WINDOWS
           - os: macos-26-intel
             platform: macos-x86_64
             target: x86_64-apple-darwin
+            license_key: CLAB_CI_LICENSE_KEY_MACOS
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
@@ -97,7 +105,10 @@ jobs:
       - name: Smoke test Linux release runtime
         if: runner.os == 'Linux'
         shell: bash
+        env:
+          CLAB_LICENSE_KEY: ${{ secrets[matrix.license_key] }}
         run: |
+          test -n "$CLAB_LICENSE_KEY"
           smoke_input="$(mktemp)"
           trap 'rm -f "$smoke_input"' EXIT
           tar -czf "$smoke_input" \
@@ -111,7 +122,7 @@ jobs:
             examples/input/raw-simulation/example-simulation-knc-vertical.res \
             examples/input/raw-simulation/example-simulation-knc-static.res \
             examples/input/raw-simulation/example-simulation-knc-roll.res
-          docker run --rm --pull=missing -i ubuntu:24.04 bash -ceu '
+          docker run --rm --pull=missing -i -e CLAB_LICENSE_KEY ubuntu:24.04 bash -ceu '
             mkdir /tmp/input /tmp/bundle /tmp/smoke
             tar -xzf - -C /tmp/input
             tar -xzf /tmp/input/dist/embed-bundle-linux-x86_64.tar.gz -C /tmp/bundle
@@ -126,6 +137,10 @@ jobs:
             cp /tmp/input/examples/input/raw-simulation/example-simulation-knc-static.res /tmp/smoke/
             cp /tmp/input/examples/input/raw-simulation/example-simulation-knc-roll.res /tmp/smoke/
             cd /tmp/smoke
+            tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id
+            clab_license() { env -i PATH="$bundle/bin:/usr/bin:/bin" HOME=/tmp/smoke "$bundle/bin/clab" license "$@"; }
+            clab_license activate "$CLAB_LICENSE_KEY"
+            trap "clab_license deactivate" EXIT
             env -i PATH="$bundle/bin:/usr/bin:/bin" HOME=/tmp/smoke PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" --version
             env -i PATH="$bundle/bin:/usr/bin:/bin" HOME=/tmp/smoke PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-svc.res -d svc -o input/raw-simulation/example-simulation-svc.h5
             env -i PATH="$bundle/bin:/usr/bin:/bin" HOME=/tmp/smoke PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned LD_LIBRARY_PATH=/poisoned "$bundle/bin/clab" convert --yes example-simulation-knc-vertical.res -d knc -t vertical -o input/raw-simulation/example-simulation-knc-vertical.h5
@@ -138,7 +153,10 @@ jobs:
       - name: Smoke test Windows release runtime
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          CLAB_LICENSE_KEY: ${{ secrets[matrix.license_key] }}
         run: |
+          if (-not $env:CLAB_LICENSE_KEY) { throw "missing CI license key" }
           $smoke = Join-Path $env:RUNNER_TEMP "clab-release-windows-smoke"
           Remove-Item $smoke -Recurse -Force -ErrorAction SilentlyContinue
           Expand-Archive dist\embed-bundle-windows-x86_64.zip -DestinationPath $smoke
@@ -147,7 +165,11 @@ jobs:
           $env:PYTHONHOME = "C:\poisoned"
           $env:PYTHONPATH = "C:\poisoned"
           $env:VIRTUAL_ENV = "C:\poisoned"
+          $env:APPDATA = Join-Path $smoke "appdata"
           & "$bundle\bin\clab.exe" --version
+          & "$bundle\bin\clab.exe" license activate $env:CLAB_LICENSE_KEY
+          if ($LASTEXITCODE -ne 0) { throw "license activation failed" }
+          try {
           Copy-Item examples\config.toml $smoke
           New-Item -ItemType Directory -Path (Join-Path $smoke "input\raw-simulation") | Out-Null
           Copy-Item examples\input\run-simulation.toml (Join-Path $smoke "input")
@@ -169,17 +191,25 @@ jobs:
             if (-not (Test-Path $path) -or (Get-Item $path).Length -eq 0) { throw "missing report: $path" }
           }
           Pop-Location
+          } finally {
+            & "$bundle\bin\clab.exe" license deactivate
+          }
 
       - name: Smoke test macOS release runtime
         if: runner.os == 'macOS'
         shell: bash
+        env:
+          CLAB_LICENSE_KEY: ${{ secrets[matrix.license_key] }}
         run: |
+          test -n "$CLAB_LICENSE_KEY"
           smoke="$RUNNER_TEMP/clab-release-macos-smoke"
           rm -rf "$smoke" && mkdir -p "$smoke"
           tar -xzf dist/embed-bundle-macos-x86_64.tar.gz -C "$smoke"
           bundle="$smoke/embed-bundle-macos-x86_64"
-          clean_env=(env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned DYLD_LIBRARY_PATH=/poisoned)
+          clean_env=(env -i PATH="$bundle/bin:/usr/bin:/bin:/usr/sbin" HOME="$RUNNER_TEMP" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned DYLD_LIBRARY_PATH=/poisoned)
           "${clean_env[@]}" "$bundle/bin/clab" --version
+          "${clean_env[@]}" "$bundle/bin/clab" license activate "$CLAB_LICENSE_KEY"
+          trap '"${clean_env[@]}" "$bundle/bin/clab" license deactivate' EXIT
           cp examples/config.toml "$smoke/"
           cp examples/setup.toml examples/tolerances.toml "$smoke/"
           cp -R examples/mappings "$smoke/"
