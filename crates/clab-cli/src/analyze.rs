@@ -235,7 +235,7 @@ fn write_combined_run(
     }
     for (test, _, report, _) in &knc_reports {
         domains.push(knc_domain(*test, report));
-        metrics.extend(console_ordered(&report.metrics));
+        metrics.extend(display::console_ordered(&report.metrics));
         csv += &knc_csv_rows(&config.name, *test, &report.metrics)?;
     }
     let mut bundle = serde_json::json!({
@@ -720,21 +720,6 @@ fn report_written(args: &AnalyzeArgs, output: &Path) {
     }
 }
 
-/// All metrics with the console ones first, in console order, so a report lists them like the
-/// console does; the rest keep catalog order.
-fn console_ordered(metrics: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    let mut ordered = metrics.to_vec();
-    ordered.sort_by_key(|metric| {
-        crate::analysis::display::console_metric_order(
-            metric["domain"].as_str().unwrap_or_default(),
-            metric["test"].as_str(),
-            metric["metric"].as_str().unwrap_or_default(),
-        )
-        .unwrap_or(usize::MAX)
-    });
-    ordered
-}
-
 /// Metrics shown on the console, in console order.
 fn console_metrics(metrics: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     let mut visible: Vec<_> = visible_metrics(metrics).collect();
@@ -846,7 +831,7 @@ fn write_knc(
         "case": {"name": config.name, "loadcase": config.loadcase},
         "inputs": {"config": provenance(&args.config)?, "input": provenance(input)?},
         "domains": [knc_domain(test, &report)],
-        "metrics": console_ordered(&report.metrics),
+        "metrics": display::console_ordered(&report.metrics),
         "warnings": report.warnings,
     });
     add_label(&mut bundle, args);

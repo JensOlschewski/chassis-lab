@@ -56,12 +56,31 @@ pub(crate) fn qualified_metric_name(domain: &str, test: Option<&str>, metric: &s
     format!("{}::{metric}", qualifier(domain, test))
 }
 
-/// Only the concise roll summary is printed; reports retain the full catalog.
+/// Only the concise summary is printed and listed in `report.json`; `metrics.csv` keeps the full catalog.
 pub(crate) fn show_metric(domain: &str, test: Option<&str>, metric: &str) -> bool {
     console_metric_order(domain, test, metric).is_some()
 }
 
-/// Console order follows each KnC test's requested list; reports list these first, then the rest.
+/// The metrics the console shows, in console order: what `report.json` lists.
+/// `metrics.csv` keeps the full catalog.
+pub(crate) fn console_ordered(metrics: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let rank = |metric: &serde_json::Value| {
+        console_metric_order(
+            metric["domain"].as_str().unwrap_or_default(),
+            metric["test"].as_str(),
+            metric["metric"].as_str().unwrap_or_default(),
+        )
+    };
+    let mut shown: Vec<_> = metrics
+        .iter()
+        .filter(|m| rank(m).is_some())
+        .cloned()
+        .collect();
+    shown.sort_by_key(|metric| rank(metric));
+    shown
+}
+
+/// Console order follows each KnC test's requested list; reports list the same.
 pub(crate) fn console_metric_order(
     domain: &str,
     test: Option<&str>,
@@ -182,7 +201,31 @@ pub(crate) fn mapping_missing(domain: &str, name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{console_metric_order, qualified_metric_name, show_metric, tag_warning};
+    use super::{
+        console_metric_order, console_ordered, qualified_metric_name, show_metric, tag_warning,
+    };
+
+    #[test]
+    fn report_metrics_are_the_console_ones_in_console_order() {
+        let metric =
+            |name: &str| serde_json::json!({"domain": "knc", "test": "roll", "metric": name});
+        let listed = console_ordered(&[
+            metric("roll_ride_rate_front_left_n_per_mm"),
+            metric("roll_moment_peak_nm"),
+            metric("roll_camber_front_left_deg_per_mm"),
+        ]);
+        let names: Vec<_> = listed
+            .iter()
+            .map(|m| m["metric"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "roll_camber_front_left_deg_per_mm",
+                "roll_ride_rate_front_left_n_per_mm"
+            ]
+        );
+    }
 
     #[test]
     fn roll_console_order_matches_requested_families_and_corners() {

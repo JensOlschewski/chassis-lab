@@ -511,6 +511,7 @@ def plot_compare(
     debug: str | None = None,
     corner_mass_kg: str | None = None,
     selected: list[str] | None = None,
+    series: bool = False,
 ) -> dict[str, bytes]:
     """Render vertical overlays.
 
@@ -544,12 +545,13 @@ def plot_compare(
         logo,
         gradient_points_mm,
         branches,
+        series_json=series,
     )
     if debug:
         info = json.loads(debug)
-        series = [baseline, *(item["curves"] for item in candidates)]
+        sources = [baseline, *(item["curves"] for item in candidates)]
         for index, (curves, options) in enumerate(
-            zip(series, branches, strict=True)
+            zip(sources, branches, strict=True)
         ):
             debug_specs = selected_specs(PLOT_SPECS, selected, f"debug:{index}")
             reports.update(

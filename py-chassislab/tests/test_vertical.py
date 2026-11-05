@@ -443,6 +443,23 @@ def test_plot_compare_renders_ride_frequency_with_per_series_mass() -> None:
         corner_mass_kg=json.dumps([mass, mass]),
     )
     assert reports["knc_vertical_ride_frequency.pdf"].startswith(b"%PDF")
+    assert not any(name.endswith(".plot.json") for name in reports)
+
+    overlay = json.loads(
+        plot_compare(
+            json.dumps(curves),
+            json.dumps([{"label": "Curve 1", "curves": curves}]),
+            "Baseline",
+            "",
+            None,
+            0.5,
+            corner_mass_kg=json.dumps([mass, mass]),
+            series=True,
+        )["knc_vertical_ride_frequency.plot.json"]
+    )
+    sources = overlay["panels"][0]["sources"]
+    assert [source["label"] for source in sources] == ["Baseline", "Curve 1"]
+    assert sources[0]["color"] != sources[1]["color"]
 
     # One series missing mass (empty map): no crash. Same as any other
     # signal unavailable on one series only, the overlay plot needs it on

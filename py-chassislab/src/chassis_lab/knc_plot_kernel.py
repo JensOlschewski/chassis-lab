@@ -354,6 +354,7 @@ def render_comparison_reports(
     branches: list[BranchOptions] | None = None,
     gradient_points_deg: float | None = None,
     warn_missing: bool = False,
+    series_json: bool = False,
 ) -> dict[str, bytes]:
     """Render baseline and candidates using one declarative plot catalog."""
     series = [
@@ -382,6 +383,7 @@ def render_comparison_reports(
         branches or [BranchOptions()] * len(series),
         gradient_points_deg,
         warn_missing,
+        series_json,
     )
 
 
