@@ -206,7 +206,7 @@ jobs:
           rm -rf "$smoke" && mkdir -p "$smoke"
           tar -xzf dist/embed-bundle-macos-x86_64.tar.gz -C "$smoke"
           bundle="$smoke/embed-bundle-macos-x86_64"
-          clean_env=(env -i PATH="$bundle/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned DYLD_LIBRARY_PATH=/poisoned)
+          clean_env=(env -i PATH="$bundle/bin:/usr/bin:/bin:/usr/sbin" HOME="$RUNNER_TEMP" PYTHONHOME=/poisoned PYTHONPATH=/poisoned VIRTUAL_ENV=/poisoned DYLD_LIBRARY_PATH=/poisoned)
           "${clean_env[@]}" "$bundle/bin/clab" --version
           "${clean_env[@]}" "$bundle/bin/clab" license activate "$CLAB_LICENSE_KEY"
           trap '"${clean_env[@]}" "$bundle/bin/clab" license deactivate' EXIT
