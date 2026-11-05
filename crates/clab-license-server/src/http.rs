@@ -1,8 +1,8 @@
 use crate::store::{Failure, Store};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use clab_license::{
     ActivateRequest, ErrorBody, ErrorCode, RegisterRequest, RegisterResponse, SeatRequest, Token,
@@ -55,6 +55,7 @@ type Shared = Arc<App>;
 
 pub fn router(store: Store, open_registration: bool) -> Router {
     Router::new()
+        .route("/", get(index))
         .route("/v1/register", post(register))
         .route("/v1/activate", post(activate))
         .route("/v1/validate", post(validate))
@@ -90,6 +91,28 @@ impl IntoResponse for Failure {
             }
         }
     }
+}
+
+/// A public status page. It shows no licenses, names or counts.
+async fn index(State(app): State<Shared>) -> Html<String> {
+    let database_ok = app.store.lock().expect("store lock").list().is_ok();
+    let (database, class) = if database_ok {
+        ("ok", "ok")
+    } else {
+        ("unavailable", "bad")
+    };
+    let registration = if app.open_registration {
+        "accepted"
+    } else {
+        "closed"
+    };
+    Html(
+        include_str!("index.html")
+            .replace("{{database_class}}", class)
+            .replace("{{database}}", database)
+            .replace("{{registration}}", registration)
+            .replace("{{version}}", env!("CARGO_PKG_VERSION")),
+    )
 }
 
 async fn register(
@@ -265,6 +288,22 @@ mod tests {
             post_json(&app, "/v1/validate", check).await.0,
             StatusCode::OK
         );
+    }
+
+    #[tokio::test]
+    async fn the_status_page_shows_state_but_no_licenses() {
+        let store = store(SigningKey::from_bytes(&[4; 32]));
+        store.create("Ada Secret").unwrap();
+        let app = router(store, false);
+        let response = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let page = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(page.contains("closed") && page.contains("running"));
+        assert!(!page.contains("Ada Secret") && !page.contains("{{"));
     }
 
     #[tokio::test]

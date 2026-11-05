@@ -5,23 +5,25 @@ format via crate `clab-license`.
 
 ## Model
 
-- One license = one seat = one installation (random `install_id`). Two ways in:
-  - **Automatic:** first start, `clab` calls `register`. Server makes license
-    named after hostname (`auto`). User asked nothing.
-  - **Manual:** admin runs `create --person`. User binds key with `activate`.
-- Machine fingerprint = salted hash of OS machine ID. `revoke` also blocks the
-  fingerprint, so delete + reinstall gives no new license. `register` and
-  `activate` refuse blocked fingerprints. IP and hostname are only recorded for
-  admin. They never decide anything.
+- One license = one seat = one installation (random `install_id`)
+
+Two ways in:
+
+- **Automatic:** first start, `clab` calls `register`. Server makes license
+  named after hostname (`auto`). User asked nothing.
+- **Manual:** admin runs `create --person`. User binds key with `activate`.
+
 - Server answers with signed token. `valid_until` = now + grace (`--grace-days`,
   default 7). Client asks server on every run. Server unreachable: client runs
   until `valid_until`, then fails. Each online run resets the clock.
+
 - `revoke` bites at the client's next online check. Offline client notices only
   after reconnect or after `valid_until`.
 
 ## API
 
-All bodies JSON.
+`GET /` is a public status page (`src/index.html`): server up, database ok,
+registration accepted or closed, version. No licenses, names or counts.
 
 | Request               | Body                                                | Success              |
 | --------------------- | --------------------------------------------------- | -------------------- |
@@ -30,24 +32,12 @@ All bodies JSON.
 | `POST /v1/validate`   | `{key, install_id, hostname, version}`              | `200` token          |
 | `POST /v1/deactivate` | `{key, install_id}`                                 | `204`                |
 
-`register` from known machine returns its license on new `install_id` and new
-key (keys stored hashed only).
-
-Token = `{payload, signature}`. `payload` = JSON text of
-`{license_id, licensee, install_id, issued_at, valid_until}` (Unix seconds).
-`signature` = base64 Ed25519 over exactly those bytes.
-
-- `403 {"error": code}`: license not usable, client drops token. Codes:
-  `invalid_key` (unknown, revoked, blocked machine), `seat_in_use`,
-  `not_activated`, `registration_closed`.
-- `400` malformed. `429` `rate_limited`: over 20 registrations per address per
-  hour.
-- Anything else, or no connection: server gave no answer. Client keeps token
-  until `valid_until`.
 
 ## Client
 
-`clab convert|analyze|compare|inspect` check license first
+These commands are gated with license check.
+
+`clab convert|analyze|compare|inspect`
 (`crates/clab-cli/src/license.rs`). `--help`, `--version`, `clab license ...`
 need none.
 
