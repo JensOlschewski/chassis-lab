@@ -104,6 +104,50 @@ fn read_report_file(directory: PathBuf, name: String) -> Result<String, String> 
 }
 
 #[tauri::command]
+async fn open_report_plots(directory: PathBuf) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let directory = worker::clean_path(&directory);
+        if kind_of(&directory) != PathKind::Report {
+            return Err(format!("{} is not a report folder", directory.display()));
+        }
+        let plots = directory.join("plots");
+        let plots = plots
+            .canonicalize()
+            .map_err(|error| format!("{}: {error}", plots.display()))?;
+        if !plots.is_dir() {
+            return Err(format!("{} is not a folder", plots.display()));
+        }
+        #[cfg(target_os = "windows")]
+        let opener = "explorer.exe";
+        #[cfg(target_os = "macos")]
+        let opener = "open";
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let opener = "xdg-open";
+        let output = std::process::Command::new(opener)
+            .arg(&plots)
+            .output()
+            .map_err(|error| format!("Could not open {}: {error}", plots.display()))?;
+        if !output.status.success() {
+            return Err(format!(
+                "Could not open {} ({}): {}",
+                plots.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Inputs a report was computed from that are missing or no longer match; hashing may take a while, so it runs off the UI thread.
+#[tauri::command]
+async fn changed_report_inputs(directory: PathBuf) -> Result<Vec<report::ChangedInput>, String> {
+    report::changed_inputs(&worker::clean_path(&directory))
+}
+
+#[tauri::command]
 fn save_session(path: PathBuf, session: session::Session) -> Result<(), String> {
     session::save(&path, &session)
 }
@@ -150,6 +194,8 @@ fn main() {
             save_image,
             path_kind,
             read_report_file,
+            open_report_plots,
+            changed_report_inputs,
             save_session,
             load_session
         ])

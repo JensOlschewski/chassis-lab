@@ -70,6 +70,19 @@ export interface AnalyzeState {
   report: string | null;
 }
 
+interface ChangedInput {
+  path: string;
+  change: "missing" | "changed";
+}
+
+/** Saved results are from an earlier run; say whether the inputs they came from still match. */
+async function describeSaved(directory: string, subject: string, advice: string): Promise<{ message: string; ok: boolean }> {
+  const changed = await invoke<ChangedInput[]>("changed_report_inputs", { directory });
+  if (changed.length === 0) return { message: `${subject}. Inputs unchanged since the run. ${advice}`, ok: true };
+  const list = changed.map(({ path, change }) => `${path} (${change})`).join(", ");
+  return { message: `${subject}. Inputs changed since the run: ${list}. Run again to update.`, ok: false };
+}
+
 /** `showReport` opens a report folder in Inspect, at the plots of `test` if given. */
 export function setupAnalyze(showReport: (directory: string, test?: string) => void) {
   const form = document.querySelector<HTMLFormElement>("#analyze-form")!;
@@ -80,6 +93,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   const tolerancesOption = document.querySelector<HTMLElement>("#analyze-tolerances")!;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
   const reportButton = document.querySelector<HTMLButtonElement>("#analyze-show-report")!;
+  const plotsButton = document.querySelector<HTMLButtonElement>("#analyze-open-plots")!;
   let shown: string | null = null;
   let revision = 0;
   reportButton.addEventListener("click", () => shown && showReport(shown));
@@ -88,6 +102,16 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
     status.textContent = message;
     status.classList.toggle("error", !ok);
   };
+
+  plotsButton.addEventListener("click", async () => {
+    if (!shown) return;
+    const current = revision;
+    try {
+      await invoke("open_report_plots", { directory: shown });
+    } catch (error) {
+      if (current === revision) show(`Could not open plots folder: ${error}`, false);
+    }
+  });
 
   const phaseStates = new Map<string, PhaseState>();
   const reportBadges: ReportBadge[] = [];
@@ -225,6 +249,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     submit.disabled = true;
+    let run = revision;
     try {
       const config = clean(String(new FormData(form).get("config") ?? ""));
       const inputs = rows().map((row) => clean(pathField(row).value));
@@ -232,13 +257,14 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       const series = inputs.map((path, index) => ({ path, name: names[index] || roleOf(index) }));
       const compare = inputs.length > 1;
       const confirmed = await confirmReport(inputs[0], compare);
-      if (!confirmed) return;
+      if (!confirmed || run !== revision) return;
       const { report, force } = confirmed;
-      revision++;
+      run = ++revision;
 
       sections.replaceChildren();
       sections.classList.remove("finished");
       reportButton.hidden = true;
+      plotsButton.hidden = true;
       shown = null;
       phaseStates.clear();
       reportBadges.length = 0;
@@ -246,6 +272,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       let comparison: string | undefined;
       const request = { config, inputs, names, tolerances: compare && tolerances.checked, report, force };
       const outcome = await runStreaming("run_analyze", request, (line) => {
+        if (run !== revision) return;
         const parsed = parseLine(line);
         const { section, progress } = parsed;
         if (section) {
@@ -264,6 +291,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         }
         if (parsed.comparison) comparison = parsed.comparison.status;
       });
+      if (run !== revision) return;
       const toleranceFailed = compare && outcome.exit_code === TOLERANCE_FAILURE;
       const { ok, message } = describe(outcome);
       const completed = ok || toleranceFailed;
@@ -272,11 +300,13 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         sections.classList.add("finished");
         shown = report;
         reportButton.hidden = false;
+        plotsButton.hidden = false;
       }
       if (toleranceFailed) show("Compared: tolerance checks failed", false);
       else if (ok && compare) show(COMPARISON_MESSAGES[comparison ?? ""] ?? "Compared", comparison !== "incomplete");
       else show(ok ? message : (errorLine(outcome.stderr) ?? message), ok);
     } catch (error) {
+      if (run !== revision) return;
       settlePhases(false);
       show(`Failed to run clab: ${error}`, false);
     } finally {
@@ -314,6 +344,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
       sections.replaceChildren();
       sections.classList.remove("finished");
       reportButton.hidden = true;
+      plotsButton.hidden = true;
       shown = null;
       phaseStates.clear();
       reportBadges.length = 0;
@@ -331,7 +362,9 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         if (report.command === "compare") {
           shown = directory;
           reportButton.hidden = false;
-          show(`Saved comparison report: ${directory}. Show it in Inspect, or run Compare again.`, true);
+          plotsButton.hidden = false;
+          const { message, ok } = await describeSaved(directory, `Saved comparison report: ${directory}`, "Show it in Inspect.");
+          if (current === revision) show(message, ok);
           return;
         }
         if (report.command !== "analyze") return;
@@ -344,7 +377,9 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         sections.classList.add("finished");
         shown = directory;
         reportButton.hidden = false;
-        show("Saved report results. Not rerun or checked against current inputs.", true);
+        plotsButton.hidden = false;
+        const { message, ok } = await describeSaved(directory, "Saved report results", "Not rerun.");
+        if (current === revision) show(message, ok);
       } catch (error) {
         if (current === revision) show(`Could not restore saved report: ${error}`, false);
       }

@@ -104,8 +104,8 @@ fieldset:disabled { opacity: 0.5; }
 .embedded-note { font-weight: 400; color: var(--muted); }
 .row { display: flex; gap: 16px; }
 .row label { flex: 1; }
-.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
-.check input { box-sizing: content-box; margin: 0; accent-color: var(--accent); }
+.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; pointer-events: none; }
+.check input { box-sizing: content-box; margin: 0; accent-color: var(--accent); pointer-events: auto; }
 
 .path-row { display: flex; gap: 8px; }
 .path-row input { flex: 1; }
