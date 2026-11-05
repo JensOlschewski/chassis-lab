@@ -290,10 +290,12 @@ impl<S: Server> Gate<S> {
     /// unreachable server is tolerated until the token's `valid_until`. The flag
     /// tells whether the server answered.
     fn check(&self, mut state: State) -> Result<(Claims, bool)> {
-        let Some(token) = state.token.clone() else {
-            bail!(NO_LICENSE);
-        };
-        let claims = self.accept(&state.install_id, &token).context(NO_LICENSE)?;
+        // Without a token the server is still asked: an unrevoked license comes back.
+        let claims = state
+            .token
+            .as_ref()
+            .map(|token| self.accept(&state.install_id, token).context(NO_LICENSE))
+            .transpose()?;
         let request = ValidateRequest {
             key: state.key.clone(),
             install_id: state.install_id.clone(),
@@ -312,9 +314,12 @@ impl<S: Server> Gate<S> {
                 self.store.save(&state)?;
                 Err(denied(code))
             }
-            Err(Refusal::Unreachable(_)) if self.now < claims.valid_until => Ok((claims, false)),
-            Err(Refusal::Unreachable(reason)) => Err(unreachable(reason)
-                .context("the license check is overdue and the grace period has ended")),
+            Err(Refusal::Unreachable(reason)) => match claims {
+                Some(claims) if self.now < claims.valid_until => Ok((claims, false)),
+                Some(_) => Err(unreachable(reason)
+                    .context("the license check is overdue and the grace period has ended")),
+                None => bail!(NO_LICENSE),
+            },
         }
     }
 
@@ -403,9 +408,6 @@ impl<S: Server> Gate<S> {
         let Some(state) = self.store.load() else {
             return "not licensed yet: the next analysis registers this installation".to_owned();
         };
-        if state.token.is_none() {
-            return NO_LICENSE.to_owned();
-        }
         match self.check(state) {
             Ok((claims, true)) => format!(
                 "licensed to {} (license {}), confirmed by the server",
@@ -608,15 +610,19 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_drops_the_token_for_good() {
+    fn a_refusal_drops_the_token_until_the_server_accepts_again() {
         let f = fixture(START + DAY);
         saved(&f.gate, Some(token("inst", START)));
         *f.gate.server.validate.borrow_mut() = Some(Err(Refusal::Denied(ErrorCode::InvalidKey)));
         let error = f.gate.require().unwrap_err();
         assert!(message(&error).starts_with(NO_LICENSE), "{error:#}");
         assert!(f.gate.store.load().unwrap().token.is_none());
+        // Offline, the dropped token stays dropped.
         assert!(f.gate.require().is_err());
-        assert_eq!(f.gate.server.calls.get(), 1);
+        // The license was restored on the server.
+        *f.gate.server.validate.borrow_mut() = Some(Ok(token("inst", START + DAY)));
+        assert!(f.gate.require().is_ok());
+        assert!(f.gate.store.load().unwrap().token.is_some());
     }
 
     #[test]

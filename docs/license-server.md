@@ -75,13 +75,13 @@ licenses create --person "Ada Lovelace"   # manual license; prints the key once
 licenses list                             # person, state, auto/manual, host, IP, last seen, version
 licenses name 3 "Ada Lovelace"            # name an automatic license
 licenses revoke 3                         # stops it and blocks its machine
-licenses unblock 3                        # lets that machine register again (new license)
+licenses unrevoke 3                       # undoes revoke: license works, machine unblocked
 licenses unbind 3                         # frees the seat after a machine change
 licenses delete 3                         # removes a license made by mistake; prefer revoke
 ```
 
 Keys are stored as SHA-256 hashes and cannot be shown again. A machine block
-belongs to the license id and survives `delete`; lift it with `unblock <id>`
+belongs to the license id and survives `delete`; lift it with `unrevoke <id>`
 before deleting. `serve --open-registration=false` stops new registrations;
 installations that already have a license keep working.
 

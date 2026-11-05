@@ -168,12 +168,16 @@ impl Store {
             > 0)
     }
 
-    /// Lets the machine of a revoked license register again. The license stays revoked.
-    pub fn unblock(&self, id: i64) -> rusqlite::Result<bool> {
-        Ok(self.connection.execute(
+    /// Undoes `revoke`: the license works again and its machine is unblocked.
+    pub fn unrevoke(&self, id: i64) -> rusqlite::Result<bool> {
+        self.connection.execute(
             "delete from blocked_fingerprints where license_id = ?1",
             [id],
-        )? > 0)
+        )?;
+        Ok(self
+            .connection
+            .execute("update licenses set revoked = 0 where id = ?1", [id])?
+            > 0)
     }
 
     pub fn rename(&self, id: i64, person: &str) -> rusqlite::Result<bool> {
@@ -766,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn unblocking_lets_the_machine_register_a_new_license() {
+    fn unrevoking_restores_the_license_and_unblocks_the_machine() {
         let store = store();
         let registered = store
             .register(&registration("a", "fp-1", "pc"), None, NOW)
@@ -774,15 +778,15 @@ mod tests {
             .unwrap();
         let id = verified(&store, &registered.token).license_id;
         store.revoke(id, NOW).unwrap();
-        assert!(store.unblock(id).unwrap());
-        assert!(!store.unblock(id).unwrap());
-        // The old license stays revoked; the machine gets a new one.
+        assert!(store.list().unwrap()[0].revoked);
+        assert!(store.unrevoke(id).unwrap());
+        assert!(!store.list().unwrap()[0].revoked);
         let again = store
             .register(&registration("b", "fp-1", "pc"), None, NOW)
             .ok()
             .unwrap();
-        assert_ne!(verified(&store, &again.token).license_id, id);
-        assert!(store.list().unwrap()[0].revoked);
+        assert_eq!(verified(&store, &again.token).license_id, id);
+        assert!(!store.unrevoke(99).unwrap());
     }
 
     #[test]
@@ -806,7 +810,7 @@ mod tests {
         let store = store();
         let (id, _) = store.create("Ada").unwrap();
         assert!(store.revoke(id, NOW).unwrap());
-        assert!(!store.unblock(id).unwrap());
+        assert!(store.unrevoke(id).unwrap());
     }
 
     #[test]
