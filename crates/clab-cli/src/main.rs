@@ -9,6 +9,7 @@ mod analyze;
 mod compare;
 mod convert;
 mod inspect;
+mod license;
 mod progress;
 mod report;
 mod signals;
@@ -30,6 +31,9 @@ enum Command {
     Inspect(inspect::InspectArgs),
     /// Convert a supported input to HDF5.
     Convert(convert::ConvertArgs),
+    /// Manage the license of this installation.
+    #[command(subcommand)]
+    License(license::LicenseCommand),
     /// Generate shell completion scripts.
     Completion { shell: Shell },
     #[command(hide = true, name = "__render-knc")]
@@ -37,6 +41,15 @@ enum Command {
         request: std::path::PathBuf,
         output: std::path::PathBuf,
     },
+}
+
+impl Command {
+    fn needs_license(&self) -> bool {
+        matches!(
+            self,
+            Self::Analyze(_) | Self::Compare(_) | Self::Inspect(_) | Self::Convert(_)
+        )
+    }
 }
 
 #[cfg(windows)]
@@ -77,11 +90,15 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    if cli.command.needs_license() {
+        license::require()?;
+    }
     match cli.command {
         Command::Analyze(args) => analyze::analyze(args),
         Command::Compare(args) => compare::compare(args),
         Command::Inspect(args) => inspect::inspect(args),
         Command::Convert(args) => convert::convert(args),
+        Command::License(command) => license::run(command),
         Command::Completion { shell } => {
             generate(shell, &mut Cli::command(), "clab", &mut std::io::stdout());
             Ok(())

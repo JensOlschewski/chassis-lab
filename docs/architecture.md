@@ -330,8 +330,11 @@ tests pass.
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --locked
+cargo test --workspace --locked --features clab-cli/skip-license-gate
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
 .venv/bin/pytest -q
 ```
+
+The `skip-license-gate` feature switches off the license check so the CLI tests
+can run the binary. Never enable it for a release build.

@@ -7,6 +7,10 @@ edition = "2024"
 name = "clab"
 path = "src/main.rs"
 
+[features]
+# For tests only: skips the license gate. Release builds must not enable it.
+skip-license-gate = []
+
 [dependencies]
 clab-converter = { path = "../clab-converter" }
 anyhow = "1.0"
@@ -21,6 +25,8 @@ sha2 = "0.10"
 tempfile = "3.20"
 toml = "0.9"
 indicatif = "0.18"
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+clab-license = { version = "0.8.0", path = "../clab-license" }
 
 [dev-dependencies]
 hdf5 = { package = "hdf5-metno", version = "0.13", features = ["static"] }

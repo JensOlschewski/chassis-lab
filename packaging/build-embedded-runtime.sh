@@ -46,7 +46,7 @@ done < "$lock"
 RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,\$ORIGIN/../lib" \
     PYO3_CONFIG_FILE="$pyo3_config" \
     PYO3_PYTHON="$output/bin/python3.12" \
-    cargo build --release --locked -p clab-cli
+    cargo build --release --locked -p clab-cli ${CLAB_CARGO_FLAGS:-}
 cp "$root/target/release/clab" "$output/bin/clab-bin"
 cat > "$output/bin/clab" <<'SH'
 #!/bin/sh

@@ -7,9 +7,6 @@ use std::fmt;
 
 pub use ed25519_dalek;
 
-/// Clients ask the server again once their token is older than this.
-pub const REFRESH_AFTER_SECS: u64 = 24 * 60 * 60;
-
 /// What the server vouches for. The token is only issued for a valid license.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Claims {
@@ -147,8 +144,8 @@ impl fmt::Display for ErrorCode {
             Self::SeatInUse => "the license is already activated on another machine",
             Self::NotActivated => "the license is not activated on this machine",
             Self::InvalidRequest => "the request was rejected as invalid",
-            Self::RegistrationClosed => "the server accepts no new registrations",
-            Self::RateLimited => "too many registrations from this address; try again later",
+            Self::RegistrationClosed => "the server accepts no new installations",
+            Self::RateLimited => "too many requests from this address; try again later",
         })
     }
 }

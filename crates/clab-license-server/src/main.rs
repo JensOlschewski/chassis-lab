@@ -37,8 +37,6 @@ enum Command {
     },
     /// Create the signing key. Refuses to replace an existing one.
     Keygen,
-    /// Print the public key that clients embed.
-    PublicKey,
     /// Create a license for a person and print its key once.
     Create {
         #[arg(long)]
@@ -46,8 +44,8 @@ enum Command {
     },
     /// Make a license stop working at the next online check, and block its machine.
     Revoke { id: i64 },
-    /// Let the machine of a revoked license register again.
-    Unblock { id: i64 },
+    /// Undo `revoke`: the license works again and its machine is unblocked.
+    Unrevoke { id: i64 },
     /// Set the person a license belongs to.
     Name { id: i64, person: String },
     /// Free the seat of a license, for example after a machine change.
@@ -143,7 +141,6 @@ async fn main() -> Result<()> {
                 .await?;
         }
         Command::Keygen => keygen(&data)?,
-        Command::PublicKey => println!("{}", encode_public_key(&load_key(&data)?.verifying_key())),
         Command::Create { person } => {
             let (id, key) = open(&data, 0)?.create(&person)?;
             println!("license {id} for {person}\n{key}");
@@ -154,13 +151,11 @@ async fn main() -> Result<()> {
             store.revoke(id, http::now())?;
             println!("revoked license {id} ({person}); its machine is blocked");
         }
-        Command::Unblock { id } => {
+        Command::Unrevoke { id } => {
             let store = open(&data, 0)?;
             let person = person(&store, id)?;
-            if !store.unblock(id)? {
-                bail!("license {id} ({person}) has no blocked machine");
-            }
-            println!("unblocked the machine of license {id} ({person})");
+            store.unrevoke(id)?;
+            println!("license {id} ({person}) works again; its machine is unblocked");
         }
         Command::Name { id, person: name } => {
             let store = open(&data, 0)?;
