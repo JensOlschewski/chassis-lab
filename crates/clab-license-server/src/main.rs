@@ -37,8 +37,6 @@ enum Command {
     },
     /// Create the signing key. Refuses to replace an existing one.
     Keygen,
-    /// Print the public key that clients embed.
-    PublicKey,
     /// Create a license for a person and print its key once.
     Create {
         #[arg(long)]
@@ -143,7 +141,6 @@ async fn main() -> Result<()> {
                 .await?;
         }
         Command::Keygen => keygen(&data)?,
-        Command::PublicKey => println!("{}", encode_public_key(&load_key(&data)?.verifying_key())),
         Command::Create { person } => {
             let (id, key) = open(&data, 0)?.create(&person)?;
             println!("license {id} for {person}\n{key}");
