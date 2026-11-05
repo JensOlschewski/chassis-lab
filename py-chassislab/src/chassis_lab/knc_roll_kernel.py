@@ -521,6 +521,7 @@ def plot_compare(
     gradient_points_deg: float | None = None,
     debug: str | None = None,
     selected: list[str] | None = None,
+    series: bool = False,
 ) -> dict[str, bytes]:
     candidates = json.loads(candidates_json)
     branches = (
@@ -545,6 +546,7 @@ def plot_compare(
         branches,
         gradient_points_deg,
         warn_missing=selected is None,
+        series_json=series,
     )
     reports.update(
         render_axle_reports(
@@ -555,6 +557,7 @@ def plot_compare(
             footer,
             logo,
             warn_missing=selected is None,
+            series_json=series,
         )
     )
     if debug:

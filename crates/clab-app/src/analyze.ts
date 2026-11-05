@@ -215,9 +215,11 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   /** Where a KnC section's plots land; analysis plots also open in Inspect. */
   const kncStatus = (report: string, section: { test?: string | null }, compare: boolean, badge: HTMLElement): ReportStatus => {
     const test = String(section.test);
-    return compare
-      ? { badge, plots: join(report, "plots", "knc", test, "comparison") }
-      : { badge, plots: join(report, "plots", "knc", test), open: () => showReport(report, test) };
+    return {
+      badge,
+      plots: compare ? join(report, "plots", "knc", test, "comparison") : join(report, "plots", "knc", test),
+      open: () => showReport(report, test),
+    };
   };
 
   form.addEventListener("submit", async (event) => {
@@ -342,7 +344,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         sections.classList.add("finished");
         shown = directory;
         reportButton.hidden = false;
-        show("Saved report results (full catalog). Not rerun or checked against current inputs.", true);
+        show("Saved report results. Not rerun or checked against current inputs.", true);
       } catch (error) {
         if (current === revision) show(`Could not restore saved report: ${error}`, false);
       }

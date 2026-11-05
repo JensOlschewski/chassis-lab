@@ -177,7 +177,7 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
         const group = document.createElement("optgroup");
         group.label = titleOf(domain);
         for (const plot of file.plots) {
-          group.append(new Option(plot.title, String(plots.length)));
+          group.append(new Option(plot.name, String(plots.length)));
           plots.push({ plot, test: domain.test! });
         }
         groups.push(group);
@@ -201,16 +201,18 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
       try {
         const report = await readReport(directory);
         if (report.command === "compare") {
-          // Plots of a comparison are not saved as data yet.
           const { series, sections } = comparisonFromReport(report);
           sectionsRoot.replaceChildren(...sections.map((section) => renderComparison(section, series)));
-          show("");
-          return;
+        } else {
+          sectionsRoot.replaceChildren(...sectionsFromReport(report).map((section) => renderSection(section)));
         }
-        sectionsRoot.replaceChildren(...sectionsFromReport(report).map((section) => renderSection(section)));
         const missing = await loadPlots(directory, report.domains);
         viewer.hidden = plots.length === 0;
-        show(missing.length > 0 ? `No plot data for ${missing.join(", ")}; run Analyze with a report folder again.` : "");
+        show(
+          missing.length > 0
+            ? `No plot data for ${missing.join(", ")}; run ${report.command === "compare" ? "Compare" : "Analyze"} with a report folder again.`
+            : "",
+        );
         const first = plots.findIndex((entry) => entry.test === test);
         if (first >= 0) picker.value = String(first);
         if (plots.length > 0) await draw();

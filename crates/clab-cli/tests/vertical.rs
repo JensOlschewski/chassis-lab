@@ -909,13 +909,12 @@ fn compares_only_gradient_metrics_with_overlays() {
     }
     expected.sort();
     let metrics = report["candidates"][0]["metrics"].as_array().unwrap();
-    assert_eq!(
-        metrics
-            .iter()
-            .map(|metric| metric["metric"].as_str().unwrap().to_owned())
-            .collect::<Vec<_>>(),
-        expected
-    );
+    let mut listed = metrics
+        .iter()
+        .map(|metric| metric["metric"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    listed.sort();
+    assert_eq!(listed, expected);
     assert!(
         metrics
             .iter()
@@ -935,6 +934,24 @@ fn compares_only_gradient_metrics_with_overlays() {
         output.join("plots/knc/vertical/comparison/knc_vertical_ride_frequency.pdf");
     assert!(fs::read(ride_frequency).unwrap().starts_with(b"%PDF"));
     assert!(output.join("metrics.csv").is_file());
+
+    // The app draws the same overlays from data: baseline and candidate are one source each,
+    // and the metrics a plot highlights are all listed in report.json.
+    let plots: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("knc-vertical.plots.json")).unwrap())
+            .unwrap();
+    assert_eq!(plots["command"], "compare");
+    for plot in plots["plots"].as_array().unwrap() {
+        for panel in plot["panels"].as_array().unwrap() {
+            assert_eq!(panel["sources"].as_array().unwrap().len(), 2);
+        }
+        for name in plot["metrics"].as_array().unwrap() {
+            assert!(
+                listed.contains(&name.as_str().unwrap().to_owned()),
+                "{name}"
+            );
+        }
+    }
 }
 
 #[test]

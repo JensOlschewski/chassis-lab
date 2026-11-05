@@ -335,6 +335,12 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         }
         rows.extend(metrics.iter().cloned().map(|metric| (path.clone(), metric)));
         candidate_sources.extend(candidate.sources.iter().cloned());
+        let metrics = display::console_ordered(
+            &serde_json::to_value(&metrics)?
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        );
         let mut entry = serde_json::json!({"input": provenance(path)?, "case": {"name": candidate.config.name, "loadcase": candidate.config.loadcase}, "metrics": metrics, "domains": domains});
         if let Some(label) = &labels[index + 1] {
             entry["label"] = label.as_str().into();
