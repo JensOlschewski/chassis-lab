@@ -103,6 +103,12 @@ fn read_report_file(directory: PathBuf, name: String) -> Result<String, String> 
     report::read_file(&worker::clean_path(&directory), &name)
 }
 
+/// Inputs a report was computed from that are missing or no longer match; hashing may take a while, so it runs off the UI thread.
+#[tauri::command]
+async fn changed_report_inputs(directory: PathBuf) -> Result<Vec<report::ChangedInput>, String> {
+    report::changed_inputs(&worker::clean_path(&directory))
+}
+
 #[tauri::command]
 fn save_session(path: PathBuf, session: session::Session) -> Result<(), String> {
     session::save(&path, &session)
@@ -150,6 +156,7 @@ fn main() {
             save_image,
             path_kind,
             read_report_file,
+            changed_report_inputs,
             save_session,
             load_session
         ])

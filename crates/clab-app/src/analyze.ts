@@ -70,6 +70,19 @@ export interface AnalyzeState {
   report: string | null;
 }
 
+interface ChangedInput {
+  path: string;
+  change: "missing" | "changed";
+}
+
+/** Saved results are from an earlier run; say whether the inputs they came from still match. */
+async function describeSaved(directory: string, subject: string, advice: string): Promise<{ message: string; ok: boolean }> {
+  const changed = await invoke<ChangedInput[]>("changed_report_inputs", { directory });
+  if (changed.length === 0) return { message: `${subject}. Inputs unchanged since the run. ${advice}`, ok: true };
+  const list = changed.map(({ path, change }) => `${path} (${change})`).join(", ");
+  return { message: `${subject}. Inputs changed since the run: ${list}. Run again to update.`, ok: false };
+}
+
 /** `showReport` opens a report folder in Inspect, at the plots of `test` if given. */
 export function setupAnalyze(showReport: (directory: string, test?: string) => void) {
   const form = document.querySelector<HTMLFormElement>("#analyze-form")!;
@@ -331,7 +344,8 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         if (report.command === "compare") {
           shown = directory;
           reportButton.hidden = false;
-          show(`Saved comparison report: ${directory}. Show it in Inspect, or run Compare again.`, true);
+          const { message, ok } = await describeSaved(directory, `Saved comparison report: ${directory}`, "Show it in Inspect.");
+          if (current === revision) show(message, ok);
           return;
         }
         if (report.command !== "analyze") return;
@@ -344,7 +358,8 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         sections.classList.add("finished");
         shown = directory;
         reportButton.hidden = false;
-        show("Saved report results. Not rerun or checked against current inputs.", true);
+        const { message, ok } = await describeSaved(directory, "Saved report results", "Not rerun.");
+        if (current === revision) show(message, ok);
       } catch (error) {
         if (current === revision) show(`Could not restore saved report: ${error}`, false);
       }
