@@ -34,6 +34,9 @@ pub fn write_file(
     if let Some(test) = &identity.test {
         write_string_attribute(&file, "test", test)?;
     }
+    if let Some(conditions) = &identity.conditions {
+        conditions.write(&file)?;
+    }
     write_string_attribute(&file, "source_file", &source.display().to_string())?;
     let axis = file.create_group("axis")?;
     write_string_attribute(&axis, "kind", "sample_index")?;

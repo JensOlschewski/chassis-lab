@@ -81,8 +81,14 @@ Convert a file next to the source file:
 target/release/clab convert BeFlex2upLoa_svc.res --domain svc
 ```
 
-This creates `BeFlex2upLoa_svc.h5`. `--domain` (`svc` or `knc`) is required; `knc`
-also needs `--test vertical`. Both are stored as HDF5 attributes.
+This creates `BeFlex2upLoa_svc.h5`. `--domain` (`svc` or `knc`) is required.
+`knc` also needs `--test` and `--setup b<0|1>e<0|1>f<0|1>r<0|1>` (brakes applied,
+steering engine on, front ARB connected, rear ARB connected). `--test lateral`
+also needs `--phase in|anti` and `--offset <mm>`. All are stored as HDF5
+attributes. Each declared value is compared with the data where the data shows
+it (ACD header, wheel forces, brake torque); a disagreement warns and asks to
+proceed, `--yes` skips the prompt. The status line after the run shows which
+values the data confirmed and which are only declared.
 
 Choose another output path:
 

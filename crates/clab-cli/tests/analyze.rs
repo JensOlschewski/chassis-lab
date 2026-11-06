@@ -458,6 +458,8 @@ fn analyzes_knc_measurement_hdf5_when_config_also_defines_svc() {
             "knc",
             "-t",
             "vertical",
+            "--setup",
+            "b0e0f1r1",
             "-o",
             input.to_str().unwrap(),
         ])
@@ -725,6 +727,8 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
             "knc",
             "-t",
             "vertical",
+            "--setup",
+            "b0e0f1r1",
             "-o",
             vertical_simulation.to_str().unwrap(),
         ])
@@ -745,6 +749,8 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
             "knc",
             "-t",
             "static",
+            "--setup",
+            "b0e0f1r1",
             "-o",
             static_simulation.to_str().unwrap(),
         ])
@@ -915,6 +921,8 @@ fn analyze_routes_hdf5_by_declared_domain() {
             "knc",
             "-t",
             "vertical",
+            "--setup",
+            "b0e0f1r1",
             "-o",
         ])
         .arg(&declared)

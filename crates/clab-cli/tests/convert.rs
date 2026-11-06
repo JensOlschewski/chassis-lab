@@ -307,9 +307,28 @@ fn requires_domain_and_validates_test() {
     for (args, message) in [
         (&["-d", "driving"][..], "unknown domain 'driving'"),
         (&["-d", "knc"][..], "--test <TEST>"),
+        (&["-d", "knc", "-t", "roll"][..], "--setup <SETUP>"),
         (
-            &["-d", "knc", "-t", "lateral"][..],
-            "unknown test 'lateral'",
+            &["-d", "knc", "-t", "roll", "--setup", "b1e0f1"][..],
+            "invalid setup 'b1e0f1'",
+        ),
+        (
+            &["-d", "knc", "-t", "lateral", "--setup", "b1e0f1r1"][..],
+            "--phase <PHASE>",
+        ),
+        (
+            &[
+                "-d", "knc", "-t", "roll", "--setup", "b1e0f1r1", "--phase", "in",
+            ][..],
+            "only apply to test 'lateral'",
+        ),
+        (
+            &["-d", "svc", "--setup", "b1e0f1r1"][..],
+            "takes no --setup",
+        ),
+        (
+            &["-d", "knc", "-t", "steering", "--setup", "b1e0f1r1"][..],
+            "unknown test 'steering'",
         ),
         (&["-d", "svc", "-t", "vertical"][..], "has no tests"),
     ] {
@@ -329,7 +348,9 @@ fn stores_domain_and_test_when_data_has_no_identity_to_disagree_with() {
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .arg("convert")
         .arg(&input)
-        .args(["-d", "knc", "-t", "vertical", "--yes", "-o"])
+        .args([
+            "-d", "knc", "-t", "vertical", "--setup", "b1e0f1r1", "--yes", "-o",
+        ])
         .arg(&output)
         .output()
         .unwrap();
@@ -345,12 +366,57 @@ fn stores_domain_and_test_when_data_has_no_identity_to_disagree_with() {
             .to_owned()
     };
     assert_eq!(
-        (read("domain"), read("test")),
-        ("knc".into(), "vertical".into())
+        (read("domain"), read("test"), read("setup")),
+        ("knc".into(), "vertical".into(), "B1E0F1R1".into())
     );
+    assert!(file.attr("phase").is_err());
     // MINIMAL_RES has no motion channels, so the test cannot be verified.
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("no motion channels"), "{stderr}");
+}
+
+#[test]
+fn stores_lateral_phase_and_offset() {
+    let directory = tempdir().unwrap();
+    let input = directory.path().join("shared.res");
+    fs::write(&input, MINIMAL_RES).unwrap();
+    let output = directory.path().join("out.h5");
+
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .arg("convert")
+        .arg(&input)
+        .args(["-d", "knc", "-t", "lateral", "--setup", "B1e0F1r1"])
+        .args(["--phase", "anti", "--offset", "30", "--yes", "-o"])
+        .arg(&output)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        stdout.contains("setup B1E0F1R1: B=1 [declared]"),
+        "{stdout}"
+    );
+    let file = hdf5::File::open(&output).unwrap();
+    let text = |name: &str| {
+        file.attr(name)
+            .unwrap()
+            .read_scalar::<hdf5::types::VarLenUnicode>()
+            .unwrap()
+            .as_str()
+            .to_owned()
+    };
+    assert_eq!(
+        (text("setup"), text("phase")),
+        ("B1E0F1R1".into(), "anti".into())
+    );
+    assert_eq!(
+        file.attr("offset_mm")
+            .unwrap()
+            .read_scalar::<f64>()
+            .unwrap(),
+        30.0
+    );
 }
 
 fn knc_res(roll: f64, vertical: f64) -> String {
@@ -381,7 +447,7 @@ fn convert_knc(input: &Path, test: &str) -> Command {
     command
         .arg("convert")
         .arg(input)
-        .args(["-d", "knc", "-t", test])
+        .args(["-d", "knc", "-t", test, "--setup", "b1e0f1r1"])
         .stdin(std::process::Stdio::null());
     command
 }

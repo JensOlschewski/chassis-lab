@@ -8,15 +8,24 @@
 use anyhow::{Result, bail};
 
 use crate::acd::AcdMeasurement;
+use crate::conditions::Conditions;
 use crate::model::AdamsResult;
 
 /// Known domains and their tests. Add new domains and tests here.
-pub const DOMAINS: &[(&str, &[&str])] = &[("svc", &[]), ("knc", &["vertical", "roll", "static"])];
+pub const DOMAINS: &[(&str, &[&str])] = &[
+    ("svc", &[]),
+    (
+        "knc",
+        &["vertical", "roll", "static", "lateral", "longitudinal"],
+    ),
+];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Identity {
     pub domain: String,
     pub test: Option<String>,
+    /// Declared KnC setup; stored next to domain and test.
+    pub conditions: Option<Conditions>,
 }
 
 impl Identity {
@@ -45,6 +54,7 @@ impl Identity {
             _ => Ok(Self {
                 domain: domain.into(),
                 test: test.map(Into::into),
+                conditions: None,
             }),
         }
     }
@@ -120,28 +130,58 @@ pub enum Detection {
     Unavailable,
 }
 
-/// Largest peak-to-peak range over all components of the named entity.
-fn motion_range(result: &AdamsResult, entity_name: &str) -> Option<f64> {
-    let mut found = false;
-    let mut range = 0.0f64;
-    for entity in result.entities.iter().filter(|e| e.name == entity_name) {
-        for component in &entity.components {
-            found = true;
+/// Applied wheel force range (N) above which a compliance test drives the wheels.
+/// Measured: compliance runs apply 3000 N, all other runs exactly 0.
+const FORCE_MOVES_N: f64 = 100.0;
+/// Applied wheel torque range (N·mm) above which an aligning test runs.
+const TORQUE_MOVES_NMM: f64 = 10_000.0;
+/// Steering input range (rad) above which a steering test runs.
+const STEER_MOVES_RAD: f64 = 0.05;
+
+/// Largest peak-to-peak range over the named component of every entity
+/// whose name satisfies `matches`. `None` when no such component exists.
+fn component_range(
+    result: &AdamsResult,
+    matches: impl Fn(&str) -> bool,
+    component_name: Option<&str>,
+) -> Option<f64> {
+    result
+        .entities
+        .iter()
+        .filter(|entity| matches(&entity.name))
+        .flat_map(|entity| &entity.components)
+        .filter(|component| component_name.is_none_or(|name| component.name == name))
+        .map(|component| {
             let (min, max) = component
                 .values
                 .iter()
                 .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
                     (lo.min(*v), hi.max(*v))
                 });
-            if max >= min {
-                range = range.max(max - min);
-            }
-        }
-    }
-    found.then_some(range)
+            if max >= min { max - min } else { 0.0 }
+        })
+        .reduce(f64::max)
 }
 
-/// Detect the KnC test from which rig motion moves.
+/// Largest peak-to-peak range over all components of the named entity.
+fn motion_range(result: &AdamsResult, entity_name: &str) -> Option<f64> {
+    component_range(result, |name| name == entity_name, None)
+}
+
+/// Largest range of one component over the four wheel force entities.
+/// A missing entity means that nothing is applied.
+fn wheel_force_range(result: &AdamsResult, component: &str) -> f64 {
+    component_range(
+        result,
+        |name| name.starts_with("gforce_tire_"),
+        Some(component),
+    )
+    .unwrap_or(0.0)
+}
+
+/// Detect the KnC test from which rig motion moves and which wheel
+/// loads are applied. Several excitations at once, or an excitation
+/// without its own test (steering, aligning torque), are undetermined.
 pub fn res_test(result: &AdamsResult) -> Detection {
     let (Some(roll), Some(vertical)) = (
         motion_range(result, "motion_roll"),
@@ -149,11 +189,31 @@ pub fn res_test(result: &AdamsResult) -> Detection {
     ) else {
         return Detection::Unavailable;
     };
-    match (roll > ROLL_MOVES_RAD, vertical > VERTICAL_MOVES_MM) {
-        (true, false) => Detection::Test("roll"),
-        (false, true) => Detection::Test("vertical"),
-        (false, false) => Detection::Test("static"),
-        (true, true) => Detection::Undetermined,
+    let steer = component_range(
+        result,
+        |name| name == "steering_wheel_input",
+        Some("steering_wheel_input"),
+    )
+    .unwrap_or(0.0);
+    let lateral = wheel_force_range(result, "FY") > FORCE_MOVES_N;
+    // Torque next to lateral force is the pneumatic trail offset (Tz = Fy × offset).
+    let aligning = !lateral && wheel_force_range(result, "TZ") > TORQUE_MOVES_NMM;
+    let excited = [
+        (roll > ROLL_MOVES_RAD, Some("roll")),
+        (vertical > VERTICAL_MOVES_MM, Some("vertical")),
+        (
+            wheel_force_range(result, "FX") > FORCE_MOVES_N,
+            Some("longitudinal"),
+        ),
+        (lateral, Some("lateral")),
+        (aligning, None),
+        (steer > STEER_MOVES_RAD, None),
+    ];
+    let mut active = excited.iter().filter(|(moves, _)| *moves);
+    match (active.next(), active.next()) {
+        (None, _) => Detection::Test("static"),
+        (Some((_, Some(test))), None) => Detection::Test(test),
+        _ => Detection::Undetermined,
     }
 }
 
@@ -179,8 +239,22 @@ fn paired_range(left: &[f64], right: &[f64], f: impl Fn(f64, f64) -> f64) -> f64
     if max >= min { max - min } else { 0.0 }
 }
 
-/// Detect the KnC test from front wheel-centre Z: vertical moves both
-/// wheels together (heave), roll moves them in opposition.
+/// Front wheel force range (N) above which a compliance test drives the wheels.
+/// Measured: compliance runs span 6000 N and more, all other runs at most 156 N.
+const ACD_FORCE_MOVES_N: f64 = 1000.0;
+
+/// Largest range of the named force channels.
+fn force_range(measurement: &AcdMeasurement, names: [&str; 2]) -> f64 {
+    names
+        .iter()
+        .filter_map(|name| acd_channel(measurement, name))
+        .map(|values| paired_range(values, values, |v, _| v))
+        .fold(0.0, f64::max)
+}
+
+/// Detect the KnC test from front wheel forces and wheel-centre Z:
+/// forces drive a compliance test, vertical moves both wheels together
+/// (heave), roll moves them in opposition.
 pub fn acd_motion_test(measurement: &AcdMeasurement) -> Detection {
     let (Some(left), Some(right)) = (
         acd_channel(measurement, "lfwcz"),
@@ -190,11 +264,20 @@ pub fn acd_motion_test(measurement: &AcdMeasurement) -> Detection {
     };
     let heave = paired_range(left, right, |l, r| (l + r) / 2.0);
     let roll = paired_range(left, right, |l, r| l - r);
-    match (roll > ACD_MOVES_MM, heave > ACD_MOVES_MM) {
-        (true, false) => Detection::Test("roll"),
-        (false, true) => Detection::Test("vertical"),
-        (false, false) => Detection::Test("static"),
-        (true, true) => Detection::Undetermined,
+    let longitudinal = force_range(measurement, ["lffx", "rffx"]) > ACD_FORCE_MOVES_N;
+    let lateral = force_range(measurement, ["lffy", "rffy"]) > ACD_FORCE_MOVES_N;
+    match (
+        roll > ACD_MOVES_MM,
+        heave > ACD_MOVES_MM,
+        longitudinal,
+        lateral,
+    ) {
+        (true, false, false, false) => Detection::Test("roll"),
+        (false, true, false, false) => Detection::Test("vertical"),
+        (false, false, true, false) => Detection::Test("longitudinal"),
+        (false, false, false, true) => Detection::Test("lateral"),
+        (false, false, false, false) => Detection::Test("static"),
+        _ => Detection::Undetermined,
     }
 }
 
@@ -265,6 +348,8 @@ fn acd_test(testtype: &str) -> Option<(&'static str, &'static str)> {
     match testtype {
         "vert" => Some(("knc", "vertical")),
         "roll" => Some(("knc", "roll")),
+        "lat" => Some(("knc", "lateral")),
+        "long" => Some(("knc", "longitudinal")),
         _ => None,
     }
 }
@@ -298,10 +383,10 @@ pub fn check_acd_identity(
 #[cfg(test)]
 mod tests {
     use super::{
-        COMBINED, Detection, Identity, acd_motion_test, acd_warnings, check_acd_identity,
+        COMBINED, Detection, Identity, acd_motion_test, acd_test, acd_warnings, check_acd_identity,
         res_domain_warnings, res_test, res_warnings,
     };
-    use crate::acd::{AcdMeasurement, AcdTestInfo};
+    use crate::acd::{AcdChannel, AcdMeasurement, AcdTestInfo};
     use crate::model::{AdamsResult, Component, Entity};
 
     #[test]
@@ -310,10 +395,12 @@ mod tests {
         assert!(Identity::new("knc", Some("vertical")).is_ok());
         assert!(Identity::new("knc", Some("static")).is_ok());
         assert!(Identity::new("knc", Some("roll")).is_ok());
+        assert!(Identity::new("knc", Some("lateral")).is_ok());
+        assert!(Identity::new("knc", Some("longitudinal")).is_ok());
         for (domain, test, message) in [
             ("driving", None, "unknown domain 'driving'"),
             ("knc", None, "requires --test"),
-            ("knc", Some("lateral"), "unknown test 'lateral'"),
+            ("knc", Some("steering"), "unknown test 'steering'"),
             ("svc", Some("vertical"), "has no tests"),
         ] {
             let error = Identity::new(domain, test).unwrap_err().to_string();
@@ -428,6 +515,78 @@ mod tests {
         }
     }
 
+    fn res_with_loads(loads: &[(&str, &str, f64)]) -> AdamsResult {
+        let mut result = res_with_motion(Some(vec![0.0, 0.0]), Some(vec![0.0, 0.0]));
+        for (entity, component, peak) in loads {
+            result.entities.push(Entity {
+                name: (*entity).into(),
+                source_path: None,
+                object_id: None,
+                components: vec![Component {
+                    name: (*component).into(),
+                    adams_id: 1,
+                    units: None,
+                    values: vec![0.0, *peak],
+                }],
+            });
+        }
+        result
+    }
+
+    #[test]
+    fn detects_force_driven_tests_from_wheel_loads() {
+        let cases = [
+            (
+                vec![
+                    ("gforce_tire_lf", "FX", 3000.0),
+                    ("gforce_tire_rf", "FX", 3000.0),
+                ],
+                Detection::Test("longitudinal"),
+            ),
+            (
+                vec![
+                    ("gforce_tire_lf", "FY", 3000.0),
+                    ("gforce_tire_rf", "FY", -3000.0),
+                ],
+                Detection::Test("lateral"),
+            ),
+            (
+                vec![
+                    ("gforce_tire_lf", "FY", 3000.0),
+                    ("gforce_tire_lf", "FX", 3000.0),
+                ],
+                Detection::Undetermined,
+            ),
+            (
+                vec![
+                    ("gforce_tire_lf", "FY", 1500.0),
+                    ("gforce_tire_lf", "TZ", 45000.0),
+                ],
+                Detection::Test("lateral"),
+            ),
+            (vec![("gforce_tire_lf", "TZ", 5e5)], Detection::Undetermined),
+            (
+                vec![("steering_wheel_input", "steering_wheel_input", 12.5)],
+                Detection::Undetermined,
+            ),
+            (
+                vec![("gforce_tire_lf", "FY", 0.0)],
+                Detection::Test("static"),
+            ),
+            (vec![], Detection::Test("static")),
+        ];
+        for (loads, expected) in cases {
+            assert_eq!(res_test(&res_with_loads(&loads)), expected, "{loads:?}");
+        }
+    }
+
+    #[test]
+    fn wheel_load_with_rig_motion_is_undetermined() {
+        let mut result = res_with_loads(&[("gforce_tire_lf", "FY", 3000.0)]);
+        result.entities[1].components[0].values = vec![0.0, 100.0];
+        assert_eq!(res_test(&result), Detection::Undetermined);
+    }
+
     #[test]
     fn detects_acd_test_from_motion_and_metadata() {
         let example = |name: &str| {
@@ -475,6 +634,42 @@ mod tests {
             acd_warnings(&no_motion, "roll"),
             ["no motion channels, test not verified"]
         );
+    }
+
+    fn acd_with_forces(forces: &[(&str, f64)]) -> AcdMeasurement {
+        let mut measurement = acd_with_testtype("lat");
+        measurement.channels = ["lfwcz", "rfwcz"]
+            .iter()
+            .map(|name| (*name, 0.0))
+            .chain(forces.iter().copied())
+            .map(|(name, peak)| AcdChannel {
+                name: name.into(),
+                description: String::new(),
+                unit: String::new(),
+                offset: 0.0,
+                column: 0,
+                values: vec![-peak, peak],
+            })
+            .collect();
+        measurement
+    }
+
+    #[test]
+    fn detects_acd_compliance_from_wheel_forces() {
+        let lateral = acd_with_forces(&[("lffy", 3000.0), ("rffy", 3000.0)]);
+        assert_eq!(acd_motion_test(&lateral), Detection::Test("lateral"));
+        assert!(acd_warnings(&lateral, "lateral").is_empty());
+        let longitudinal = acd_with_forces(&[("lffx", 3000.0), ("rffx", 3000.0)]);
+        assert_eq!(
+            acd_motion_test(&longitudinal),
+            Detection::Test("longitudinal")
+        );
+        let both = acd_with_forces(&[("lffx", 3000.0), ("lffy", 3000.0)]);
+        assert_eq!(acd_motion_test(&both), Detection::Undetermined);
+        let rest = acd_with_forces(&[("lffy", 150.0)]);
+        assert_eq!(acd_motion_test(&rest), Detection::Test("static"));
+        assert_eq!(acd_test("lat"), Some(("knc", "lateral")));
+        assert_eq!(acd_test("long"), Some(("knc", "longitudinal")));
     }
 
     #[test]

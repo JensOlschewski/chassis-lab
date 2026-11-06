@@ -75,6 +75,9 @@ pub fn write_file(
     if let Some(test) = &identity.test {
         write_string_attribute(&file, "test", test)?;
     }
+    if let Some(conditions) = &identity.conditions {
+        conditions.write(&file)?;
+    }
     write_string_attribute(&file, "source_file", &source.display().to_string())?;
     write_string_attribute(&file, "encoding", &measurement.encoding)?;
     write_string_attribute(&file, "dialect", &measurement.dialect)?;

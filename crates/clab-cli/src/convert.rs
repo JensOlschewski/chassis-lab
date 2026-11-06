@@ -2,13 +2,14 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use clab_converter::conditions::{Conditions, Finding, Phase, Setup, acd_findings, res_findings};
 use clab_converter::identity::{Identity, acd_warnings, res_domain_warnings, res_warnings};
 use clap::Args;
 
 #[derive(Debug, Args)]
 #[command(
-    override_usage = "clab convert --domain <DOMAIN> [--test <TEST>] [OPTIONS] <INPUT>",
-    after_help = "Domains and tests:\n  svc            no test\n  knc            --test vertical|roll|static\n\nExample:\n  clab convert run.res -d knc -t vertical -o converted/"
+    override_usage = "clab convert --domain <DOMAIN> [--test <TEST>] [--setup <SETUP>] [OPTIONS] <INPUT>",
+    after_help = "Domains and tests:\n  svc            no test, no setup\n  knc            --test vertical|roll|static|longitudinal  --setup\n  knc            --test lateral  --setup --phase --offset\n\nSetup code b<0|1>e<0|1>f<0|1>r<0|1>: brakes applied, steering engine on,\nfront ARB connected, rear ARB connected.\n\nExamples:\n  clab convert run.res -d knc -t vertical --setup b1e0f1r1 -o converted/\n  clab convert lat.res -d knc -t lateral --setup b1e0f1r1 --phase in --offset 30"
 )]
 pub(crate) struct ConvertArgs {
     /// Adams RES simulation or Lommel ACD measurement input.
@@ -23,9 +24,18 @@ pub(crate) struct ConvertArgs {
     /// Domain the data belongs to: svc or knc (required). Stored in the HDF5 file.
     #[arg(short, long, value_name = "DOMAIN")]
     domain: String,
-    /// Test within the domain: required for knc (vertical, roll, or static), not allowed for svc.
+    /// Test within the domain: required for knc (vertical, roll, static, lateral, or longitudinal), not allowed for svc.
     #[arg(short, long, value_name = "TEST", required_if_eq("domain", "knc"))]
     test: Option<String>,
+    /// Test setup code b<0|1>e<0|1>f<0|1>r<0|1> (brakes, steering engine, front ARB, rear ARB). Required for knc.
+    #[arg(long, value_name = "SETUP", required_if_eq("domain", "knc"))]
+    setup: Option<Setup>,
+    /// Lateral force phase of the left and right wheels: in or anti. Required for lateral.
+    #[arg(long, value_name = "PHASE", required_if_eq("test", "lateral"))]
+    phase: Option<Phase>,
+    /// Pneumatic trail offset in mm. Required for lateral.
+    #[arg(long, value_name = "MM", required_if_eq("test", "lateral"))]
+    offset: Option<f64>,
     /// Proceed without prompting when motion data disagrees with --test.
     #[arg(short, long)]
     yes: bool,
@@ -74,7 +84,14 @@ impl InputKind {
 
 pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     let kind = InputKind::from_path(&args.input)?;
-    let identity = Identity::new(&args.domain, args.test.as_deref())?;
+    let mut identity = Identity::new(&args.domain, args.test.as_deref())?;
+    identity.conditions = Conditions::declare(
+        &args.domain,
+        args.test.as_deref(),
+        args.setup,
+        args.phase,
+        args.offset,
+    )?;
     let output = resolve_output(kind, &args.input, args.output.as_deref());
     if let (Some(requested), Some(parent)) = (args.output.as_deref(), output.parent())
         && is_directory_request(requested)
@@ -85,6 +102,7 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     validate_output(&args.input, &output, args.force)?;
 
     let declared = identity.test.clone();
+    let mut findings = Vec::new();
     match kind {
         InputKind::Res => clab_converter::convert_res_checked(
             &args.input,
@@ -95,7 +113,11 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
                 let mut warnings = res_domain_warnings(result, &identity.domain);
                 if let Some(test) = &declared {
                     warnings.extend(res_warnings(result, test));
+                    if let Some(conditions) = &identity.conditions {
+                        findings = res_findings(result, test, conditions);
+                    }
                 }
+                warnings.extend(finding_warnings(&findings));
                 confirm(warnings, args.yes)
             },
         ),
@@ -105,7 +127,14 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
             args.force,
             &identity,
             |measurement| match &declared {
-                Some(test) => confirm(acd_warnings(measurement, test), args.yes),
+                Some(test) => {
+                    let mut warnings = acd_warnings(measurement, test);
+                    if let Some(conditions) = &identity.conditions {
+                        findings = acd_findings(measurement, test, conditions);
+                    }
+                    warnings.extend(finding_warnings(&findings));
+                    confirm(warnings, args.yes)
+                }
                 None => Ok(()),
             },
         ),
@@ -113,7 +142,18 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     .with_context(|| format!("failed to generate '{}'", output.display()))?;
 
     println!("generated {} ({})", output.display(), kind.output_type());
+    if let Some(conditions) = &identity.conditions {
+        let details: Vec<_> = findings.iter().map(ToString::to_string).collect();
+        println!("setup {}: {}", conditions.setup, details.join(" "));
+    }
     Ok(())
+}
+
+fn finding_warnings(findings: &[Finding]) -> Vec<String> {
+    findings
+        .iter()
+        .flat_map(|finding| finding.warnings().to_vec())
+        .collect()
 }
 
 /// Warnings need confirmation but there is no terminal to ask on.
@@ -221,6 +261,8 @@ mod tests {
             "knc",
             "-t",
             "vertical",
+            "--setup",
+            "b1e0f1r1",
             "-o",
             "output.h5",
         ])

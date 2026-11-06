@@ -130,6 +130,11 @@ fn inspect_json(path: &Path, names: &[String], list: bool, match_text: Option<&s
             "summary": {
                 "source_file": summary.source_file,
                 "source_kind": summary.source_kind.as_str(),
+                "domain": summary.domain,
+                "test": summary.test,
+                "setup": summary.setup,
+                "phase": summary.phase,
+                "offset_mm": summary.offset_mm,
                 "schema_version": summary.schema_version,
                 "samples": summary.sample_count,
                 "signals": summary.signal_count,
@@ -194,6 +199,21 @@ fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<
     println!("source file: {}", summary.source_file);
     println!("schema version: {}", summary.schema_version);
     println!("source kind: {}", summary.source_kind.as_str());
+    if let Some(domain) = &summary.domain {
+        println!("domain: {domain}");
+    }
+    if let Some(test) = &summary.test {
+        println!("test: {test}");
+    }
+    if let Some(setup) = &summary.setup {
+        println!("setup: {setup}");
+    }
+    if let Some(phase) = &summary.phase {
+        println!("phase: {phase}");
+    }
+    if let Some(offset) = summary.offset_mm {
+        println!("offset: {offset} mm");
+    }
     println!("samples: {}", summary.sample_count);
     println!("signals: {}", summary.signal_count);
     if summary.source_kind == SourceKind::Measurement {
