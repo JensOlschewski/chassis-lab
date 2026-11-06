@@ -128,13 +128,19 @@ fn measurement_renamed_channel(path: &std::path::Path) {
 }
 
 fn measurement_with_front_left_wcx_name(path: &std::path::Path, front_left_wcx_name: &str) {
+    measurement_channels(path, front_left_wcx_name, Some("B1E0F1R1"));
+}
+
+fn measurement_channels(path: &std::path::Path, front_left_wcx_name: &str, setup: Option<&str>) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 6_u64);
     scalar(&file, "signal_count", 48_u64);
     string(&file, "source_kind", "measurement");
     string(&file, "domain", "knc");
-    string(&file, "setup", "B1E0F1R1");
+    if let Some(setup) = setup {
+        string(&file, "setup", setup);
+    }
     string(&file, "test", "vertical");
     string(&file, "source_file", "fixture.acd");
     let axis = file.create_group("axis").unwrap();
@@ -469,7 +475,8 @@ fn assert_measurement_metrics(
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(
-        stdout.contains("KnC Vertical\nrunning 36 metrics"),
+        stdout.contains("KnC Vertical\n  Setup   B1E0F1R1")
+            && stdout.contains("running 36 metrics"),
         "{stdout}"
     );
     assert_vertical_console_order(&stdout);
@@ -511,11 +518,22 @@ fn assert_measurement_metrics(
     close(value("ride_rate_rear_right_n_per_mm"), 30.0 / 1.1);
     close(value("tire_rate_rear_right_n_per_mm"), 300.0);
     let csv = fs::read_to_string(output.join("metrics.csv")).unwrap();
-    assert!(csv.starts_with("run,domain,test,metric,unit,value\n"));
+    assert!(csv.starts_with("run,domain,test,metric,unit,value,setup,phase,offset_mm\n"));
+    let mut rows = csv::Reader::from_reader(csv.as_bytes());
+    for row in rows.records() {
+        let row = row.unwrap();
+        assert_eq!(&row[6], "B1E0F1R1");
+        assert_eq!(&row[7], "");
+        assert_eq!(&row[8], "");
+    }
     assert!(csv.contains("fixture,knc,vertical,suspension_rate_rear_right_n_per_mm,N/mm,30"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["domains"][0]["metric_count"], 36);
+    assert_eq!(
+        report["domains"][0]["conditions"],
+        serde_json::json!({"setup": "B1E0F1R1"})
+    );
 }
 
 #[test]
@@ -583,7 +601,8 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
         );
         let stdout = String::from_utf8_lossy(&result.stdout);
         assert!(
-            stdout.contains("KnC Vertical\nrunning 36 metrics"),
+            stdout.contains("KnC Vertical\n  Setup   B1E0F1R1")
+                && stdout.contains("running 36 metrics"),
             "{stdout}"
         );
         // Neither input has SVC/sprung-mass data, so ride_frequency (4 rows)
@@ -670,7 +689,10 @@ fn skips_vertical_metrics_without_static_normalization() {
         .output()
         .unwrap();
     assert!(result.status.success());
-    assert!(String::from_utf8_lossy(&result.stdout).contains("KnC Vertical\nrunning 0 metrics"));
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        stdout.contains("KnC Vertical\n  Setup   B1E0F1R1") && stdout.contains("running 0 metrics")
+    );
     assert!(
         String::from_utf8_lossy(&result.stderr)
             .contains("knc::vertical: metrics require static_simulation normalization")
@@ -696,6 +718,33 @@ fn analyzes_vertical_without_output() {
         result.status.success(),
         "{}",
         String::from_utf8_lossy(&result.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        stdout.contains("Setup   B1E0F1R1  (brakes on · engine off · front ARB on · rear ARB on)"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("Input   fixture |"), "{stdout}");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .arg("analyze")
+        .args([&config_path, &simulation_path])
+        .args(["--json", "--label", "VARB"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let section: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(
+        section["section"]["conditions"],
+        serde_json::json!({"setup": "B1E0F1R1"})
+    );
+    assert_eq!(section["section"]["name"], "VARB");
+    assert_eq!(
+        section["section"]["input"],
+        simulation_path.to_str().unwrap()
     );
 }
 
@@ -879,7 +928,9 @@ fn compares_only_gradient_metrics_with_overlays() {
     let baseline_path = directory.path().join("baseline.h5");
     let candidate_path = directory.path().join("candidate.h5");
     closed_fixture(&baseline_path, measurement);
-    closed_fixture(&candidate_path, measurement);
+    closed_fixture(&candidate_path, |path| {
+        measurement_channels(path, "lfwcx", Some("B1E1F1R1"))
+    });
     let config_path = directory.path().join("case.toml");
     comparison_config(&config_path, "");
     let output = directory.path().join("comparison");
@@ -903,6 +954,26 @@ fn compares_only_gradient_metrics_with_overlays() {
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["candidates"][0]["domains"][0]["domain"], "knc");
     assert_eq!(report["candidates"][0]["domains"][0]["status"], "compared");
+    assert_eq!(report["domains"][0]["conditions"]["setup"], "B1E0F1R1");
+    assert_eq!(
+        report["candidates"][0]["domains"][0]["conditions"]["setup"],
+        "B1E1F1R1"
+    );
+    assert!(
+        report["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("test conditions differ (engine)")
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("test conditions differ (engine)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("Baseline B1E0F1R1 vs Curve 1 B1E1F1R1"),
+        "{stderr}"
+    );
     let mut expected = Vec::new();
     for corner in ["front_left", "front_right", "rear_left", "rear_right"] {
         for (metric, unit) in EXPECTED_METRICS {
@@ -936,6 +1007,14 @@ fn compares_only_gradient_metrics_with_overlays() {
         output.join("plots/knc/vertical/comparison/knc_vertical_ride_frequency.pdf");
     assert!(fs::read(ride_frequency).unwrap().starts_with(b"%PDF"));
     assert!(output.join("metrics.csv").is_file());
+    let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
+    let columns = csv.headers().unwrap().clone();
+    for row in csv.records() {
+        let row = row.unwrap();
+        let cell = |name| &row[columns.iter().position(|column| column == name).unwrap()];
+        assert_eq!(cell("baseline_setup"), "B1E0F1R1");
+        assert_eq!(cell("candidate_setup"), "B1E1F1R1");
+    }
 
     // The app draws the same overlays from data: baseline and candidate are one source each,
     // and the metrics a plot highlights are all listed in report.json.
@@ -944,6 +1023,13 @@ fn compares_only_gradient_metrics_with_overlays() {
             .unwrap();
     assert_eq!(plots["command"], "compare");
     for plot in plots["plots"].as_array().unwrap() {
+        let footer = plot["footer"].as_str().unwrap();
+        assert!(footer.contains("B1E0F1R1"), "{footer}");
+        assert!(footer.contains("B1E1F1R1"), "{footer}");
+        assert!(
+            footer.contains("WARNING: knc::vertical: test conditions differ (engine)"),
+            "{footer}"
+        );
         for panel in plot["panels"].as_array().unwrap() {
             assert_eq!(panel["sources"].as_array().unwrap().len(), 2);
         }
@@ -980,6 +1066,79 @@ fn compares_direct_vertical_inputs_without_output() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert!(!directory.path().join("plots").exists());
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("test conditions differ"));
+}
+
+#[test]
+fn condition_differences_are_in_compare_json_without_opt_in() {
+    let directory = tempdir().unwrap();
+    let baseline = directory.path().join("baseline.h5");
+    let candidate = directory.path().join("candidate.h5");
+    closed_fixture(&baseline, measurement);
+    closed_fixture(&candidate, |path| {
+        measurement_channels(path, "lfwcx", Some("B0E1F0R0"))
+    });
+    let config_path = directory.path().join("config.toml");
+    comparison_config(&config_path, "");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .arg("compare")
+        .args([&config_path, &baseline, &candidate])
+        .args(["--json", "--label", "VARB", "--label", "VARC"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stdout = String::from_utf8(result.stdout).unwrap();
+    let section: Value = serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
+    let section = &section["section"];
+    assert_eq!(section["inputs"][0]["label"], "VARB");
+    assert_eq!(section["inputs"][1]["label"], "VARC");
+    assert_eq!(
+        section["inputs"][1]["conditions"]["vertical"]["setup"],
+        "B0E1F0R0"
+    );
+    let warning = section["warnings"][0].as_str().unwrap();
+    assert!(
+        warning.contains("brakes, engine, front ARB, rear ARB"),
+        "{warning}"
+    );
+    assert!(
+        warning.contains("VARB B1E0F1R1 vs VARC B0E1F0R0"),
+        "{warning}"
+    );
+}
+
+#[test]
+fn compare_rejects_missing_or_invalid_setup() {
+    let directory = tempdir().unwrap();
+    let baseline = directory.path().join("baseline.h5");
+    closed_fixture(&baseline, measurement);
+    let config_path = directory.path().join("config.toml");
+    comparison_config(&config_path, "");
+    for setup in [None, Some("unknown")] {
+        let candidate = directory.path().join("candidate.h5");
+        // Finish writing and close the HDF5 before the CLI reads it.
+        let staging = directory.path().join("staging.h5");
+        measurement_channels(&staging, "lfwcx", setup);
+        fs::copy(&staging, &candidate).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+            .arg("compare")
+            .args([&config_path, &baseline, &candidate])
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        let expected = if setup.is_none() {
+            "convert it again with `clab convert --setup`"
+        } else {
+            "invalid setup 'unknown'"
+        };
+        assert!(stderr.contains(expected), "{stderr}");
+        assert!(stderr.contains("candidate.h5"), "{stderr}");
+    }
 }
 
 #[test]

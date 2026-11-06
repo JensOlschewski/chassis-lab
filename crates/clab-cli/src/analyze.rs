@@ -210,6 +210,7 @@ fn write_combined_run(
             ("svc", None),
             reports.report["metrics"].as_array().unwrap(),
             &reports.warnings,
+            None,
         );
     }
     for (test, _, report, _) in &knc_reports {
@@ -221,7 +222,7 @@ fn write_combined_run(
     let progress = ReportProgress::new(true, args.json);
     let mut domains = Vec::new();
     let mut metrics = Vec::new();
-    let mut csv = "run,domain,test,metric,unit,value\n".to_owned();
+    let mut csv = display::ANALYSIS_CSV_COLUMNS.join(",") + "\n";
     if let Some(reports) = &svc_reports {
         domains.push(serde_json::json!({"domain": "svc", "metric_count": reports.metric_count}));
         metrics.extend(
@@ -236,7 +237,7 @@ fn write_combined_run(
     for (test, _, report, _) in &knc_reports {
         domains.push(knc_domain(*test, report));
         metrics.extend(display::console_ordered(&report.metrics));
-        csv += &knc_csv_rows(&config.name, *test, &report.metrics)?;
+        csv += &knc_csv_rows(args.label.as_deref().unwrap_or(&config.name), *test, report)?;
     }
     let mut bundle = serde_json::json!({
         "schema_version": 1,
@@ -275,7 +276,13 @@ fn write_combined_run(
         .map(|report| (report.0.title(), report))
         .collect();
     let rendered = progress.plot_phases(jobs, |(test, path, report, debug)| {
-        let footer = analysis_footer(&args.config, config, &report.setup, path, Some(&args.input))?;
+        let footer = analysis_footer(
+            &args.config,
+            config,
+            &report.conditions,
+            path,
+            Some(&args.input),
+        )?;
         let detail = serde_json::from_str(&report.detail)?;
         knc_plots(
             config,
@@ -364,6 +371,9 @@ fn knc_domain(test: KncTest, report: &knc::Reports) -> serde_json::Value {
         "test": test.name(),
         "metric_count": report.metrics.len(),
         "curve_count": report.curve_count,
+        "conditions": report.conditions.json(),
+        "input": report.input,
+        "name": report.name,
         "normalization": report.normalization,
     })
 }
@@ -543,6 +553,7 @@ fn write_svc_reference(
         ("svc", None),
         metrics,
         &reports.warnings,
+        None,
     );
     if let Some(output) = &args.output {
         write_report_bundle(
@@ -586,7 +597,7 @@ fn svc_reference_reports(
         "schema_version": 1, "command": "analyze", "case": {"name": case.name, "loadcase": case.loadcase}, "inputs": {"config": provenance(config)?, "reference": provenance(&reference.path)?}, "metrics": metrics, "warnings": warnings,
     });
     let mut csv = csv::Writer::from_writer(Vec::new());
-    csv.write_record(["run", "domain", "test", "metric", "unit", "value"])?;
+    csv.write_record(display::ANALYSIS_CSV_COLUMNS)?;
     for metric in report["metrics"].as_array().unwrap() {
         let value = metric["value"]
             .as_f64()
@@ -599,6 +610,9 @@ fn svc_reference_reports(
             metric["metric"].as_str().unwrap(),
             metric["unit"].as_str().unwrap(),
             value.as_str(),
+            "",
+            "",
+            "",
         ])?;
     }
     Ok(SvcReferenceReports {
@@ -642,6 +656,7 @@ fn write_svc_report(
         ("svc", None),
         report.report["metrics"].as_array().unwrap(),
         &report.warnings,
+        None,
     );
     if let Some(output) = &args.output {
         let mut bundle = report.report;
@@ -673,9 +688,18 @@ fn show_section(
     (domain, test): (&str, Option<&str>),
     metrics: &[serde_json::Value],
     warnings: &[String],
+    knc_report: Option<&knc::Reports>,
 ) {
     if !args.json {
-        print_header(title, metric_count);
+        println!("\n{title}");
+        if let Some(report) = knc_report {
+            for line in report.conditions.lines() {
+                println!("{line}");
+            }
+            let name = args.label.as_deref().unwrap_or(&report.name);
+            println!("  Input   {name} | {}", report.input.display());
+        }
+        println!("running {metric_count} metrics");
         print_metrics(metrics);
         print_warnings(domain, test, warnings, args);
         return;
@@ -697,7 +721,13 @@ fn show_section(
         (domain, test),
         metrics,
         warnings,
-        serde_json::Value::Null,
+        knc_report.map_or(serde_json::Value::Null, |report| {
+            serde_json::json!({
+                "conditions": report.conditions,
+                "input": report.input,
+                "name": args.label.as_deref().unwrap_or(&report.name),
+            })
+        }),
     ));
 }
 
@@ -709,6 +739,7 @@ fn show_knc_section(args: &AnalyzeArgs, test: KncTest, report: &knc::Reports) {
         ("knc", Some(test.name())),
         &report.metrics,
         &report.warnings,
+        Some(report),
     );
 }
 
@@ -767,12 +798,6 @@ fn visible_metric_count(metrics: &[serde_json::Value]) -> usize {
     visible_metrics(metrics).count()
 }
 
-fn print_header(title: &str, metric_count: usize) {
-    println!();
-    println!("{title}");
-    println!("running {metric_count} metrics");
-}
-
 fn print_warnings(domain: &str, test: Option<&str>, warnings: &[String], args: &AnalyzeArgs) {
     if warnings.is_empty() {
         return;
@@ -819,7 +844,7 @@ fn write_knc(
 ) -> Result<()> {
     let debug = debug_info(args.debug, &args.config, &[input])?;
     let report = knc::analyze_input(config, test, input, None, debug.as_deref())?;
-    let footer = analysis_footer(&args.config, config, &report.setup, input, run)?;
+    let footer = analysis_footer(&args.config, config, &report.conditions, input, run)?;
     show_knc_section(args, test, &report);
     let Some(output) = &args.output else {
         return Ok(());
@@ -869,8 +894,9 @@ fn write_knc(
         ),
         (
             "metrics.csv",
-            ("run,domain,test,metric,unit,value\n".to_owned()
-                + &knc_csv_rows(&config.name, test, &report.metrics)?)
+            (display::ANALYSIS_CSV_COLUMNS.join(",")
+                + "\n"
+                + &knc_csv_rows(args.label.as_deref().unwrap_or(&config.name), test, &report)?)
                 .into_bytes(),
         ),
         (detail_name.as_str(), detail.into_bytes()),
@@ -894,11 +920,12 @@ fn write_knc(
 }
 
 /// Metric rows in shared analysis CSV layout, without header.
-fn knc_csv_rows(run: &str, test: KncTest, metrics: &[serde_json::Value]) -> Result<String> {
+fn knc_csv_rows(run: &str, test: KncTest, report: &knc::Reports) -> Result<String> {
     let mut csv = csv::WriterBuilder::new()
         .has_headers(false)
         .from_writer(Vec::new());
-    for metric in metrics {
+    let [setup, phase, offset_mm] = report.conditions.csv_cells();
+    for metric in &report.metrics {
         csv.write_record([
             crate::compare::safe_cell(run),
             "knc".into(),
@@ -909,6 +936,9 @@ fn knc_csv_rows(run: &str, test: KncTest, metrics: &[serde_json::Value]) -> Resu
                 .as_f64()
                 .map(|value| value.to_string())
                 .unwrap_or_default(),
+            setup.clone(),
+            phase.clone(),
+            offset_mm.clone(),
         ])?;
     }
     Ok(String::from_utf8(csv.into_inner()?)?)
@@ -932,11 +962,11 @@ fn add_knc_inputs<'a>(
 fn analysis_footer(
     config_path: &Path,
     config: &clab_core::config::CaseConfig,
-    setup: &str,
+    conditions: &knc::Conditions,
     input: &Path,
     run: Option<&Path>,
 ) -> Result<String> {
-    let mut lines = vec![format!("KnC setup: {setup}")];
+    let mut lines = vec![format!("KnC conditions: {}", conditions.summary())];
     lines.push(format!("Config: {}", absolute_path(config_path)?.display()));
     lines.push(format!("Case: {} | {}", config.name, config.loadcase));
     lines.push(format!("Input: {}", absolute_path(input)?.display()));

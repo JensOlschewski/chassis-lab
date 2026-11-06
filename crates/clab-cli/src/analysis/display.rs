@@ -6,6 +6,19 @@
 
 use std::io::{IsTerminal, Write};
 
+/// Shared `analyze` CSV layout, including empty conditions for SVC rows.
+pub(crate) const ANALYSIS_CSV_COLUMNS: [&str; 9] = [
+    "run",
+    "domain",
+    "test",
+    "metric",
+    "unit",
+    "value",
+    "setup",
+    "phase",
+    "offset_mm",
+];
+
 /// Keep warnings next to their metrics, but retain qualifiers in redirected output.
 pub(crate) fn print_warnings(domain: &str, test: Option<&str>, warnings: &[String]) {
     if warnings.is_empty() {

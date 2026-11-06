@@ -261,7 +261,7 @@ fn reports(
         "warnings": warnings,
     });
     let mut csv = csv::WriterBuilder::new().from_writer(Vec::new());
-    csv.write_record(["run", "domain", "test", "metric", "unit", "value"])?;
+    csv.write_record(super::display::ANALYSIS_CSV_COLUMNS)?;
     for metric in detail["metrics"].as_array().unwrap() {
         csv.write_record([
             safe_cell(&config.name),
@@ -270,6 +270,9 @@ fn reports(
             safe_cell(metric["metric"].as_str().unwrap()),
             metric["unit"].as_str().unwrap().into(),
             metric["value"].as_f64().unwrap().to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
         ])?;
     }
     Ok(Reports {

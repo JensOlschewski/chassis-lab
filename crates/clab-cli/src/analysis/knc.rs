@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyModule};
 use serde::{Deserialize, Serialize};
 
+use clab_converter::conditions::Setup;
 use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
 use clab_core::config::{CaseConfig, SignalRef, VerticalBranch, VerticalConfig};
 use clab_core::conventions::{
@@ -350,11 +351,12 @@ struct Curve {
 }
 
 pub(crate) struct Reports {
+    pub input: PathBuf,
+    pub name: String,
     pub detail: String,
     pub curve_count: usize,
     pub metrics: Vec<serde_json::Value>,
-    /// Setup code of the analyzed input, for report footers.
-    pub setup: String,
+    pub conditions: Conditions,
     pub warnings: Vec<String>,
     pub normalization: serde_json::Value,
     pub branch: VerticalBranch,
@@ -366,16 +368,127 @@ pub(crate) struct Reports {
     pub corner_mass_kg: BTreeMap<String, f64>,
 }
 
-/// Test setup code stored by `clab convert --setup`. Files converted without
-/// one must be converted again.
-pub(crate) fn required_setup(file: &CanonicalFile) -> Result<String> {
-    let summary = file.summary();
-    summary.setup.clone().ok_or_else(|| {
-        anyhow::anyhow!(
-            "'{}' has no test setup; convert it again with `clab convert --setup`",
-            summary.path.display()
+/// Test conditions stored by `clab convert`: setup always, phase and offset
+/// for lateral tests only.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Conditions {
+    setup: Setup,
+    phase: Option<String>,
+    offset_mm: Option<f64>,
+}
+
+impl Conditions {
+    /// Files converted without a setup must be converted again.
+    pub(crate) fn from_file(file: &CanonicalFile) -> Result<Self> {
+        let summary = file.summary();
+        let code = summary.setup.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "'{}' has no test setup; convert it again with `clab convert --setup`",
+                summary.path.display()
+            )
+        })?;
+        let parse_error = |error| anyhow::anyhow!("'{}': {error}", summary.path.display());
+        let setup = code.parse().map_err(parse_error)?;
+        let phase = summary
+            .phase
+            .as_deref()
+            .map(str::parse)
+            .transpose()
+            .map_err(parse_error)?;
+        let conditions = clab_converter::conditions::Conditions::declare(
+            "knc",
+            summary.test.as_deref(),
+            Some(setup),
+            phase,
+            summary.offset_mm,
         )
-    })
+        .with_context(|| format!("invalid test conditions in '{}'", summary.path.display()))?
+        .expect("KnC declaration has conditions");
+        Ok(Self {
+            setup: conditions.setup,
+            phase: conditions.phase.map(|phase| phase.as_str().to_owned()),
+            offset_mm: conditions.offset_mm,
+        })
+    }
+
+    /// Short form for report footers: `B1E0F1R1 | in-phase | 30 mm`.
+    pub(crate) fn summary(&self) -> String {
+        let mut parts = vec![self.setup.to_string()];
+        parts.extend(self.phase.iter().map(|phase| format!("{phase}-phase")));
+        parts.extend(self.offset_mm.iter().map(|offset| format!("{offset} mm")));
+        parts.join(" | ")
+    }
+
+    /// Aligned console lines under the section title.
+    pub(crate) fn lines(&self) -> Vec<String> {
+        let on = |flag: bool| if flag { "on" } else { "off" };
+        let setup = self.setup;
+        let mut lines = vec![format!(
+            "  Setup   {setup}  (brakes {} · engine {} · front ARB {} · rear ARB {})",
+            on(setup.brakes),
+            on(setup.engine),
+            on(setup.front_arb),
+            on(setup.rear_arb),
+        )];
+        lines.extend(
+            self.phase
+                .iter()
+                .map(|phase| format!("  Phase   {phase}-phase")),
+        );
+        lines.extend(
+            self.offset_mm
+                .iter()
+                .map(|offset| format!("  Offset  {offset} mm")),
+        );
+        lines
+    }
+
+    pub(crate) fn json(&self) -> serde_json::Value {
+        let mut value = serde_json::json!({"setup": self.setup.to_string()});
+        if let Some(phase) = &self.phase {
+            value["phase"] = phase.as_str().into();
+        }
+        if let Some(offset) = self.offset_mm {
+            value["offset_mm"] = offset.into();
+        }
+        value
+    }
+
+    /// Names of the conditions that differ from `other`.
+    pub(crate) fn differences(&self, other: &Self) -> Vec<&'static str> {
+        let (a, b) = (self.setup, other.setup);
+        [
+            ("brakes", a.brakes != b.brakes),
+            ("engine", a.engine != b.engine),
+            ("front ARB", a.front_arb != b.front_arb),
+            ("rear ARB", a.rear_arb != b.rear_arb),
+            ("phase", self.phase != other.phase),
+            ("offset", self.offset_mm != other.offset_mm),
+        ]
+        .into_iter()
+        .filter_map(|(name, differs)| differs.then_some(name))
+        .collect()
+    }
+
+    /// CSV cells: setup, phase, offset_mm.
+    pub(crate) fn csv_cells(&self) -> [String; 3] {
+        [
+            self.setup.to_string(),
+            self.phase.clone().unwrap_or_default(),
+            self.offset_mm
+                .map(|offset| offset.to_string())
+                .unwrap_or_default(),
+        ]
+    }
+}
+
+impl Serialize for Conditions {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        self.json().serialize(serializer)
+    }
 }
 
 /// Calculate KnC curves, metrics, and warnings for one test. Does not render
@@ -391,7 +504,7 @@ pub(crate) fn analyze_input(
 ) -> Result<Reports> {
     let file = CanonicalFile::open(path)
         .with_context(|| format!("failed to read HDF5 '{}'", path.display()))?;
-    let setup = required_setup(&file)?;
+    let conditions = Conditions::from_file(&file)?;
     let (curves, mut warnings, normalization) = match file.summary().source_kind {
         SourceKind::Simulation => {
             let (mut curves, mut warnings) = simulation_curves(config, test, &file)?;
@@ -462,6 +575,7 @@ pub(crate) fn analyze_input(
         "command": "analyze",
         "domain": "knc",
         "test": test.name(),
+        "conditions": conditions.json(),
         "metrics": metrics,
         "curves": curves,
         "warnings": warnings,
@@ -469,10 +583,12 @@ pub(crate) fn analyze_input(
     });
     let curve_count = detail["curves"].as_array().unwrap().len();
     Ok(Reports {
+        input: path.to_path_buf(),
+        name: config.name.clone(),
         detail: serde_json::to_string_pretty(&detail)? + "\n",
         curve_count,
         metrics: detail["metrics"].as_array().unwrap().clone(),
-        setup,
+        conditions,
         warnings: detail["warnings"]
             .as_array()
             .unwrap()
@@ -1353,5 +1469,34 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+    #[test]
+    fn condition_formats_and_differences_preserve_lateral_cases() {
+        let base = super::Conditions {
+            setup: "b1e0f1r1".parse().unwrap(),
+            phase: Some("in".into()),
+            offset_mm: Some(0.0),
+        };
+        assert!(base.differences(&base).is_empty());
+        assert_eq!(base.summary(), "B1E0F1R1 | in-phase | 0 mm");
+        assert_eq!(base.csv_cells(), ["B1E0F1R1", "in", "0"]);
+        assert_eq!(
+            base.json(),
+            serde_json::json!({"setup": "B1E0F1R1", "phase": "in", "offset_mm": 0.0})
+        );
+        let other = super::Conditions {
+            phase: Some("anti".into()),
+            offset_mm: Some(30.0),
+            ..base.clone()
+        };
+        assert_eq!(base.differences(&other), ["phase", "offset"]);
+        assert_eq!(other.summary(), "B1E0F1R1 | anti-phase | 30 mm");
+        let unknown = super::Conditions {
+            phase: None,
+            offset_mm: None,
+            ..base.clone()
+        };
+        assert_eq!(base.differences(&unknown), ["phase", "offset"]);
+        assert_eq!(unknown.json(), serde_json::json!({"setup": "B1E0F1R1"}));
     }
 }
