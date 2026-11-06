@@ -353,6 +353,8 @@ pub(crate) struct Reports {
     pub detail: String,
     pub curve_count: usize,
     pub metrics: Vec<serde_json::Value>,
+    /// Setup code of the analyzed input, for report footers.
+    pub setup: String,
     pub warnings: Vec<String>,
     pub normalization: serde_json::Value,
     pub branch: VerticalBranch,
@@ -362,6 +364,18 @@ pub(crate) struct Reports {
     /// reused by both the metric calculation and the `ride_frequency` plot
     /// (`curve_plots`/`compare_plots`), so callers never recompute it.
     pub corner_mass_kg: BTreeMap<String, f64>,
+}
+
+/// Test setup code stored by `clab convert --setup`. Files converted without
+/// one must be converted again.
+pub(crate) fn required_setup(file: &CanonicalFile) -> Result<String> {
+    let summary = file.summary();
+    summary.setup.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "'{}' has no test setup; convert it again with `clab convert --setup`",
+            summary.path.display()
+        )
+    })
 }
 
 /// Calculate KnC curves, metrics, and warnings for one test. Does not render
@@ -377,6 +391,7 @@ pub(crate) fn analyze_input(
 ) -> Result<Reports> {
     let file = CanonicalFile::open(path)
         .with_context(|| format!("failed to read HDF5 '{}'", path.display()))?;
+    let setup = required_setup(&file)?;
     let (curves, mut warnings, normalization) = match file.summary().source_kind {
         SourceKind::Simulation => {
             let (mut curves, mut warnings) = simulation_curves(config, test, &file)?;
@@ -457,6 +472,7 @@ pub(crate) fn analyze_input(
         detail: serde_json::to_string_pretty(&detail)? + "\n",
         curve_count,
         metrics: detail["metrics"].as_array().unwrap().clone(),
+        setup,
         warnings: detail["warnings"]
             .as_array()
             .unwrap()

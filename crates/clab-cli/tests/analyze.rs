@@ -485,6 +485,20 @@ fn analyzes_knc_measurement_hdf5_when_config_also_defines_svc() {
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(!stderr.contains("SVC analysis does not support"));
     assert!(String::from_utf8_lossy(&result.stdout).contains("KnC Vertical"));
+
+    hdf5::File::open_rw(&input)
+        .unwrap()
+        .delete_attr("setup")
+        .unwrap();
+    let old = clab()
+        .args(["analyze", config.to_str().unwrap(), input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!old.status.success());
+    assert!(
+        String::from_utf8_lossy(&old.stderr)
+            .contains("convert it again with `clab convert --setup`")
+    );
 }
 
 #[test]

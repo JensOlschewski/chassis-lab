@@ -6,13 +6,6 @@
 # Optional keys that are left out fall back to their default, and clab warns
 # about each one (details with --verbose).
 
-# KnC test condition, shown in the report footer
-[knc.meta]
-brakes_applied = false
-engine_running = false
-front_arb_connected = true
-rear_arb_connected = true
-
 # Plot range defined by wheel-center travel
 [knc.window]
 minimum_mm = -80
@@ -44,8 +37,5 @@ index = 2
 
 # Roll test setup
 # only keys that differ from [knc.*].
-[knc.roll.meta]
-brakes_applied = true
-
 [knc.roll.metric]
 gradient_points_deg = 0.5

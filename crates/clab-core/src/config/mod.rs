@@ -22,7 +22,7 @@ use std::{
 use thiserror::Error;
 use toml::Value;
 
-pub use legacy::{VerticalBranch, VerticalBranches, VerticalConfig, VerticalSetup, VerticalWindow};
+pub use legacy::{VerticalBranch, VerticalBranches, VerticalConfig, VerticalWindow};
 use support::{absolute, expand, merge_map, table};
 
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -414,7 +414,7 @@ mod tests {
     fn parses_vertical_only_unified_config() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n").unwrap();
+        fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n").unwrap();
         let config = load_config(&p).unwrap();
         assert_eq!(config.configured_domains(), vec![Domain::Knc]);
     }
@@ -423,7 +423,7 @@ mod tests {
     fn validates_vertical_branch_options() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n";
+        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n";
         fs::write(&p, base).unwrap();
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
         assert_eq!((branch.measurement.index, branch.simulation.index), (2, 2));
@@ -452,7 +452,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
         let write = |window: &str| {
-            fs::write(&p, format!("[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\n{window}\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n")).unwrap();
+            fs::write(&p, format!("[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\n{window}\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n")).unwrap();
         };
         write(
             "travel_minimum_mm=-10\ntravel_maximum_mm=10\nstep_mm=1\nmetric_gradient_points_mm=5",
@@ -492,7 +492,7 @@ mod tests {
         let p = d.path().join("case.toml");
         fs::write(
             &p,
-            "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.metric]\nsprung_mass_front_left_kg=449.0\nsprung_mass_rear_right_kg=383.0\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n",
+            "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.metric]\nsprung_mass_front_left_kg=449.0\nsprung_mass_rear_right_kg=383.0\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n",
         )
         .unwrap();
         let window = load_config(&p).unwrap().vertical.unwrap().window;
@@ -587,7 +587,7 @@ mod tests {
         let setup = d.path().join("setup.toml");
         fs::write(
             &setup,
-            "[knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n\
+            "[knc.vertical]\n\
              [knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n",
         )
         .unwrap();
@@ -724,7 +724,11 @@ mod tests {
     fn parses_canonical_toml_role_files_and_signal_inheritance() {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("input.toml"), "[svc.simulation]\nfile='simulation.json'\n[knc.vertical.simulation]\nfile='simulation.h5'\n").unwrap();
-        fs::write(d.path().join("setup.toml"), "[knc.vertical]\nbrakes_applied=false\nengine_running=false\nfront_arb_connected=true\n[knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n").unwrap();
+        fs::write(
+            d.path().join("setup.toml"),
+            "[knc.vertical]\n[knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n",
+        )
+        .unwrap();
         fs::write(d.path().join("signals.toml"), "[simulation.svc.signals.total]\nentity='e'\ncomponent='c'\nunit='kg'\n[measurement.svc.signals.total]\nentity='e'\nunit='kg'\n[simulation.knc.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n[simulation.knc.vertical.signals.front_left_wheel_center_x]\nentity='fl'\ncomponent='x'\nunit='mm'\n[measurement.knc.vertical.signals.front_left_wheel_center_x]\nentity='fl'\nunit='mm'\n").unwrap();
         fs::write(
             d.path().join("validation.toml"),
@@ -779,7 +783,7 @@ mod tests {
         .unwrap();
         fs::write(
             d.path().join("setup.toml"),
-            "[knc]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\nrear_arb_connected=true\n[knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n",
+            "[knc]\n[knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n",
         )
         .unwrap();
         fs::write(
@@ -801,7 +805,6 @@ mod tests {
 
         let vertical = load_config(&p).unwrap().vertical.unwrap();
 
-        assert!(vertical.setup.brakes_applied);
         assert_eq!(
             vertical.tolerances.absolute["front_left_wheel_center_x_mm"],
             0.05
@@ -826,7 +829,7 @@ mod tests {
         .unwrap();
         fs::write(
             d.path().join("setup.toml"),
-            "[knc.meta]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\nrear_arb_connected=true\n\
+            "\
              [knc.window]\nminimum_mm=-80\nmaximum_mm=80\nstep_mm=1\nplot_branches='selected'\n\
              [knc.metric]\ngradient_points_mm=10\ndirection='fall'\nindex=3\n\
              [knc.vertical.window]\nminimum_mm=-60\nmaximum_mm=60\n\
@@ -848,12 +851,6 @@ mod tests {
 
         let vertical = load_config(&p).unwrap().vertical.unwrap();
 
-        assert!(vertical.setup.brakes_applied);
-        assert_eq!(vertical.setup.rear_arb_connected, Some(true));
-        assert_eq!(
-            vertical.setup.summary(),
-            "brakes applied: yes | engine running: no | front ARB connected: yes | rear ARB connected: yes"
-        );
         // Vertical overrides per key; unset keys inherit from [knc].
         assert_eq!(
             (
@@ -875,7 +872,7 @@ mod tests {
     fn vertical_reports_defaulted_branch_keys() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.setup]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n";
+        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n";
         fs::write(&p, base).unwrap();
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
         assert_eq!(
@@ -987,7 +984,7 @@ mod tests {
         fs::write(
             &config,
             format!(
-                "[meta]\nname='n'\nloadcase='l'\n[input.svc]\nfile={:?}\n[input.knc.vertical]\nfile={:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.svc.signals.x]\nentity='e'\ncomponent='c'\nunit='kg'\n[signals.measurement.svc.signals.x]\nentity='e'\nunit='kg'\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[signals.measurement.knc.vertical.signals.x]\nentity='e'\nunit='mm'\n",
+                "[meta]\nname='n'\nloadcase='l'\n[input.svc]\nfile={:?}\n[input.knc.vertical]\nfile={:?}\n[setup.knc.vertical]\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.svc.signals.x]\nentity='e'\ncomponent='c'\nunit='kg'\n[signals.measurement.svc.signals.x]\nentity='e'\nunit='kg'\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[signals.measurement.knc.vertical.signals.x]\nentity='e'\nunit='mm'\n",
                 svc, vertical
             ),
         )
@@ -1010,7 +1007,7 @@ mod tests {
         source_kind(&input, "simulation");
         source_kind(&static_input, "simulation");
         let config = d.path().join("case.toml");
-        fs::write(&config, "[meta]\nname='n'\nloadcase='l'\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[signals.measurement.knc.vertical.signals.x]\nentity='e'\nunit='mm'\n").unwrap();
+        fs::write(&config, "[meta]\nname='n'\nloadcase='l'\n[setup.knc.vertical]\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[signals.measurement.knc.vertical.signals.x]\nentity='e'\nunit='mm'\n").unwrap();
         let run = run_dir.join("run.toml");
         fs::write(
             &run,
@@ -1119,7 +1116,7 @@ mod tests {
         fs::write(
             &config,
             format!(
-                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
+                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
             ),
         )
         .unwrap();
@@ -1142,7 +1139,7 @@ mod tests {
         fs::write(
             &config,
             format!(
-                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
+                "[meta]\nname='n'\nloadcase='l'\n[input.knc.static]\nfile={static_input:?}\n[input.knc.vertical]\nfile={input:?}\n[setup.knc.vertical]\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n"
             ),
         )
         .unwrap();
@@ -1185,7 +1182,7 @@ mod tests {
             &config,
             format!(
                 "[meta]\nname='n'\nloadcase='l'\n\
-                 [setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n\
+                 [setup.knc.vertical]\n\
                  [setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n\
                  [signals.simulation.knc.vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n\
                  [signals.measurement.knc.vertical.signals.x]\nentity='e'\nunit='mm'\n\
@@ -1219,5 +1216,17 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn rejects_removed_setup_flags() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("case.toml");
+        let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n";
+        fs::write(&p, base).unwrap();
+        assert!(load_config(&p).is_ok());
+        fs::write(&p, format!("{base}[vertical.setup]\nbrakes_applied=true\n")).unwrap();
+        let error = load_config(&p).unwrap_err().to_string();
+        assert!(error.contains("clab convert --setup"), "{error}");
     }
 }

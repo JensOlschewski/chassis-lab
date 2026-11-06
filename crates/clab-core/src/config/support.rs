@@ -438,16 +438,6 @@ pub(crate) fn string_allow_empty(
         .ok_or_else(|| ConfigError(format!("{where_}.{key} must be a string")))?
         .to_owned())
 }
-pub(crate) fn boolean(
-    t: &toml::map::Map<String, Value>,
-    key: &str,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    boolean_value(value(t, key, "[vertical.setup]")?, key)
-}
-pub(crate) fn boolean_value(v: &Value, key: &str) -> Result<bool, Box<dyn std::error::Error>> {
-    v.as_bool()
-        .ok_or_else(|| ConfigError(format!("[vertical.setup].{key} must be boolean")).into())
-}
 pub(crate) fn finite(v: &Value, where_: &str) -> Result<f64, Box<dyn std::error::Error>> {
     let n = v
         .as_float()

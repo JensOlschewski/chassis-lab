@@ -82,6 +82,7 @@ enum ComparedDomain {
         test: KncTest,
         curves: serde_json::Value,
         metrics: Vec<serde_json::Value>,
+        setup: String,
         branch: clab_core::config::VerticalBranch,
         /// This series' own `ride_frequency` mass map (same source as
         /// `knc::Reports::corner_mass_kg`): baseline and candidate
@@ -289,6 +290,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                         metrics: candidate_metrics,
                         branch: candidate_branch,
                         corner_mass_kg: candidate_mass,
+                        ..
                     },
                 ) if base_test == test => {
                     let compared = compare_knc_metrics(
@@ -401,6 +403,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     let rendered = progress.plot_phases(jobs, |(test, candidates_for_test)| {
         let Some(ComparedDomain::Knc {
             curves: base,
+            setup: base_setup,
             branch: base_branch,
             corner_mass_kg: base_mass,
             ..
@@ -408,10 +411,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         else {
             anyhow::bail!("missing KnC {} baseline", test.name());
         };
-        let mut footer = Vec::new();
-        if let Some(config) = test.config(&baseline.config) {
-            footer.push(format!("KnC setup: {}", config.setup.summary()));
-        }
+        let mut footer = vec![format!("KnC setup: {base_setup}")];
         footer.push(format!(
             "Config: {}",
             absolute_path(&args.config)?.display()
@@ -671,6 +671,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
                 test,
                 curves: detail["curves"].clone(),
                 metrics: report.metrics,
+                setup: report.setup,
                 branch: report.branch,
                 corner_mass_kg: report.corner_mass_kg,
             },

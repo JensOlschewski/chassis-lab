@@ -215,9 +215,9 @@ as `undefined`. Paths resolve relative to main config.
 KnC setup lives under `[setup.knc]`; `[setup.knc.vertical]` and
 `[setup.knc.roll]` hold test-only values and override `[setup.knc]` key by key
 (nested tables deep-merge).
-`[meta]` holds the test setup flags (`brakes_applied`, `engine_running`,
-`front_arb_connected`, optional `rear_arb_connected`), which also appear in the
-report footer. `[window]` defines the plot range (`minimum_mm`, `maximum_mm`,
+The test setup (brakes, engine, ARBs) is not configured: it is stored in the
+HDF5 by `clab convert --setup` and shown in the report footer; the old setup
+flags and `[meta]` are rejected. `[window]` defines the plot range (`minimum_mm`, `maximum_mm`,
 `step_mm`; legacy `travel_minimum_mm` and `travel_maximum_mm` remain accepted) and
 `plot_branches` (`all` or `selected`). `[metric]` defines the metric computation:
 `gradient_points_mm` (default 10, limited to the travel window and required to lie
