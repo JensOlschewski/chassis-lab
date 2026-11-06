@@ -62,7 +62,7 @@ impl SourceKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Summary {
     pub path: PathBuf,
     pub schema_version: u32,
@@ -71,6 +71,12 @@ pub struct Summary {
     pub domain: Option<String>,
     /// Declared test within the domain (`vertical`); `None` for domains without tests.
     pub test: Option<String>,
+    /// Declared KnC setup code (`B1E0F1R1`); `None` for files converted without one.
+    pub setup: Option<String>,
+    /// Lateral force phase (`in`, `anti`); lateral tests only.
+    pub phase: Option<String>,
+    /// Pneumatic trail offset in mm; lateral tests only.
+    pub offset_mm: Option<f64>,
     pub source_file: String,
     pub sample_count: usize,
     pub signal_count: usize,
@@ -372,6 +378,9 @@ fn validate(
             source_kind,
             domain,
             test,
+            setup: optional_string(file, "setup")?,
+            phase: optional_string(file, "phase")?,
+            offset_mm: optional_f64(file, "offset_mm")?,
             source_file,
             sample_count,
             signal_count,
