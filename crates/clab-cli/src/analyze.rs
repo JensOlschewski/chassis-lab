@@ -275,7 +275,7 @@ fn write_combined_run(
         .map(|report| (report.0.title(), report))
         .collect();
     let rendered = progress.plot_phases(jobs, |(test, path, report, debug)| {
-        let footer = analysis_footer(&args.config, config, *test, path, Some(&args.input))?;
+        let footer = analysis_footer(&args.config, config, &report.setup, path, Some(&args.input))?;
         let detail = serde_json::from_str(&report.detail)?;
         knc_plots(
             config,
@@ -817,9 +817,9 @@ fn write_knc(
     args: &AnalyzeArgs,
     run: Option<&Path>,
 ) -> Result<()> {
-    let footer = analysis_footer(&args.config, config, test, input, run)?;
     let debug = debug_info(args.debug, &args.config, &[input])?;
     let report = knc::analyze_input(config, test, input, None, debug.as_deref())?;
+    let footer = analysis_footer(&args.config, config, &report.setup, input, run)?;
     show_knc_section(args, test, &report);
     let Some(output) = &args.output else {
         return Ok(());
@@ -932,14 +932,11 @@ fn add_knc_inputs<'a>(
 fn analysis_footer(
     config_path: &Path,
     config: &clab_core::config::CaseConfig,
-    test: KncTest,
+    setup: &str,
     input: &Path,
     run: Option<&Path>,
 ) -> Result<String> {
-    let mut lines = Vec::new();
-    if let Some(knc) = test.config(config) {
-        lines.push(format!("KnC setup: {}", knc.setup.summary()));
-    }
+    let mut lines = vec![format!("KnC setup: {setup}")];
     lines.push(format!("Config: {}", absolute_path(config_path)?.display()));
     lines.push(format!("Case: {} | {}", config.name, config.loadcase));
     lines.push(format!("Input: {}", absolute_path(input)?.display()));

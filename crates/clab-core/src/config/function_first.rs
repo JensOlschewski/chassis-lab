@@ -550,12 +550,12 @@ fn function_knc_test(
         Value::Table(measurement_mappings),
     );
     let mut setup_copy = setup.clone();
-    // `[meta]` holds the test setup flags; flags directly in `[setup.knc]`
-    // remain accepted.
-    if let Some(meta) = setup_copy.remove("meta") {
-        for (key, value) in table(&meta, "[setup.knc.meta]")? {
-            setup_copy.insert(key.clone(), value.clone());
-        }
+    if setup_copy.contains_key("meta") {
+        return Err(ConfigError(
+            "[setup.knc.meta] was removed; the test setup is stored in the HDF5 by `clab convert --setup`"
+                .into(),
+        )
+        .into());
     }
     let window = setup_copy.remove("window").unwrap_or_else(|| {
         let mut w = Map::new();

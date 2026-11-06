@@ -35,6 +35,7 @@ fn simulation_with_test(path: &std::path::Path, test: &str) {
     scalar(&file, "signal_count", 24_u64);
     string(&file, "source_kind", "simulation");
     string(&file, "domain", "knc");
+    string(&file, "setup", "B1E0F1R1");
     string(&file, "test", test);
     string(&file, "source_file", "fixture.res");
     let axis = file.create_group("axis").unwrap();
@@ -133,6 +134,7 @@ fn measurement_with_front_left_wcx_name(path: &std::path::Path, front_left_wcx_n
     scalar(&file, "signal_count", 48_u64);
     string(&file, "source_kind", "measurement");
     string(&file, "domain", "knc");
+    string(&file, "setup", "B1E0F1R1");
     string(&file, "test", "vertical");
     string(&file, "source_file", "fixture.acd");
     let axis = file.create_group("axis").unwrap();
@@ -291,7 +293,7 @@ fn config(path: &std::path::Path, omit: bool) {
             ));
         }
     }
-    fs::write(path,format!("[meta]\nname=\"fixture\"\nloadcase=\"L\"\n[physics]\ngravity=9.80665\n[setup.knc.vertical]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=true\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}{measurement_signals}" )).unwrap();
+    fs::write(path,format!("[meta]\nname=\"fixture\"\nloadcase=\"L\"\n[physics]\ngravity=9.80665\n[setup.knc.vertical]\n[setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n{signals}{measurement_signals}" )).unwrap();
 }
 
 /// Real reverse-engineered VARB corner masses; ride_frequency's fallback when

@@ -36,12 +36,6 @@ wheelbase_mm = 0.5
 measurement_hdf5 = "vertical.measurement.h5"
 simulation_hdf5 = "vertical.simulation.h5"
 
-[vertical.setup]
-brakes_applied = false
-engine_running = false
-front_arb_connected = true
-rear_arb_connected = true
-
 [vertical.window]
 minimum_mm = -1
 maximum_mm = 1

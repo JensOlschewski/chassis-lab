@@ -36,6 +36,7 @@ fn header(file: &File, source_kind: &str, test: &str, samples: u64) {
     scalar(file, "sample_count", samples);
     string(file, "source_kind", source_kind);
     string(file, "domain", "knc");
+    string(file, "setup", "B1E0F1R1");
     string(file, "test", test);
     string(file, "source_file", "fixture");
 }
@@ -230,7 +231,7 @@ fn closed_fixture(path: &Path, write: impl Fn(&Path)) {
 fn config(path: &Path, roll_angle: bool) {
     let mut text = String::from(
         "[meta]\nname=\"fixture\"\nloadcase=\"L\"\n\
-         [setup.knc.meta]\nbrakes_applied=true\nengine_running=false\nfront_arb_connected=false\n\
+         \
          [setup.knc.window]\nminimum_mm=-30\nmaximum_mm=30\nstep_mm=1\n\
          [setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n\
          [setup.knc.roll.metric]\ngradient_points_mm=5\n",

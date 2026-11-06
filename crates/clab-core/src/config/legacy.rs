@@ -12,8 +12,8 @@ use std::{collections::BTreeMap, path::Path};
 use toml::{Value, map::Map};
 
 use super::support::{
-    aliased, boolean, boolean_value, finite, keys, parse_tolerance_table, parse_validation,
-    positive, require, resolve, string, table, value,
+    aliased, finite, keys, parse_tolerance_table, parse_validation, positive, require, resolve,
+    string, table, value,
 };
 use super::support::{parse_measurement_signals, parse_signals};
 use super::{
@@ -21,29 +21,6 @@ use super::{
     ValidationTolerances,
 };
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct VerticalSetup {
-    pub brakes_applied: bool,
-    pub engine_running: bool,
-    pub front_arb_connected: bool,
-    pub rear_arb_connected: Option<bool>,
-}
-
-impl VerticalSetup {
-    /// One-line test setup description for report footers.
-    pub fn summary(&self) -> String {
-        let yes_no = |value: bool| if value { "yes" } else { "no" };
-        let mut parts = vec![
-            format!("brakes applied: {}", yes_no(self.brakes_applied)),
-            format!("engine running: {}", yes_no(self.engine_running)),
-            format!("front ARB connected: {}", yes_no(self.front_arb_connected)),
-        ];
-        if let Some(rear) = self.rear_arb_connected {
-            parts.push(format!("rear ARB connected: {}", yes_no(rear)));
-        }
-        parts.join(" | ")
-    }
-}
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalWindow {
     pub minimum_mm: f64,
@@ -66,7 +43,6 @@ pub struct VerticalConfig {
     pub simulation_hdf5: std::path::PathBuf,
     pub source_kind: SourceKind,
     pub static_simulation_hdf5: Option<std::path::PathBuf>,
-    pub setup: VerticalSetup,
     pub window: VerticalWindow,
     pub branch: VerticalBranches,
     pub signals: BTreeMap<String, SignalRef>,
@@ -442,6 +418,13 @@ pub(crate) fn parse_unified(
 /// `function_first::function_knc_test`, which synthesizes the same shape
 /// from `[input.knc.<test>]` + `[setup.knc.<test>]` for both `vertical` and
 /// `roll` rather than duplicating this parser.
+pub(crate) const REMOVED_SETUP_KEYS: [&str; 4] = [
+    "brakes_applied",
+    "engine_running",
+    "front_arb_connected",
+    "rear_arb_connected",
+];
+
 pub(crate) fn parse_vertical(
     raw: &Value,
     path: &Path,
@@ -468,11 +451,20 @@ pub(crate) fn parse_vertical(
             .ok_or_else(|| ConfigError("missing required [vertical.inputs] table".into()))?,
         "[vertical.inputs]",
     )?;
-    let s = table(
-        v.get("setup")
-            .ok_or_else(|| ConfigError("missing required [vertical.setup] table".into()))?,
-        "[vertical.setup]",
-    )?;
+    let empty = Map::new();
+    let s = v
+        .get("setup")
+        .map(|raw| table(raw, "[vertical.setup]"))
+        .transpose()?
+        .unwrap_or(&empty);
+    for key in REMOVED_SETUP_KEYS {
+        if s.contains_key(key) {
+            return Err(ConfigError(format!(
+                "[vertical.setup].{key} was removed; the test setup is stored in the HDF5 by `clab convert --setup`"
+            ))
+            .into());
+        }
+    }
     keys(
         i,
         &[
@@ -489,15 +481,7 @@ pub(crate) fn parse_vertical(
     require(i, "simulation_hdf5", "[vertical.inputs]")?;
     keys(
         s,
-        &[
-            "brakes_applied",
-            "engine_running",
-            "front_arb_connected",
-            "rear_arb_connected",
-            "window_minimum_mm",
-            "window_maximum_mm",
-            "window_step_mm",
-        ],
+        &["window_minimum_mm", "window_maximum_mm", "window_step_mm"],
         "[vertical.setup]",
     )?;
     let condensed = s.contains_key("window_minimum_mm")
@@ -648,15 +632,6 @@ pub(crate) fn parse_vertical(
             .get("static_simulation_hdf5")
             .map(|value| resolve(value, path, "static_simulation_hdf5"))
             .transpose()?,
-        setup: VerticalSetup {
-            brakes_applied: boolean(s, "brakes_applied")?,
-            engine_running: boolean(s, "engine_running")?,
-            front_arb_connected: boolean(s, "front_arb_connected")?,
-            rear_arb_connected: s
-                .get("rear_arb_connected")
-                .map(|v| boolean_value(v, "rear_arb_connected"))
-                .transpose()?,
-        },
         window: VerticalWindow {
             minimum_mm: min,
             maximum_mm: max,
