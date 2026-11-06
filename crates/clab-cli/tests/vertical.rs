@@ -526,7 +526,7 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
         command
             .args(["convert", "--yes"])
             .arg(examples.join("input").join(source))
-            .args(["-d", "knc", "-t", test, "-o"])
+            .args(["-d", "knc", "-t", test, "--setup", "b1e0f1r1", "-o"])
             .arg(&destination);
         let result = command.output().unwrap();
         assert!(

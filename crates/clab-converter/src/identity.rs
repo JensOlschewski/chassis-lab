@@ -8,6 +8,7 @@
 use anyhow::{Result, bail};
 
 use crate::acd::AcdMeasurement;
+use crate::conditions::Conditions;
 use crate::model::AdamsResult;
 
 /// Known domains and their tests. Add new domains and tests here.
@@ -15,21 +16,16 @@ pub const DOMAINS: &[(&str, &[&str])] = &[
     ("svc", &[]),
     (
         "knc",
-        &[
-            "vertical",
-            "roll",
-            "static",
-            "lateral",
-            "lateral-offset",
-            "longitudinal",
-        ],
+        &["vertical", "roll", "static", "lateral", "longitudinal"],
     ),
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Identity {
     pub domain: String,
     pub test: Option<String>,
+    /// Declared KnC setup; stored next to domain and test.
+    pub conditions: Option<Conditions>,
 }
 
 impl Identity {
@@ -58,6 +54,7 @@ impl Identity {
             _ => Ok(Self {
                 domain: domain.into(),
                 test: test.map(Into::into),
+                conditions: None,
             }),
         }
     }
@@ -199,10 +196,8 @@ pub fn res_test(result: &AdamsResult) -> Detection {
     )
     .unwrap_or(0.0);
     let lateral = wheel_force_range(result, "FY") > FORCE_MOVES_N;
-    let torque = wheel_force_range(result, "TZ") > TORQUE_MOVES_NMM;
     // Torque next to lateral force is the pneumatic trail offset (Tz = Fy × offset).
-    let lateral_test = if torque { "lateral-offset" } else { "lateral" };
-    let aligning = !lateral && torque;
+    let aligning = !lateral && wheel_force_range(result, "TZ") > TORQUE_MOVES_NMM;
     let excited = [
         (roll > ROLL_MOVES_RAD, Some("roll")),
         (vertical > VERTICAL_MOVES_MM, Some("vertical")),
@@ -210,7 +205,7 @@ pub fn res_test(result: &AdamsResult) -> Detection {
             wheel_force_range(result, "FX") > FORCE_MOVES_N,
             Some("longitudinal"),
         ),
-        (lateral, Some(lateral_test)),
+        (lateral, Some("lateral")),
         (aligning, None),
         (steer > STEER_MOVES_RAD, None),
     ];
@@ -310,10 +305,7 @@ pub fn res_warnings(result: &AdamsResult, declared: &str) -> Vec<String> {
 /// Warnings for a declared KnC test checked against ACD `testtype` and motion data.
 /// An empty list means everything agrees.
 pub fn acd_warnings(measurement: &AcdMeasurement, declared: &str) -> Vec<String> {
-    let motion = match acd_motion_test(measurement) {
-        Detection::Test(test) => Detection::Test(with_offset(measurement, test)),
-        other => other,
-    };
+    let motion = acd_motion_test(measurement);
     let Some(info) = measurement
         .test_info
         .iter()
@@ -324,7 +316,6 @@ pub fn acd_warnings(measurement: &AcdMeasurement, declared: &str) -> Vec<String>
     let Some((_, meta)) = acd_test(&info.value) else {
         return motion_warnings(motion, declared);
     };
-    let meta = with_offset(measurement, meta);
     let tt = &info.value;
     let mismatch = meta != declared;
     let against = format!("but --test is '{declared}'");
@@ -349,21 +340,6 @@ pub fn acd_warnings(measurement: &AcdMeasurement, declared: &str) -> Vec<String>
             }
             out
         }
-    }
-}
-
-/// ACD forces carry no offset torque, so only `subtest2` (offset in mm)
-/// tells a lateral test with pneumatic trail offset from one without.
-fn with_offset(measurement: &AcdMeasurement, test: &'static str) -> &'static str {
-    let offset = measurement
-        .test_info
-        .iter()
-        .find(|info| info.name == "subtest2")
-        .is_some_and(|info| info.value.trim().parse::<f64>().is_ok_and(|mm| mm != 0.0));
-    if test == "lateral" && offset {
-        "lateral-offset"
-    } else {
-        test
     }
 }
 
@@ -586,7 +562,7 @@ mod tests {
                     ("gforce_tire_lf", "FY", 1500.0),
                     ("gforce_tire_lf", "TZ", 45000.0),
                 ],
-                Detection::Test("lateral-offset"),
+                Detection::Test("lateral"),
             ),
             (vec![("gforce_tire_lf", "TZ", 5e5)], Detection::Undetermined),
             (
@@ -683,16 +659,6 @@ mod tests {
         let lateral = acd_with_forces(&[("lffy", 3000.0), ("rffy", 3000.0)]);
         assert_eq!(acd_motion_test(&lateral), Detection::Test("lateral"));
         assert!(acd_warnings(&lateral, "lateral").is_empty());
-        let mut offset = lateral.clone();
-        offset.test_info.push(AcdTestInfo {
-            name: "subtest2".into(),
-            description: String::new(),
-            data_type: "string".into(),
-            unit: String::new(),
-            value: "30".into(),
-        });
-        assert!(acd_warnings(&offset, "lateral-offset").is_empty());
-        assert_eq!(acd_warnings(&offset, "lateral").len(), 1);
         let longitudinal = acd_with_forces(&[("lffx", 3000.0), ("rffx", 3000.0)]);
         assert_eq!(
             acd_motion_test(&longitudinal),

@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use tempfile::NamedTempFile;
 
 pub mod acd;
+pub mod conditions;
 pub mod hdf5_writer;
 pub mod identity;
 pub mod measurement_hdf5;
