@@ -308,8 +308,8 @@ fn requires_domain_and_validates_test() {
         (&["-d", "driving"][..], "unknown domain 'driving'"),
         (&["-d", "knc"][..], "--test <TEST>"),
         (
-            &["-d", "knc", "-t", "lateral"][..],
-            "unknown test 'lateral'",
+            &["-d", "knc", "-t", "steering"][..],
+            "unknown test 'steering'",
         ),
         (&["-d", "svc", "-t", "vertical"][..], "has no tests"),
     ] {
