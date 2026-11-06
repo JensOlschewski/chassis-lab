@@ -8,7 +8,7 @@ use clap::Args;
 #[derive(Debug, Args)]
 #[command(
     override_usage = "clab convert --domain <DOMAIN> [--test <TEST>] [OPTIONS] <INPUT>",
-    after_help = "Domains and tests:\n  svc            no test\n  knc            --test vertical|roll|static\n\nExample:\n  clab convert run.res -d knc -t vertical -o converted/"
+    after_help = "Domains and tests:\n  svc            no test\n  knc            --test vertical|roll|static|lateral|lateral-offset|longitudinal\n\nExample:\n  clab convert run.res -d knc -t vertical -o converted/"
 )]
 pub(crate) struct ConvertArgs {
     /// Adams RES simulation or Lommel ACD measurement input.
