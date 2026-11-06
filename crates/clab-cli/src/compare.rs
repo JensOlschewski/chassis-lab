@@ -82,7 +82,7 @@ enum ComparedDomain {
         test: KncTest,
         curves: serde_json::Value,
         metrics: Vec<serde_json::Value>,
-        setup: String,
+        conditions: knc::Conditions,
         branch: clab_core::config::VerticalBranch,
         /// This series' own `ride_frequency` mass map (same source as
         /// `knc::Reports::corner_mass_kg`): baseline and candidate
@@ -125,6 +125,14 @@ struct Input {
     config: clab_core::config::CaseConfig,
     domains: BTreeMap<&'static str, ComparedDomain>,
     sources: Vec<PathBuf>,
+}
+
+/// Per-input identity and conditions shared by console, JSON and CSV output.
+#[derive(Serialize)]
+struct InputSummary {
+    label: String,
+    path: PathBuf,
+    conditions: BTreeMap<&'static str, knc::Conditions>,
 }
 
 struct ComparisonTolerances {
@@ -233,6 +241,24 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         .map(|input| input.config.name.as_str())
         .collect();
     let labels = resolve_labels(explicit, &names);
+    let inputs: Vec<_> = std::iter::once((&args.baseline, &baseline))
+        .chain(args.candidates.iter().zip(&loaded))
+        .enumerate()
+        .map(|(index, (path, input))| InputSummary {
+            label: display_label(&labels, index),
+            path: path.clone(),
+            conditions: input
+                .domains
+                .values()
+                .filter_map(|domain| match domain {
+                    ComparedDomain::Knc {
+                        test, conditions, ..
+                    } => Some((test.name(), conditions.clone())),
+                    ComparedDomain::Svc(_) => None,
+                })
+                .collect(),
+        })
+        .collect();
     let tolerances = args.tolerances.then(|| ComparisonTolerances {
         svc: baseline
             .config
@@ -253,6 +279,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     let mut knc_candidates: BTreeMap<&str, Vec<_>> = BTreeMap::new();
     let mut candidate_sources = Vec::new();
     let mut unavailable_domains = Vec::new();
+    let mut warnings: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for (index, path) in args.candidates.iter().enumerate() {
         let candidate = &loaded[index];
         let mut metrics = Vec::new();
@@ -282,12 +309,14 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     ComparedDomain::Knc {
                         test: base_test,
                         metrics: base_metrics,
+                        conditions: base_conditions,
                         ..
                     },
                     ComparedDomain::Knc {
                         test,
                         curves: candidate_curves,
                         metrics: candidate_metrics,
+                        conditions: candidate_conditions,
                         branch: candidate_branch,
                         corner_mass_kg: candidate_mass,
                         ..
@@ -302,17 +331,33 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     failed |= compared.iter().any(|metric| metric.status == "failed");
                     incomplete |= compared.iter().any(|metric| metric.status == "missing");
                     metrics.extend(compared);
-                    domains.push(serde_json::json!({"domain": "knc", "test": test.name(), "status": "compared"}));
+                    domains.push(serde_json::json!({"domain": "knc", "test": test.name(), "status": "compared", "conditions": candidate_conditions.json()}));
                     let label = display_label(&labels, index + 1);
+                    let differences = base_conditions.differences(candidate_conditions);
+                    if !differences.is_empty() {
+                        warnings.entry(*name).or_default().push(display::tag_warning(
+                            "knc",
+                            Some(test.name()),
+                            format!(
+                                "test conditions differ ({}): {} {} vs {} {}; results compare different physical cases",
+                                differences.join(", "),
+                                display_label(&labels, 0),
+                                base_conditions.summary(),
+                                label,
+                                candidate_conditions.summary(),
+                            ),
+                        ));
+                    }
                     knc_candidates.entry(test.name()).or_default().push((
                         label.clone(),
                         candidate_curves.clone(),
                         candidate_branch.clone(),
                         candidate_mass.clone(),
                         format!(
-                            "{label}: {} | {} | {}",
+                            "{label}: {} | {} | {} | {}",
                             candidate.config.name,
                             candidate.config.loadcase,
+                            candidate_conditions.summary(),
                             absolute_path(path)?.display()
                         ),
                         path.as_path(),
@@ -330,9 +375,11 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             && baseline.domains.keys().next() != candidate.domains.keys().next()
         {
             bail!(
-                "incompatible comparison domains between '{}' and '{}'",
+                "cannot compare different tests: '{}' is {}, '{}' is {}",
                 args.baseline.display(),
-                path.display()
+                baseline.domains.keys().next().unwrap(),
+                path.display(),
+                candidate.domains.keys().next().unwrap(),
             );
         }
         rows.extend(metrics.iter().cloned().map(|metric| (path.clone(), metric)));
@@ -349,7 +396,6 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         }
         candidates.push(entry);
     }
-    let mut warnings = BTreeMap::new();
     if args.debug {
         for test in [KncTest::Vertical, KncTest::Roll] {
             let key = knc_key(test);
@@ -361,14 +407,11 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     candidates.iter().any(|candidate| !candidate.2.measurement)
                 })
             {
-                warnings.insert(
-                    key,
-                    vec![display::tag_warning(
-                        "knc",
-                        Some(test.name()),
-                        knc::DEBUG_RATE_WARNING,
-                    )],
-                );
+                warnings.entry(key).or_default().push(display::tag_warning(
+                    "knc",
+                    Some(test.name()),
+                    knc::DEBUG_RATE_WARNING,
+                ));
             }
         }
     }
@@ -378,7 +421,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         print_metrics
     };
     show(
-        &args.baseline,
+        &inputs,
         &args.candidates,
         &baseline.domains,
         &rows,
@@ -403,7 +446,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     let rendered = progress.plot_phases(jobs, |(test, candidates_for_test)| {
         let Some(ComparedDomain::Knc {
             curves: base,
-            setup: base_setup,
+            conditions: base_conditions,
             branch: base_branch,
             corner_mass_kg: base_mass,
             ..
@@ -411,16 +454,16 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         else {
             anyhow::bail!("missing KnC {} baseline", test.name());
         };
-        let mut footer = vec![format!("KnC setup: {base_setup}")];
-        footer.push(format!(
+        let mut footer = vec![format!(
             "Config: {}",
             absolute_path(&args.config)?.display()
-        ));
+        )];
         footer.push(format!(
-            "{}: {} | {} | {}",
+            "{}: {} | {} | {} | {}",
             display_label(&labels, 0),
             baseline.config.name,
             baseline.config.loadcase,
+            base_conditions.summary(),
             absolute_path(&args.baseline)?.display()
         ));
         footer.extend(
@@ -428,6 +471,9 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 .iter()
                 .map(|candidate| candidate.4.clone()),
         );
+        if let Some(warnings) = warnings.get(knc_key(test)) {
+            footer.extend(warnings.iter().map(|warning| format!("WARNING: {warning}")));
+        }
         footer.push(format!("Created by: {}", report_creator()));
         footer.push(format!("clab version: {}", env!("CARGO_PKG_VERSION")));
         let debug = debug_info(
@@ -472,12 +518,17 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         "domains": baseline.domains.values().map(|domain| serde_json::json!({
             "domain": domain.domain(),
             "test": domain.test().map(KncTest::name),
+            "conditions": match domain {
+                ComparedDomain::Knc { conditions, .. } => conditions.json(),
+                ComparedDomain::Svc(_) => serde_json::Value::Null,
+            },
         })).collect::<Vec<_>>(),
         "baseline": baseline_entry,
         "candidates": candidates, "status": status,
+        "warnings": warnings.values().flatten().collect::<Vec<_>>(),
     });
     if let Some(output) = &args.output {
-        let csv = metrics_csv(&args.baseline, &rows)?;
+        let csv = metrics_csv(&inputs, &rows)?;
         let knc_details = baseline
             .domains
             .values()
@@ -671,7 +722,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
                 test,
                 curves: detail["curves"].clone(),
                 metrics: report.metrics,
-                setup: report.setup,
+                conditions: report.conditions,
                 branch: report.branch,
                 corner_mass_kg: report.corner_mass_kg,
             },
@@ -832,7 +883,7 @@ fn compare_knc_metrics(
         .collect()
 }
 
-fn metrics_csv(baseline: &Path, rows: &[(PathBuf, Metric)]) -> Result<String> {
+fn metrics_csv(inputs: &[InputSummary], rows: &[(PathBuf, Metric)]) -> Result<String> {
     let mut csv = csv::Writer::from_writer(Vec::new());
     csv.write_record([
         "baseline",
@@ -848,10 +899,32 @@ fn metrics_csv(baseline: &Path, rows: &[(PathBuf, Metric)]) -> Result<String> {
         "relative_percent",
         "allowed_difference",
         "status",
+        "baseline_label",
+        "candidate_label",
+        "baseline_setup",
+        "baseline_phase",
+        "baseline_offset_mm",
+        "candidate_setup",
+        "candidate_phase",
+        "candidate_offset_mm",
     ])?;
     for (candidate, metric) in rows {
+        let base = &inputs[0];
+        let other = inputs[1..]
+            .iter()
+            .find(|input| input.path == *candidate)
+            .expect("comparison row has a candidate input");
+        let cells = |input: &InputSummary| {
+            metric
+                .test
+                .and_then(|test| input.conditions.get(test))
+                .map(knc::Conditions::csv_cells)
+                .unwrap_or_default()
+        };
+        let [base_setup, base_phase, base_offset] = cells(base);
+        let [setup, phase, offset] = cells(other);
         csv.write_record([
-            safe_cell(&baseline.display().to_string()),
+            safe_cell(&base.path.display().to_string()),
             safe_cell(&candidate.display().to_string()),
             safe_cell(metric.domain),
             metric.test.map(safe_cell).unwrap_or_default(),
@@ -864,6 +937,14 @@ fn metrics_csv(baseline: &Path, rows: &[(PathBuf, Metric)]) -> Result<String> {
             option_number(metric.relative_percent),
             option_number(metric.allowed_difference),
             safe_cell(metric.status),
+            safe_cell(&base.label),
+            safe_cell(&other.label),
+            base_setup,
+            base_phase,
+            base_offset,
+            setup,
+            phase,
+            offset,
         ])?;
     }
     Ok(String::from_utf8(csv.into_inner()?)?)
@@ -902,7 +983,7 @@ fn grouped_metrics<'a>(
 
 /// `--json` twin of `print_metrics`: one section line per compared domain.
 fn json_metrics(
-    _baseline: &Path,
+    inputs: &[InputSummary],
     candidates: &[PathBuf],
     domains: &BTreeMap<&'static str, ComparedDomain>,
     rows: &[(PathBuf, Metric)],
@@ -953,7 +1034,7 @@ fn json_metrics(
             (domain, test),
             metrics,
             warnings.get(key).map_or(&[][..], Vec::as_slice),
-            serde_json::json!({"result": {
+            serde_json::json!({"inputs": inputs, "result": {
                 "passed": passed, "failed": failed, "missing": missing,
                 "tolerance_missing": tolerance_missing, "total": domain_rows.len(),
             }}),
@@ -962,7 +1043,7 @@ fn json_metrics(
 }
 
 fn print_metrics(
-    baseline: &Path,
+    inputs: &[InputSummary],
     candidates: &[PathBuf],
     domains: &BTreeMap<&'static str, ComparedDomain>,
     rows: &[(PathBuf, Metric)],
@@ -979,9 +1060,19 @@ fn print_metrics(
         let in_domain = |metric: &Metric| metric.domain == domain && metric.test == domain_test;
         println!();
         let grouped = grouped_metrics(compared, candidates, rows);
-        println!("{title}\nbaseline: {}", baseline.display());
-        for (index, candidate) in candidates.iter().enumerate() {
-            println!("candidate_{}: {}", index + 1, candidate.display());
+        println!("{title}");
+        for (index, input) in inputs.iter().enumerate() {
+            let role = if index == 0 {
+                "baseline".to_owned()
+            } else {
+                format!("candidate_{index}")
+            };
+            println!("{role}: {} | {}", input.label, input.path.display());
+            if let Some(conditions) = domain_test.and_then(|test| input.conditions.get(test)) {
+                for line in conditions.lines() {
+                    println!("{line}");
+                }
+            }
         }
         println!(
             "running {} metrics",

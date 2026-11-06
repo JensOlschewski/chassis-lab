@@ -305,9 +305,14 @@ fn analyzes_svc_measurement_reference_with_stdout_metrics() {
     );
     let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
     assert_eq!(csv.headers().unwrap().get(3), Some("metric"));
+    assert_eq!(csv.headers().unwrap().len(), 9);
     assert_eq!(
         csv.records()
-            .map(|record| record.unwrap().get(3).unwrap().to_owned())
+            .map(|record| {
+                let row = record.unwrap();
+                assert!(row.iter().skip(6).all(str::is_empty));
+                row.get(3).unwrap().to_owned()
+            })
             .collect::<Vec<_>>(),
         expected
             .iter()
@@ -822,6 +827,16 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     // Both domains render through the same `domain[::test]::metric ... value unit` row shape.
     assert!(stdout.contains("  svc::total_mass_kg ... "));
     assert!(stdout.contains("  knc::vertical::suspension_rate_front_left_n_per_mm ... "));
+    let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
+    assert_eq!(csv.headers().unwrap().len(), 9);
+    for row in csv.records() {
+        let row = row.unwrap();
+        if &row[1] == "knc" {
+            assert_eq!(&row[6], "B0E0F1R1");
+        } else {
+            assert!(row.iter().skip(6).all(str::is_empty));
+        }
+    }
     for name in [
         "report.json",
         "metrics.csv",

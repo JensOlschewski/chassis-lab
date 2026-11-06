@@ -434,7 +434,7 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
     assert!(result.status.success(), "{stderr}");
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(
-        stdout.contains("KnC Roll\nrunning 36 metrics\n"),
+        stdout.contains("KnC Roll\n  Setup   B1E0F1R1") && stdout.contains("running 36 metrics\n"),
         "{stdout}"
     );
     assert_roll_console_order(&stdout);
@@ -729,6 +729,22 @@ fn analyzes_and_compares_roll_combined_with_vertical_in_one_run() {
             .join("plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcx.pdf")
             .is_file()
     );
+
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .arg("compare")
+        .args([&config_path, &simulation, &vertical])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("cannot compare different tests"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("knc-roll") && stderr.contains("knc-vertical"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -775,7 +791,7 @@ fn compares_roll_metrics_between_measurements() {
         serde_json::from_str(&fs::read_to_string(output.join("knc-roll.json")).unwrap()).unwrap();
     assert_eq!(
         report["domains"],
-        serde_json::json!([{"domain": "knc", "test": "roll"}])
+        serde_json::json!([{"domain": "knc", "test": "roll", "conditions": {"setup": "B1E0F1R1"}}])
     );
     let stiffness = report["candidates"][0]["metrics"]
         .as_array()
