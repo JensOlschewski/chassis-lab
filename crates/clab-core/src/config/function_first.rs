@@ -75,25 +75,37 @@ pub(crate) fn parse_function_first(
     let svc = function_svc(&root, input, path)?;
     if let Some(knc) = input.get("knc") {
         let knc = table(knc, "[input.knc]")?;
-        keys(knc, &["vertical", "roll", "static"], "[input.knc]")?;
+        keys(
+            knc,
+            &["vertical", "roll", "longitudinal", "static"],
+            "[input.knc]",
+        )?;
         if knc.contains_key("static") && !KNC_TESTS.iter().any(|test| knc.contains_key(*test)) {
             return Err(ConfigError(
-                "[input.knc.static] requires [input.knc.vertical] or [input.knc.roll]".into(),
+                "[input.knc.static] requires a KnC test such as [input.knc.vertical]".into(),
             )
             .into());
         }
     }
-    let vertical = function_knc_test(&root, input, path, "vertical")?;
-    let roll = function_knc_test(&root, input, path, "roll")?;
-    if svc.is_none() && vertical.is_none() && roll.is_none() {
+    let vertical = function_knc_test(&root, input, path, "vertical")?.pop();
+    let roll = function_knc_test(&root, input, path, "roll")?.pop();
+    let longitudinal = function_knc_test(&root, input, path, "longitudinal")?;
+    if svc.is_none() && vertical.is_none() && roll.is_none() && longitudinal.is_empty() {
         return Err(ConfigError("[input] must define at least one domain".into()).into());
     }
-    let mut source_kinds = svc
+    let source_kinds: Vec<SourceKind> = svc
         .iter()
         .map(|(_, _, _, _, kind, _)| *kind)
-        .chain(vertical.iter().chain(&roll).map(|test| test.source_kind));
-    if let Some(first) = source_kinds.next()
-        && source_kinds.any(|kind| kind != first)
+        .chain(
+            vertical
+                .iter()
+                .chain(&roll)
+                .chain(&longitudinal)
+                .map(|test| test.source_kind),
+        )
+        .collect();
+    if let Some(first) = source_kinds.first()
+        && source_kinds.iter().any(|kind| kind != first)
     {
         return Err(
             ConfigError("run manifest mixes simulation and measurement inputs".into()).into(),
@@ -128,6 +140,7 @@ pub(crate) fn parse_function_first(
         validation,
         vertical,
         roll,
+        longitudinal,
         svc_signal_map,
         svc_measurement_signals,
     })
@@ -342,24 +355,53 @@ fn function_svc(
     )))
 }
 
-/// Parse one KnC test (`vertical` or `roll`) from `[input.knc.<test>]`,
+/// Parse one KnC test (`vertical`, `roll` or `longitudinal`) from `[input.knc.<test>]`,
 /// `[setup.knc]` merged with `[setup.knc.<test>]`, and `<test>` mappings.
 /// `[input.knc.static]` is the shared static simulation baseline.
+///
+/// Only `longitudinal` accepts a list (`[[input.knc.longitudinal]]`), one
+/// entry per stored setup; every other test yields at most one entry.
 fn function_knc_test(
     root: &toml::map::Map<String, Value>,
     input: &toml::map::Map<String, Value>,
     path: &Path,
     name: &str,
-) -> Result<Option<VerticalConfig>, Box<dyn std::error::Error>> {
+) -> Result<Vec<VerticalConfig>, Box<dyn std::error::Error>> {
     let Some(raw) = input.get("knc") else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     let knc = table(raw, "[input.knc]")?;
     let Some(raw) = knc.get(name) else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     let scope = format!("[input.knc.{name}]");
-    let test = table(raw, &scope)?;
+    let tests = match raw {
+        Value::Array(items) if name == "longitudinal" => items
+            .iter()
+            .map(|item| table(item, &format!("[[input.knc.{name}]]")))
+            .collect::<Result<Vec<_>, _>>()?,
+        Value::Array(_) => {
+            return Err(ConfigError(format!(
+                "[[input.knc.{name}]] lists are only supported for longitudinal"
+            ))
+            .into());
+        }
+        raw => vec![table(raw, &scope)?],
+    };
+    tests
+        .into_iter()
+        .map(|test| function_knc_input(root, knc, path, name, test))
+        .collect()
+}
+
+fn function_knc_input(
+    root: &toml::map::Map<String, Value>,
+    knc: &toml::map::Map<String, Value>,
+    path: &Path,
+    name: &str,
+    test: &toml::map::Map<String, Value>,
+) -> Result<VerticalConfig, Box<dyn std::error::Error>> {
+    let scope = format!("[input.knc.{name}]");
     keys(
         test,
         &[
@@ -501,21 +543,25 @@ fn function_knc_test(
                 overrides = Some(raw);
             }
         }
+        fold_flat_keys(&mut setup, "[setup.knc]")?;
         if let Some(overrides) = overrides {
-            merge_map(
-                &mut setup,
-                table(&overrides, &format!("[setup.knc.{name}]"))?,
-            );
+            let label = format!("[setup.knc.{name}]");
+            let mut overrides = table(&overrides, &label)?.clone();
+            fold_flat_keys(&mut overrides, &label)?;
+            merge_map(&mut setup, &overrides);
         }
         setup
     } else {
-        table(
+        let label = format!("[setup.knc.{name}]");
+        let mut setup = table(
             setup_root
                 .get(name)
-                .ok_or_else(|| ConfigError(format!("missing [setup.knc.{name}] table")))?,
-            &format!("[setup.knc.{name}]"),
+                .ok_or_else(|| ConfigError(format!("missing {label} table")))?,
+            &label,
         )?
-        .clone()
+        .clone();
+        fold_flat_keys(&mut setup, &label)?;
+        setup
     };
     let mut vertical = Map::new();
     let mut inputs = Map::new();
@@ -584,7 +630,53 @@ fn function_knc_test(
     if let Some(validation) = knc_validation(root, name)? {
         vertical.insert("validation".into(), Value::Table(validation));
     }
-    Ok(Some(parse_vertical(&Value::Table(vertical), path)?))
+    parse_vertical(&Value::Table(vertical), path)
+}
+
+/// Settings written directly in `[setup.knc]` or `[setup.knc.<test>]`; they are
+/// moved into the `metric` table so each level keeps its own precedence.
+const FLAT_METRIC_KEYS: [&str; 13] = [
+    "gradient_points_mm",
+    "gradient_points_deg",
+    "gradient_points_n",
+    "direction",
+    "index",
+    "min_branch_fraction",
+    "min_reversal_fraction",
+    "edge_width",
+    "edge_percentile",
+    "sprung_mass_front_left_kg",
+    "sprung_mass_front_right_kg",
+    "sprung_mass_rear_left_kg",
+    "sprung_mass_rear_right_kg",
+];
+
+/// Move flat setting keys into `metric` (and `plot_branches` into `window`).
+fn fold_flat_keys(
+    setup: &mut Map<String, Value>,
+    label: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (key, target) in FLAT_METRIC_KEYS
+        .iter()
+        .map(|key| (*key, "metric"))
+        .chain([("plot_branches", "window")])
+    {
+        let Some(value) = setup.remove(key) else {
+            continue;
+        };
+        let destination = setup
+            .entry(target)
+            .or_insert_with(|| Value::Table(Map::new()))
+            .as_table_mut()
+            .ok_or_else(|| ConfigError(format!("{label}.{target} must be a table")))?;
+        if destination.insert(key.into(), value).is_some() {
+            return Err(ConfigError(format!(
+                "{label} defines {key} both directly and in [{target}]"
+            ))
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn knc_validation(

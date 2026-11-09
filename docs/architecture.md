@@ -234,16 +234,30 @@ CSV appends per-input labels and conditions. Metric formulas and tolerance exit
 codes stay unchanged. Condition source tags remain unavailable until HDF5 stores
 them (Refs #204).
 
-`[window]` defines the plot range (`minimum_mm`, `maximum_mm`,
-`step_mm`; legacy `travel_minimum_mm` and `travel_maximum_mm` remain accepted) and
-`plot_branches` (`all` or `selected`). `[metric]` defines the metric computation:
-`gradient_points_mm` (default 10, limited to the travel window and required to lie
-inside it when set), `gradient_points_deg` (roll only, default 1), `direction` (`rise`, `fall`, `any`) and `index` (default 2).
-`[metric.measurement]` and `[metric.simulation]` override `direction` and `index`
-per source kind; `[window.measurement]` and `[window.simulation]` do the same for
-`plot_branches`. Setting flags directly under `[setup.knc]`, the `[branch]` table
-and `metric_gradient_points_mm` in the window remain accepted. Optional keys that
-are left out use their default and produce one analysis warning each.
+Settings are written directly in `[setup.knc]` or `[setup.knc.<test>]`; there is
+no travel window. Secant widths are per test, named for their unit:
+`gradient_points_mm` (vertical and roll, default 10), `gradient_points_deg`
+(roll only, default 1) and `gradient_points_n` (longitudinal only, default 1000).
+Branch selection uses `direction` (`rise`, `fall`, `any`), `index` (default 2) and
+`plot_branches` (`all` or `selected`). `[metric.measurement]` and
+`[metric.simulation]` override the branch keys per source kind. The older
+`[metric]`, `[window]` and `[branch]` tables and the window's `minimum_mm`,
+`maximum_mm` and `step_mm` are still accepted (the window range is ignored);
+defining a key both directly and in `[metric]` at the same level is an error.
+Optional keys that are left out use their default and produce one analysis
+warning each.
+`index` counts sweeps of the chosen direction after the measurement's first,
+partial branch is dropped, so `index = 1` is the first full sweep.
+Branch detection and edge trimming have four more keys, set in `[setup.knc]` or
+`[setup.knc.<test>]` and also overridable in `[metric.measurement]` and
+`[metric.simulation]`; unset keys keep
+the kernel default and add no warning: `min_reversal_fraction` (default 0.01; a
+reversal that travels back less than this fraction of the total travel span does
+not split a branch), `min_branch_fraction` (default 0.05; measured branches
+shorter than this fraction of all samples are dropped), `edge_width` (default 200
+samples searched at each sweep end) and `edge_percentile` (default 0.95;
+curvature percentile above which a point starts the edge cut). Ranges are
+checked in Rust. A plot's own `PlotSpec.branch` override wins over the config.
 `sprung_mass_front_left_kg`/`..._front_right_kg`/`..._rear_left_kg`/`..._rear_right_kg`
 in `[metric]` are the `ride_frequency` metric's per-corner mass fallback: this run's
 own SVC `<corner>_mass_kg` is used automatically when SVC and KnC vertical run
@@ -318,6 +332,36 @@ over the absolute contact points (law of sines). The lateral position is
 `center_of_pressure_y`, else `contact_patch_y` with a warning. The configured
 sweep and its adjacent opposite sweep are each smoothed by a cubic
 least-squares fit over roll angle and averaged into the hysteresis mid line.
+
+### Longitudinal compliance
+
+Signs: viewed from behind, +Y is right, −Y left, +X rearward, −X forward.
+Metrics are secants between ±`gradient_points_n` (default 1000 N, set in
+`[setup.knc.longitudinal]`) of `force_x` on the configured branch (no
+regression, no smoothing), scaled per kN: `brake_steer` is the toe change and
+`windup_compliance` the castor/spin change, both with brakes applied (B1);
+`longitudinal_compliance` is the wheel-center X change without brakes (B0). The
+stored setup decides which metrics a file can report; the other setup's metrics
+are listed as `not covered` (orange) and dropped when another file of the run
+covers them. `missing` (red) means data was given but the result is broken, for
+example a branch that does not span ±1 kN. `analyze` requires a stored setup.
+
+Configure with `[[input.knc.longitudinal]]` (a list, one file per brake state; the
+single table is still accepted). Two files with the same brake state are refused.
+`compare` and tolerances for longitudinal are not supported yet (#207).
+
+Console output has one `KnC Longitudinal` section per run; conditions stay in
+JSON, CSV and PDFs. PDF and `.plot.json` names carry the full lowercase setup
+code (`..._b1e1f1r1`). B1 plots: camber, toe, castor, projected contact patch X,
+wheel center X and Y; B0 plots: camber, toe, wheel center X and Y. Detail files
+are `knc-longitudinal-b0.json` and `knc-longitudinal-b1.json`. `analyze` prints
+warning details only with `--verbose`; otherwise one summary line.
+
+`--debug` (measurement input only) adds secant debug plots under
+`plots/knc/<test>/debug/`: per corner, branch detection of the sweep signal and
+the response with the metric branch and the secant points marked. They cover
+longitudinal `toe`, `castor` (B1) and `wc_x` (B0), vertical bump steer, camber and
+spin, and the six roll steer and camber plots.
 
 ## Provenance and outputs
 

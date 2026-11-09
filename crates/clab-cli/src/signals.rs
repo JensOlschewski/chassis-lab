@@ -1,7 +1,10 @@
 use anyhow::{Result, bail};
 use clab_core::{
     config::KNC_TESTS,
-    conventions::{SignalConvention, roll_conventions, svc_conventions, vertical_conventions},
+    conventions::{
+        SignalConvention, longitudinal_conventions, roll_conventions, svc_conventions,
+        vertical_conventions,
+    },
 };
 use clap::ValueEnum;
 
@@ -27,6 +30,7 @@ pub(crate) fn mapping(domain: Option<Domain>, test: Option<&str>, template: bool
         .map(|name| {
             let conventions = match name {
                 "roll" => roll_conventions(),
+                "longitudinal" => longitudinal_conventions(),
                 _ => vertical_conventions(),
             };
             (name, conventions)

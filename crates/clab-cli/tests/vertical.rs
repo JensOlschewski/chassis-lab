@@ -35,7 +35,7 @@ fn simulation_with_test(path: &std::path::Path, test: &str) {
     scalar(&file, "signal_count", 24_u64);
     string(&file, "source_kind", "simulation");
     string(&file, "domain", "knc");
-    string(&file, "setup", "B1E0F1R1");
+    string(&file, "setup", "b1e0f1r1");
     string(&file, "test", test);
     string(&file, "source_file", "fixture.res");
     let axis = file.create_group("axis").unwrap();
@@ -128,7 +128,7 @@ fn measurement_renamed_channel(path: &std::path::Path) {
 }
 
 fn measurement_with_front_left_wcx_name(path: &std::path::Path, front_left_wcx_name: &str) {
-    measurement_channels(path, front_left_wcx_name, Some("B1E0F1R1"));
+    measurement_channels(path, front_left_wcx_name, Some("b1e0f1r1"));
 }
 
 fn measurement_channels(path: &std::path::Path, front_left_wcx_name: &str, setup: Option<&str>) {
@@ -317,8 +317,8 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
     config(&config_path, false);
     let output = directory.path().join("reports");
     let json = output.join("knc-vertical.json");
-    let svg = output.join("plots/knc/vertical/knc_vertical_wcz_vs_wcy.pdf");
-    let recession = output.join("plots/knc/vertical/knc_vertical_recession_angle.pdf");
+    let svg = output.join("plots/knc/vertical/knc_vertical_wcz_vs_wcy_b1e0f1r1.pdf");
+    let recession = output.join("plots/knc/vertical/knc_vertical_recession_angle_b1e0f1r1.pdf");
     let success = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([
             "analyze",
@@ -343,7 +343,7 @@ fn analyzes_normalized_hdf5_as_curve_bundle() {
     assert!(stderr.contains("analysis warning"));
     assert!(
         output
-            .join("plots/knc/vertical/knc_vertical_wcz_vs_wcx.pdf")
+            .join("plots/knc/vertical/knc_vertical_wcz_vs_wcx_b1e0f1r1.pdf")
             .is_file()
     );
     assert!(!output.join("knc-vertical.pdf").exists());
@@ -432,7 +432,7 @@ fn analyzes_measurement_vertical_gradient_metrics() {
     let directory = tempdir().unwrap();
     let measurement_path = directory.path().join("measurement.h5");
     closed_fixture(&measurement_path, measurement);
-    // Explicit gradient points and default limited to the ±1 mm window.
+    // Explicit gradient points, and the reported default.
     for gradient in ["gradient_points_mm=0.5\n", ""] {
         assert_measurement_metrics(directory.path(), &measurement_path, gradient);
     }
@@ -475,18 +475,16 @@ fn assert_measurement_metrics(
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(
-        stdout.contains("KnC Vertical\n  Setup   B1E0F1R1")
-            && stdout.contains("running 36 metrics"),
+        stdout.contains("KnC Vertical\nrunning") && stdout.contains("running 36 metrics"),
         "{stdout}"
     );
     assert_vertical_console_order(&stdout);
     let stderr = String::from_utf8_lossy(&result.stderr);
     if gradient.is_empty() {
-        // Every other key is set, so only the gradient default is reported.
-        assert_eq!(stderr.matches("warning:").count(), 1, "{stderr}");
+        // The 10 mm default exceeds the ±1 mm fixture, so metrics are unavailable.
         assert!(stderr.contains(
-            "warning: knc::vertical: config key 'gradient_points_mm' missing in [setup.knc.metric]; \
-             using default 10 mm (limited to travel window: 1 mm)"
+            "warning: knc::vertical: config key 'gradient_points_mm' missing in [setup.knc.vertical]; \
+             using default 10 mm\n"
         ));
         return;
     }
@@ -522,7 +520,7 @@ fn assert_measurement_metrics(
     let mut rows = csv::Reader::from_reader(csv.as_bytes());
     for row in rows.records() {
         let row = row.unwrap();
-        assert_eq!(&row[6], "B1E0F1R1");
+        assert_eq!(&row[6], "b1e0f1r1");
         assert_eq!(&row[7], "");
         assert_eq!(&row[8], "");
     }
@@ -532,7 +530,7 @@ fn assert_measurement_metrics(
     assert_eq!(report["domains"][0]["metric_count"], 36);
     assert_eq!(
         report["domains"][0]["conditions"],
-        serde_json::json!({"setup": "B1E0F1R1"})
+        serde_json::json!({"setup": "b1e0f1r1"})
     );
 }
 
@@ -601,8 +599,7 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
         );
         let stdout = String::from_utf8_lossy(&result.stdout);
         assert!(
-            stdout.contains("KnC Vertical\n  Setup   B1E0F1R1")
-                && stdout.contains("running 36 metrics"),
+            stdout.contains("KnC Vertical\nrunning") && stdout.contains("running 36 metrics"),
             "{stdout}"
         );
         // Neither input has SVC/sprung-mass data, so ride_frequency (4 rows)
@@ -690,9 +687,7 @@ fn skips_vertical_metrics_without_static_normalization() {
         .unwrap();
     assert!(result.status.success());
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(
-        stdout.contains("KnC Vertical\n  Setup   B1E0F1R1") && stdout.contains("running 0 metrics")
-    );
+    assert!(stdout.contains("KnC Vertical\nrunning") && stdout.contains("running 0 metrics"));
     assert!(
         String::from_utf8_lossy(&result.stderr)
             .contains("knc::vertical: metrics require static_simulation normalization")
@@ -721,10 +716,9 @@ fn analyzes_vertical_without_output() {
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(
-        stdout.contains("Setup   B1E0F1R1  (brakes on · engine off · front ARB on · rear ARB on)"),
+        !stdout.contains("Setup  ") && !stdout.contains("Input  "),
         "{stdout}"
     );
-    assert!(stdout.contains("Input   fixture |"), "{stdout}");
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .arg("analyze")
         .args([&config_path, &simulation_path])
@@ -739,7 +733,7 @@ fn analyzes_vertical_without_output() {
     let section: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(
         section["section"]["conditions"],
-        serde_json::json!({"setup": "B1E0F1R1"})
+        serde_json::json!({"setup": "b1e0f1r1"})
     );
     assert_eq!(section["section"]["name"], "VARB");
     assert_eq!(
@@ -886,7 +880,7 @@ fn comparison_config(path: &std::path::Path, tolerance: &str) {
         .unwrap()
         .write_all(
             format!(
-                "\n[setup.knc.vertical.metric]\n{SPRUNG_MASS_KG}\n\
+                "\n[setup.knc.vertical.metric]\ngradient_points_mm=0.5\n{SPRUNG_MASS_KG}\n\
                  [setup.knc.vertical.branch]\ndirection='any'\nindex=1\n{tolerance}"
             )
             .as_bytes(),
@@ -929,7 +923,7 @@ fn compares_only_gradient_metrics_with_overlays() {
     let candidate_path = directory.path().join("candidate.h5");
     closed_fixture(&baseline_path, measurement);
     closed_fixture(&candidate_path, |path| {
-        measurement_channels(path, "lfwcx", Some("B1E1F1R1"))
+        measurement_channels(path, "lfwcx", Some("b1e1f1r1"))
     });
     let config_path = directory.path().join("case.toml");
     comparison_config(&config_path, "");
@@ -954,10 +948,10 @@ fn compares_only_gradient_metrics_with_overlays() {
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["candidates"][0]["domains"][0]["domain"], "knc");
     assert_eq!(report["candidates"][0]["domains"][0]["status"], "compared");
-    assert_eq!(report["domains"][0]["conditions"]["setup"], "B1E0F1R1");
+    assert_eq!(report["domains"][0]["conditions"]["setup"], "b1e0f1r1");
     assert_eq!(
         report["candidates"][0]["domains"][0]["conditions"]["setup"],
-        "B1E1F1R1"
+        "b1e1f1r1"
     );
     assert!(
         report["warnings"][0]
@@ -971,7 +965,7 @@ fn compares_only_gradient_metrics_with_overlays() {
         "{stderr}"
     );
     assert!(
-        stderr.contains("Baseline B1E0F1R1 vs Curve 1 B1E1F1R1"),
+        stderr.contains("Baseline b1e0f1r1 vs Curve 1 b1e1f1r1"),
         "{stderr}"
     );
     let mut expected = Vec::new();
@@ -1012,8 +1006,8 @@ fn compares_only_gradient_metrics_with_overlays() {
     for row in csv.records() {
         let row = row.unwrap();
         let cell = |name| &row[columns.iter().position(|column| column == name).unwrap()];
-        assert_eq!(cell("baseline_setup"), "B1E0F1R1");
-        assert_eq!(cell("candidate_setup"), "B1E1F1R1");
+        assert_eq!(cell("baseline_setup"), "b1e0f1r1");
+        assert_eq!(cell("candidate_setup"), "b1e1f1r1");
     }
 
     // The app draws the same overlays from data: baseline and candidate are one source each,
@@ -1024,8 +1018,8 @@ fn compares_only_gradient_metrics_with_overlays() {
     assert_eq!(plots["command"], "compare");
     for plot in plots["plots"].as_array().unwrap() {
         let footer = plot["footer"].as_str().unwrap();
-        assert!(footer.contains("B1E0F1R1"), "{footer}");
-        assert!(footer.contains("B1E1F1R1"), "{footer}");
+        assert!(footer.contains("b1e0f1r1"), "{footer}");
+        assert!(footer.contains("b1e1f1r1"), "{footer}");
         assert!(
             footer.contains("WARNING: knc::vertical: test conditions differ (engine)"),
             "{footer}"
@@ -1076,7 +1070,7 @@ fn condition_differences_are_in_compare_json_without_opt_in() {
     let candidate = directory.path().join("candidate.h5");
     closed_fixture(&baseline, measurement);
     closed_fixture(&candidate, |path| {
-        measurement_channels(path, "lfwcx", Some("B0E1F0R0"))
+        measurement_channels(path, "lfwcx", Some("b0e1f0r0"))
     });
     let config_path = directory.path().join("config.toml");
     comparison_config(&config_path, "");
@@ -1098,7 +1092,7 @@ fn condition_differences_are_in_compare_json_without_opt_in() {
     assert_eq!(section["inputs"][1]["label"], "VARC");
     assert_eq!(
         section["inputs"][1]["conditions"]["vertical"]["setup"],
-        "B0E1F0R0"
+        "b0e1f0r0"
     );
     let warning = section["warnings"][0].as_str().unwrap();
     assert!(
@@ -1106,7 +1100,7 @@ fn condition_differences_are_in_compare_json_without_opt_in() {
         "{warning}"
     );
     assert!(
-        warning.contains("VARB B1E0F1R1 vs VARC B0E1F0R0"),
+        warning.contains("VARB b1e0f1r1 vs VARC b0e1f0r0"),
         "{warning}"
     );
 }

@@ -6,6 +6,25 @@
 
 use std::io::{IsTerminal, Write};
 
+pub(crate) const RED: &str = "31";
+pub(crate) const GREEN: &str = "32";
+pub(crate) const CYAN: &str = "36";
+/// 256-colour orange: a warning, not an error.
+pub(crate) const ORANGE: &str = "38;5;208";
+
+/// `text` in an ANSI colour when stdout is a terminal, plain otherwise.
+pub(crate) fn paint(text: &str, color: &str) -> String {
+    paint_if(text, color, std::io::stdout().is_terminal())
+}
+
+pub(crate) fn paint_if(text: &str, color: &str, terminal: bool) -> String {
+    if terminal {
+        format!("\x1b[{color}m{text}\x1b[0m")
+    } else {
+        text.into()
+    }
+}
+
 /// Shared `analyze` CSV layout, including empty conditions for SVC rows.
 pub(crate) const ANALYSIS_CSV_COLUMNS: [&str; 9] = [
     "run",
@@ -20,21 +39,13 @@ pub(crate) const ANALYSIS_CSV_COLUMNS: [&str; 9] = [
 ];
 
 /// Keep warnings next to their metrics, but retain qualifiers in redirected output.
-pub(crate) fn print_warnings(domain: &str, test: Option<&str>, warnings: &[String]) {
+pub(crate) fn print_warnings(warnings: &[String]) {
     if warnings.is_empty() {
         return;
     }
     std::io::stdout().flush().ok();
-    if std::io::stdout().is_terminal() && std::io::stderr().is_terminal() {
-        let prefix = format!("{}: ", qualifier(domain, test));
-        eprintln!("\n  Warnings");
-        for warning in warnings {
-            eprintln!("    • {}", warning.strip_prefix(&prefix).unwrap_or(warning));
-        }
-    } else {
-        for warning in warnings {
-            eprintln!("warning: {warning}");
-        }
+    for warning in warnings {
+        eprintln!("warning: {warning}");
     }
 }
 
@@ -113,6 +124,19 @@ pub(crate) fn console_metric_order(
                     ("ride_rate", "n_per_mm", 24),
                     ("suspension_rate", "n_per_mm", 28),
                     ("tire_rate", "n_per_mm", 32),
+                ],
+            )
+            .unwrap_or(usize::MAX),
+        );
+    }
+    if (domain, test) == ("knc", Some("longitudinal")) {
+        return Some(
+            corner_metric_order(
+                metric,
+                &[
+                    ("longitudinal_compliance", "mm_per_kn", 0),
+                    ("brake_steer", "deg_per_kn", 4),
+                    ("windup_compliance", "deg_per_kn", 8),
                 ],
             )
             .unwrap_or(usize::MAX),

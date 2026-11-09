@@ -832,7 +832,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     for row in csv.records() {
         let row = row.unwrap();
         if &row[1] == "knc" {
-            assert_eq!(&row[6], "B0E0F1R1");
+            assert_eq!(&row[6], "b0e0f1r1");
         } else {
             assert!(row.iter().skip(6).all(str::is_empty));
         }
@@ -885,7 +885,8 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
                 .extension()
                 .is_some_and(|e| e == "pdf"))
     );
-    let pdf = fs::read(output.join("plots/knc/vertical/knc_vertical_wcz_vs_wcy.pdf")).unwrap();
+    let pdf =
+        fs::read(output.join("plots/knc/vertical/knc_vertical_wcz_vs_wcy_b0e0f1r1.pdf")).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();

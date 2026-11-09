@@ -76,6 +76,7 @@ struct Metric {
     status: &'static str,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum ComparedDomain {
     Svc(Vec<svc::CanonicalMetric>),
     Knc {
@@ -118,6 +119,7 @@ fn knc_key(test: KncTest) -> &'static str {
     match test {
         KncTest::Vertical => "knc-vertical",
         KncTest::Roll => "knc-roll",
+        KncTest::Longitudinal => "knc-longitudinal",
     }
 }
 
@@ -501,6 +503,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 footer: &footer.join("\n"),
                 debug: debug.as_deref(),
                 workers,
+                setup: None,
             },
             &progress,
         )
@@ -1173,7 +1176,7 @@ fn print_metrics(
             );
         }
         if let Some(warnings) = warnings.get(key) {
-            display::print_warnings(domain, domain_test, warnings);
+            display::print_warnings(warnings);
         }
     }
 }
@@ -1202,17 +1205,14 @@ fn colored_status(status: &str) -> String {
 }
 
 fn render_status(status: &str, terminal: bool) -> String {
-    if !terminal {
-        return status.into();
-    }
     let color = match status {
-        "ok" => "32",
-        "FAILED" => "31",
+        "ok" => display::GREEN,
+        "FAILED" => display::RED,
         "missing" | "not compared" => "33",
-        "tolerance missing" => "36",
+        "tolerance missing" => display::CYAN,
         _ => return status.into(),
     };
-    format!("\x1b[{color}m{status}\x1b[0m")
+    display::paint_if(status, color, terminal)
 }
 
 fn option_number(value: Option<f64>) -> String {

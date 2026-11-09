@@ -470,6 +470,53 @@ pub fn vertical_conventions() -> BTreeMap<String, SignalConvention> {
     conventions
 }
 
+/// Longitudinal corner conventions. The wheel force X (+X rearward) drives the
+/// test and keeps its absolute source value; responses are relative to the
+/// measured static row. Right-side toe flips like in the vertical test.
+pub fn longitudinal_conventions() -> BTreeMap<String, SignalConvention> {
+    let mut conventions = BTreeMap::new();
+    for corner in Corner::all() {
+        let right = matches!(corner, Corner::FrontRight | Corner::RearRight);
+        for (suffix, unit, sign, baseline) in [
+            ("force_x", Unit::Newton, 1, BaselinePolicy::Absolute),
+            (
+                "wheel_center_x",
+                Unit::Millimetre,
+                1,
+                BaselinePolicy::StaticSimulation,
+            ),
+            (
+                "wheel_center_y",
+                Unit::Millimetre,
+                1,
+                BaselinePolicy::StaticSimulation,
+            ),
+            (
+                "projected_contact_patch_x",
+                Unit::Millimetre,
+                1,
+                BaselinePolicy::StaticSimulation,
+            ),
+            (
+                "toe",
+                Unit::Degree,
+                if right { -1 } else { 1 },
+                BaselinePolicy::StaticSimulation,
+            ),
+            ("camber", Unit::Degree, 1, BaselinePolicy::StaticSimulation),
+            // Hub rotation about Y (castor change); same sign on both sides.
+            ("spin", Unit::Degree, 1, BaselinePolicy::StaticSimulation),
+        ] {
+            conventions.insert(
+                format!("{}_{suffix}", corner.as_str()),
+                SignalConvention::new(unit, unit.as_str(), 1.0, sign, Some(corner), baseline)
+                    .expect("canonical convention is valid"),
+            );
+        }
+    }
+    conventions
+}
+
 /// Axle locations of roll signals that belong to no single corner.
 pub const ROLL_AXLES: [&str; 3] = ["front", "rear", "total"];
 

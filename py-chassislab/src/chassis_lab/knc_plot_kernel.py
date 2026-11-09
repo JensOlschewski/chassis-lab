@@ -164,11 +164,12 @@ class GradientDisplay:
     label: str
     unit: str
     kind: str = "gradient"
+    scale: float = 1.0
 
     def value(self, delta: float, span: float) -> float:
         if self.kind == "angle":
             return float(np.degrees(np.arctan(-delta / span)))
-        return delta / span
+        return self.scale * delta / span
 
 
 # (x, y, denominator, sweeps, branch options) -> plotted (x, y)
@@ -869,6 +870,108 @@ def render_rate_debug(
             indexed, spec, spec_options, footer, logo
         )
     return reports
+
+
+def render_secant_debug(
+    curves: list[dict[str, object]],
+    specs: tuple[PlotSpec, ...],
+    options: BranchOptions,
+    prefix: str,
+    info: dict[str, Any],
+    input_path: str,
+    half: float | None,
+    logo: bytes | None = None,
+    source: str = "measurement",
+    half_deg: float | None = None,
+) -> dict[str, bytes]:
+    """Show which branch carries each secant metric, one PDF per secant plot.
+
+    Per corner: branch detection of the sweep signal, and the response against
+    it with the metric branch highlighted and the +-`half` secant points marked
+    (`half_deg` for plots whose gradient unit is degrees).
+    """
+    if not options.measurement:
+        return {}
+    indexed = _index(curves)
+    reports = {}
+    for spec in specs:
+        if spec.gradient is None or not _available(spec, [indexed]):
+            continue
+        spec_options = spec.branch_options(options)
+        footer = _debug_footer(info, input_path, spec_options)
+        path = f"debug/{source}_{spec.name}.pdf"
+        reports[f"{prefix}/{path}" if prefix else path] = _secant_debug_plot(
+            indexed,
+            spec,
+            spec_options,
+            half_deg if spec.gradient_unit == "deg" else half,
+            footer,
+            logo,
+        )
+    return reports
+
+
+def _secant_debug_plot(
+    curves: CurveIndex,
+    spec: PlotSpec,
+    options: BranchOptions,
+    half: float | None,
+    footer: str,
+    logo: bytes | None,
+) -> bytes:
+    plt = _pyplot()
+    figure, panels = _new_figure(plt, 4, 2, DEBUG_FIGSIZE, footer)
+    figure.suptitle(f"{spec.title} - debug", fontsize=16)
+    for row, (corner, label) in zip(panels, CORNERS, strict=True):
+        branch, response = row
+        branch.set_title(f"{label}: branch detection", loc="left")
+        response.set_title(f"{label}: {spec.y_signal} on branches", loc="left")
+        x = _values(
+            curves,
+            Signal(spec.x_signal, spec.x_at).location(corner),
+            spec.x_signal,
+        )
+        y = _values(curves, corner, spec.y_signal)
+        sweep_values = _values(
+            curves, spec.sweep.location(corner), spec.sweep.name
+        )
+        plotted = options.plot_sweeps(sweep_values)
+        metric = options.metric_sweep(sweep_values)
+        _draw_branches(branch, sweep_values, plotted, metric)
+        response.plot(
+            x, y, color=RAW_COLOR, alpha=0.4, linewidth=0.8, label="raw"
+        )
+        for sweep in plotted:
+            response.plot(
+                x[sweep],
+                y[sweep],
+                color=USED_COLOR,
+                linewidth=1.2,
+                label="plotted branch",
+            )
+        if metric is not None:
+            response.plot(
+                x[metric],
+                y[metric],
+                color=METRIC_COLOR,
+                linewidth=1.6,
+                label="metric branch",
+            )
+        for point in (-half, half) if half else ():
+            response.axvline(
+                point, color=CUT_COLOR, linewidth=0.8, label="secant points"
+            )
+        branch.set_xlabel("sample")
+        sweep_unit = "deg" if spec.sweep.name == "roll_angle" else "mm"
+        if spec.sweep.name == "force_x":
+            sweep_unit = "N"
+        branch.set_ylabel(f"{spec.sweep.name} [{sweep_unit}]")
+        response.set_xlabel(f"{spec.x_signal} [{spec.gradient_unit}]")
+        response.set_ylabel(spec.y_signal)
+        for panel in row:
+            _legend_unique(panel)
+    _add_footer(figure, footer)
+    return _save_pdf(figure, plt, footer, logo)
 
 
 def render_contact_path_debug(

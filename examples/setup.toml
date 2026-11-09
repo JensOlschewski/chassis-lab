@@ -1,41 +1,40 @@
 # This file is the [setup] table of config.toml
 #
-# [domain.*] applies to every domain test
-# [domain.test.*] and apply to that test only and override [domain.*]
+# [knc] applies to every KnC test
+# [knc.<test>] applies to that test only and overrides [knc] key by key
+# (tests: vertical, roll, longitudinal)
 #
 # Optional keys that are left out fall back to their default, and clab warns
 # about each one (details with --verbose).
 
-# Plot range defined by wheel-center travel
-[knc.window]
-minimum_mm = -80
-maximum_mm = 80
-step_mm = 5
-plot_branches = "all"     # all | selected (only the sweep used by the metrics)
-
-# define where metric is calculated, and which sweep to use for the metric
-# use --debug option for more details
-[knc.metric]
-gradient_points_mm = 10
+# Which sweep is used for the metrics (use --debug for more details)
+[knc]
 direction = "rise"        # rise | fall | any
 index = 1                 # nth sweep of that direction, 1-based
+plot_branches = "all"     # all | selected (only the sweep used by the metrics)
+
+# Branch detection and edge trimming, optional (kernel defaults shown, no warning)
+# min_reversal_fraction = 0.01   # a reversal shorter than this fraction of the span does not split a branch
+# min_branch_fraction = 0.05     # measured branches shorter than this fraction of all samples are dropped
+# edge_width = 200               # samples searched at each sweep end
+# edge_percentile = 0.95         # curvature percentile above which the edge cut starts
 
 # The ADAMS results starts with a short settling rise before the full sweep
 # Therefore use second index here!
 [knc.metric.simulation]
 index = 2
 
-# Vertical test setup
-# only keys that differ from [knc.*].
-# [knc.vertical.window]
-# minimum_mm = -0.8
-# maximum_mm = 0.8
-# plot_branches = "all"
+# Secant half-widths depend on the unit of each test, so set them per test.
 
-# [knc.vertical.metric]
-# gradient_points_mm = 0.2
+# Vertical test: wheel-center travel in mm
+[knc.vertical]
+gradient_points_mm = 10
 
-# Roll test setup
-# only keys that differ from [knc.*].
-[knc.roll.metric]
-gradient_points_deg = 0.5
+# Roll test: travel in mm and roll angle in deg
+[knc.roll]
+gradient_points_mm = 10
+gradient_points_deg = 1
+
+# Longitudinal compliance: force in N
+[knc.longitudinal]
+gradient_points_n = 1000

@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     env, fs,
-    io::{IsTerminal, Write},
+    io::Write,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -107,12 +107,14 @@ fn analyze_run(args: &mut AnalyzeArgs) -> Result<()> {
     if has_svc && is_hdf5(&config.simulation_json) {
         sources.push(config.simulation_json.as_path());
     }
-    for test in [KncTest::Vertical, KncTest::Roll] {
-        if let Some(knc) = test.config(&config) {
-            sources.push(knc_input(&config, test).expect("KnC input path"));
-            if let Some(static_input) = &knc.static_simulation_hdf5 {
-                sources.push(static_input);
-            }
+    let units = knc_units(&config);
+    for (test, unit, path) in &units {
+        sources.push(path.as_path());
+        if let Some(static_input) = &test
+            .config(unit)
+            .and_then(|knc| knc.static_simulation_hdf5.as_ref())
+        {
+            sources.push(static_input);
         }
     }
     for path in sources {
@@ -120,13 +122,13 @@ fn analyze_run(args: &mut AnalyzeArgs) -> Result<()> {
             eprintln!("warning: {warning}");
         }
     }
-    let knc_tests = [KncTest::Vertical, KncTest::Roll]
-        .into_iter()
-        .filter_map(|test| knc_input(&config, test).map(|path| (test, path)))
+    let knc_tests = units
+        .iter()
+        .map(|(test, unit, path)| (*test, unit, path.as_path()))
         .collect::<Vec<_>>();
     match (has_svc, knc_tests.as_slice()) {
         (false, []) => Ok(()),
-        (false, [(test, path)]) => write_knc(&config, *test, path, args, Some(&args.input)),
+        (false, [(test, unit, path)]) => write_knc(unit, *test, path, args, Some(&args.input)),
         (true, []) if is_hdf5(&config.simulation_json) => {
             if config.svc_source_kind == Some(clab_core::config::SourceKind::Measurement) {
                 bail!(
@@ -152,12 +154,55 @@ fn analyze_run(args: &mut AnalyzeArgs) -> Result<()> {
     }
 }
 
-/// Configured input file of one KnC test, `None` when the test is absent.
-fn knc_input(config: &clab_core::config::CaseConfig, test: KncTest) -> Option<&Path> {
-    test.config(config).map(|knc| match knc.source_kind {
-        clab_core::config::SourceKind::Simulation => knc.simulation_hdf5.as_path(),
-        clab_core::config::SourceKind::Measurement => knc.measurement_hdf5.as_path(),
-    })
+/// One analysis unit per configured KnC input: its test, a configuration
+/// holding only that input, and its file. Longitudinal yields one per listed file.
+fn knc_units(
+    config: &clab_core::config::CaseConfig,
+) -> Vec<(KncTest, clab_core::config::CaseConfig, PathBuf)> {
+    let mut units = Vec::new();
+    for test in KncTest::ALL {
+        let inputs: Vec<_> = match test {
+            KncTest::Vertical => config.vertical.iter().collect(),
+            KncTest::Roll => config.roll.iter().collect(),
+            KncTest::Longitudinal => config.longitudinal.iter().collect(),
+        };
+        for knc in inputs {
+            let path = match knc.source_kind {
+                clab_core::config::SourceKind::Simulation => knc.simulation_hdf5.clone(),
+                clab_core::config::SourceKind::Measurement => knc.measurement_hdf5.clone(),
+            };
+            let mut unit = config.clone();
+            if test == KncTest::Longitudinal {
+                unit.longitudinal = vec![knc.clone()];
+            }
+            units.push((test, unit, path));
+        }
+    }
+    units
+}
+
+/// Two longitudinal inputs with the same brake state would report the same
+/// metrics twice; refuse instead of picking one.
+fn ensure_distinct_setups<'a>(
+    inputs: impl Iterator<Item = (KncTest, &'a Path, &'a knc::Reports)>,
+) -> Result<()> {
+    let mut seen: Vec<(bool, &Path)> = Vec::new();
+    for (test, path, report) in inputs {
+        if test != KncTest::Longitudinal {
+            continue;
+        }
+        let brakes = report.conditions.brakes();
+        if let Some((_, first)) = seen.iter().find(|(seen, _)| *seen == brakes) {
+            bail!(
+                "two longitudinal files with setup B{}: '{}' and '{}'; metrics would be ambiguous",
+                u8::from(brakes),
+                first.display(),
+                path.display()
+            );
+        }
+        seen.push((brakes, path));
+    }
+    Ok(())
 }
 
 fn validate_input_file(path: &Path) -> Result<()> {
@@ -171,7 +216,7 @@ fn validate_input_file(path: &Path) -> Result<()> {
 fn write_combined_run(
     config: &clab_core::config::CaseConfig,
     has_svc: bool,
-    knc_tests: &[(KncTest, &Path)],
+    knc_tests: &[(KncTest, &clab_core::config::CaseConfig, &Path)],
     args: &AnalyzeArgs,
 ) -> Result<()> {
     let svc_reports = if has_svc {
@@ -188,18 +233,29 @@ fn write_combined_run(
         .map(|reports| reports.warnings.clone())
         .unwrap_or_default();
     let mut knc_reports = Vec::new();
-    for &(test, path) in knc_tests {
+    for &(test, unit, path) in knc_tests {
         let debug = debug_info(args.debug, &args.config, &[path])?;
         let report = knc::analyze_input(
-            config,
+            unit,
             test,
             path,
             svc_corner_mass_kg.as_ref(),
             debug.as_deref(),
         )?;
         warnings.extend(report.warnings.iter().cloned());
-        knc_reports.push((test, path, report, debug));
+        knc_reports.push((test, unit, path, report, debug));
     }
+    ensure_distinct_setups(
+        knc_reports
+            .iter()
+            .map(|(test, _, path, report, _)| (*test, *path, report)),
+    )?;
+    let mut longitudinal: Vec<_> = knc_reports
+        .iter_mut()
+        .filter(|(test, ..)| *test == KncTest::Longitudinal)
+        .map(|(_, _, _, report, _)| report)
+        .collect();
+    knc::drop_resolved_placeholders(&mut longitudinal);
     warnings.sort();
     warnings.dedup();
     if let Some(reports) = &svc_reports {
@@ -210,11 +266,18 @@ fn write_combined_run(
             ("svc", None),
             reports.report["metrics"].as_array().unwrap(),
             &reports.warnings,
-            None,
+            &[],
         );
     }
-    for (test, _, report, _) in &knc_reports {
-        show_knc_section(args, *test, report);
+    for test in KncTest::ALL {
+        let group: Vec<_> = knc_reports
+            .iter()
+            .filter(|(candidate, ..)| *candidate == test)
+            .map(|(_, _, _, report, _)| report)
+            .collect();
+        if !group.is_empty() {
+            show_knc_section(args, test, &group);
+        }
     }
     let Some(output) = &args.output else {
         return Ok(());
@@ -234,7 +297,7 @@ fn write_combined_run(
         );
         csv = reports.csv.clone();
     }
-    for (test, _, report, _) in &knc_reports {
+    for (test, _, _, report, _) in &knc_reports {
         domains.push(knc_domain(*test, report));
         metrics.extend(display::console_ordered(&report.metrics));
         csv += &knc_csv_rows(args.label.as_deref().unwrap_or(&config.name), *test, report)?;
@@ -271,53 +334,64 @@ fn write_combined_run(
         inputs.push(config.simulation_json.as_path());
     }
     let workers = knc::plot_worker_limit(knc_reports.len());
-    let jobs = knc_reports
-        .iter()
-        .map(|report| (report.0.title(), report))
-        .collect();
-    let rendered = progress.plot_phases(jobs, |(test, path, report, debug)| {
-        let footer = analysis_footer(
-            &args.config,
-            config,
-            &report.conditions,
-            path,
-            Some(&args.input),
-        )?;
-        let detail = serde_json::from_str(&report.detail)?;
-        knc_plots(
-            config,
-            *test,
-            &detail,
-            report,
-            knc::PlotOptions {
-                label: args.label.as_deref(),
-                footer: &footer,
-                debug: debug.as_deref(),
-                workers,
-            },
-            &progress,
-        )
+    // One progress job per test; its inputs (units are grouped by test) render in turn.
+    let mut jobs: Vec<(&str, Vec<_>)> = Vec::new();
+    for report in &knc_reports {
+        match jobs.last_mut() {
+            Some((title, group)) if *title == report.0.title() => group.push(report),
+            _ => jobs.push((report.0.title(), vec![report])),
+        }
+    }
+    let rendered = progress.plot_phases(jobs, |group| {
+        group
+            .into_iter()
+            .map(|(test, unit, path, report, debug)| {
+                let footer = analysis_footer(
+                    &args.config,
+                    unit,
+                    &report.conditions,
+                    path,
+                    Some(&args.input),
+                )?;
+                let detail = serde_json::from_str(&report.detail)?;
+                knc_plots(
+                    unit,
+                    *test,
+                    &detail,
+                    report,
+                    knc::PlotOptions {
+                        label: args.label.as_deref(),
+                        footer: &footer,
+                        debug: debug.as_deref(),
+                        workers,
+                        setup: Some(&report.conditions.setup_code()),
+                    },
+                    &progress,
+                )
+            })
+            .collect::<Result<Vec<_>>>()
     })?;
-    for ((test, path, report, _), plots) in knc_reports.iter().zip(rendered) {
+    let rendered = rendered.into_iter().flatten();
+    for ((test, unit, path, report, _), plots) in knc_reports.iter().zip(rendered) {
         let mut detail: serde_json::Value = serde_json::from_str(&report.detail)?;
         detail["case"] = bundle["case"].clone();
         add_label(&mut detail, args);
         let mut knc_inputs = bundle["inputs"].clone();
         knc_inputs["input"] = provenance(path)?;
         if let Some(static_input) = test
-            .config(config)
+            .config(unit)
             .and_then(|knc| knc.static_simulation_hdf5.as_ref())
         {
             knc_inputs["static_simulation"] = provenance(static_input)?;
         }
         detail["inputs"] = knc_inputs;
         files.push((
-            format!("knc-{}.json", test.name()),
+            format!("knc-{}.json", test.report_stem(report.brakes)),
             (serde_json::to_string_pretty(&detail)? + "\n").into_bytes(),
         ));
         files.extend(plots);
         inputs.push(path);
-        add_knc_inputs(&mut inputs, config, *test);
+        add_knc_inputs(&mut inputs, unit, *test);
     }
     let files = files
         .iter()
@@ -400,6 +474,7 @@ fn knc_plots(
         &detail["curves"],
         report.measurement,
         &report.corner_mass_kg,
+        report.brakes,
         options,
         progress,
     )
@@ -488,7 +563,7 @@ fn analyze_hdf5(args: &AnalyzeArgs) -> Result<()> {
             analyze_knc(args, KncTest::from_name(test).expect("known KnC test"))
         }
         (Some("knc"), test) => bail!(
-            "unsupported knc test {} in '{}'; supported: vertical, roll",
+            "unsupported knc test {} in '{}'; supported: vertical, roll, longitudinal",
             test.map_or("(none)".into(), |test| format!("'{test}'")),
             args.input.display()
         ),
@@ -553,7 +628,7 @@ fn write_svc_reference(
         ("svc", None),
         metrics,
         &reports.warnings,
-        None,
+        &[],
     );
     if let Some(output) = &args.output {
         write_report_bundle(
@@ -656,7 +731,7 @@ fn write_svc_report(
         ("svc", None),
         report.report["metrics"].as_array().unwrap(),
         &report.warnings,
-        None,
+        &[],
     );
     if let Some(output) = &args.output {
         let mut bundle = report.report;
@@ -688,17 +763,10 @@ fn show_section(
     (domain, test): (&str, Option<&str>),
     metrics: &[serde_json::Value],
     warnings: &[String],
-    knc_report: Option<&knc::Reports>,
+    knc_reports: &[&knc::Reports],
 ) {
     if !args.json {
         println!("\n{title}");
-        if let Some(report) = knc_report {
-            for line in report.conditions.lines() {
-                println!("{line}");
-            }
-            let name = args.label.as_deref().unwrap_or(&report.name);
-            println!("  Input   {name} | {}", report.input.display());
-        }
         println!("running {metric_count} metrics");
         print_metrics(metrics);
         print_warnings(domain, test, warnings, args);
@@ -707,13 +775,18 @@ fn show_section(
     let metrics: Vec<_> = console_metrics(metrics)
         .into_iter()
         .map(|metric| {
-            serde_json::json!({
+            let mut row = serde_json::json!({
                 "name": crate::analysis::display::qualified_metric_name(
                     domain, test, metric["metric"].as_str().unwrap_or_default(),
                 ),
                 "unit": metric["unit"],
                 "value": metric["value"],
-            })
+            });
+            if knc::is_not_covered(metric) {
+                row["status"] = "not_covered".into();
+                row["needs_setup"] = metric["needs_setup"].clone();
+            }
+            row
         })
         .collect();
     display::print_json(&display::section_json(
@@ -721,25 +794,41 @@ fn show_section(
         (domain, test),
         metrics,
         warnings,
-        knc_report.map_or(serde_json::Value::Null, |report| {
-            serde_json::json!({
-                "conditions": report.conditions,
-                "input": report.input,
-                "name": args.label.as_deref().unwrap_or(&report.name),
-            })
+        knc_reports.first().map_or(serde_json::Value::Null, |first| {
+            let describe = |report: &knc::Reports| {
+                serde_json::json!({
+                    "conditions": report.conditions,
+                    "input": report.input,
+                    "name": args.label.as_deref().unwrap_or(&report.name),
+                })
+            };
+            if knc_reports.len() == 1 {
+                describe(first)
+            } else {
+                serde_json::json!({"inputs": knc_reports.iter().map(|r| describe(r)).collect::<Vec<_>>()})
+            }
         }),
     ));
 }
 
-fn show_knc_section(args: &AnalyzeArgs, test: KncTest, report: &knc::Reports) {
+/// One section per test; every input of a test (e.g. longitudinal B0 and B1) shares it.
+fn show_knc_section(args: &AnalyzeArgs, test: KncTest, reports: &[&knc::Reports]) {
+    let metrics: Vec<_> = reports
+        .iter()
+        .flat_map(|report| report.metrics.iter().cloned())
+        .collect();
+    let warnings: Vec<_> = reports
+        .iter()
+        .flat_map(|report| report.warnings.iter().cloned())
+        .collect();
     show_section(
         args,
         test.title(),
-        visible_metric_count(&report.metrics),
+        visible_metric_count(&metrics),
         ("knc", Some(test.name())),
-        &report.metrics,
-        &report.warnings,
-        Some(report),
+        &metrics,
+        &warnings,
+        reports,
     );
 }
 
@@ -766,12 +855,17 @@ fn console_metrics(metrics: &[serde_json::Value]) -> Vec<&serde_json::Value> {
 
 fn print_metrics(metrics: &[serde_json::Value]) {
     for metric in console_metrics(metrics) {
-        let value = if metric["value"].is_null() {
-            if std::io::stdout().is_terminal() {
-                "\x1b[38;5;208mmissing\x1b[0m".into()
-            } else {
-                "missing".into()
-            }
+        let value = if knc::is_not_covered(metric) {
+            let label = format!(
+                "not covered (needs {} setup)",
+                metric["needs_setup"]
+                    .as_str()
+                    .unwrap_or("another")
+                    .to_lowercase()
+            );
+            display::paint(&label, display::ORANGE)
+        } else if metric["value"].is_null() {
+            display::paint("missing", display::RED)
         } else {
             metric["value"].to_string()
         };
@@ -795,15 +889,17 @@ fn visible_metrics(metrics: &[serde_json::Value]) -> impl Iterator<Item = &serde
 }
 
 fn visible_metric_count(metrics: &[serde_json::Value]) -> usize {
-    visible_metrics(metrics).count()
+    visible_metrics(metrics)
+        .filter(|metric| !knc::is_not_covered(metric))
+        .count()
 }
 
 fn print_warnings(domain: &str, test: Option<&str>, warnings: &[String], args: &AnalyzeArgs) {
     if warnings.is_empty() {
         return;
     }
-    if args.verbose || (std::io::stdout().is_terminal() && std::io::stderr().is_terminal()) {
-        display::print_warnings(domain, test, warnings);
+    if args.verbose {
+        display::print_warnings(warnings);
         return;
     }
     std::io::stdout().flush().ok();
@@ -845,7 +941,7 @@ fn write_knc(
     let debug = debug_info(args.debug, &args.config, &[input])?;
     let report = knc::analyze_input(config, test, input, None, debug.as_deref())?;
     let footer = analysis_footer(&args.config, config, &report.conditions, input, run)?;
-    show_knc_section(args, test, &report);
+    show_knc_section(args, test, &[&report]);
     let Some(output) = &args.output else {
         return Ok(());
     };
@@ -878,6 +974,7 @@ fn write_knc(
             footer: &footer,
             debug: debug.as_deref(),
             workers: knc::plot_worker_limit(1),
+            setup: Some(&report.conditions.setup_code()),
         },
         &progress,
     )?;
@@ -886,7 +983,7 @@ fn write_knc(
     add_label(&mut detail, args);
     detail["inputs"] = bundle["inputs"].clone();
     let detail = serde_json::to_string_pretty(&detail)? + "\n";
-    let detail_name = format!("knc-{}.json", test.name());
+    let detail_name = format!("knc-{}.json", test.report_stem(report.brakes));
     let mut files = vec![
         (
             "report.json",

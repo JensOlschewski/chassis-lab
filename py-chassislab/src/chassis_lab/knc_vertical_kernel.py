@@ -25,6 +25,7 @@ from chassis_lab.knc_plot_kernel import (
     render_comparison_reports,
     render_rate_debug,
     render_reports,
+    render_secant_debug,
     selected_specs,
 )
 from chassis_lab.knc_plot_kernel import (
@@ -493,11 +494,48 @@ def plot(
                 logo,
             )
         )
+        reports.update(
+            render_secant_debug(
+                curves,
+                _secant_specs(selected, "debug:0"),
+                options,
+                "plots/knc/vertical",
+                info,
+                info["inputs"][0],
+                gradient_points_mm,
+                logo,
+            )
+        )
     return reports
 
 
+SECANT_DEBUG_SPECS = (
+    "knc_vertical_toe",
+    "knc_vertical_camber",
+    "knc_vertical_spin",
+)
+
+
+def _secant_specs(
+    selected: list[str] | None, kind: str
+) -> tuple[PlotSpec, ...]:
+    """Bump steer, camber and spin: the secant plots that get a debug view."""
+    return tuple(
+        spec
+        for spec in selected_specs(PLOT_SPECS, selected, kind)
+        if spec.name in SECANT_DEBUG_SPECS
+    )
+
+
 def plot_jobs(debug: bool, series_count: int = 1) -> list[str]:
-    return catalog_jobs(PLOT_SPECS, (), debug, series_count)
+    jobs = catalog_jobs(PLOT_SPECS, (), debug, series_count)
+    if debug:
+        jobs += [
+            f"debug:{index}:{name}"
+            for index in range(series_count)
+            for name in SECANT_DEBUG_SPECS
+        ]
+    return jobs
 
 
 def plot_compare(
@@ -562,6 +600,19 @@ def plot_compare(
                     "",
                     info,
                     info["inputs"][index],
+                    logo,
+                    f"series_{index}",
+                )
+            )
+            reports.update(
+                render_secant_debug(
+                    curves,
+                    _secant_specs(selected, f"debug:{index}"),
+                    options,
+                    "",
+                    info,
+                    info["inputs"][index],
+                    gradient_points_mm,
                     logo,
                     f"series_{index}",
                 )

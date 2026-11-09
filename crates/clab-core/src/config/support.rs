@@ -158,7 +158,12 @@ fn merge_mapping_source(
         merge_map(target, values);
     }
     for (key, value) in source {
-        if key != "file" && !matches!(key.as_str(), "vertical" | "roll" | "svc" | "knc") {
+        if key != "file"
+            && !matches!(
+                key.as_str(),
+                "vertical" | "roll" | "longitudinal" | "svc" | "knc"
+            )
+        {
             merge_value(target, key, value);
         }
     }
@@ -391,21 +396,6 @@ pub(crate) fn require(
         Err(ConfigError(format!("{where_} is missing key(s): {key}")).into())
     } else {
         Ok(())
-    }
-}
-/// Read `key`, accepting legacy `alias`; reject both together.
-pub(crate) fn aliased<'a>(
-    t: &'a toml::map::Map<String, Value>,
-    key: &str,
-    alias: &str,
-    where_: &str,
-) -> Result<&'a Value, Box<dyn std::error::Error>> {
-    match (t.get(key), t.get(alias)) {
-        (Some(_), Some(_)) => {
-            Err(ConfigError(format!("{where_} cannot define both {key} and {alias}")).into())
-        }
-        (Some(value), None) | (None, Some(value)) => Ok(value),
-        (None, None) => Err(ConfigError(format!("{where_} is missing key(s): {key}")).into()),
     }
 }
 pub(crate) fn value<'a>(

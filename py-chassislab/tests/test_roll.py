@@ -333,6 +333,25 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
         text = _pdf_text(reports[path])
         assert "roll_angle [deg]" in text
         assert "roll.h5" in text
+    secants = [
+        f"knc_roll_{name}"
+        for name in (
+            "toe",
+            "toe_vs_roll_angle",
+            "toe_vs_suspension_roll_angle",
+            "camber",
+            "camber_vs_roll_angle",
+            "camber_vs_suspension_roll_angle",
+        )
+    ]
+    for name in secants:
+        path = f"plots/knc/roll/debug/measurement_{name}.pdf"
+        assert path in reports
+        assert "roll_angle [deg]" in _pdf_text(reports[path])
+    assert (
+        "plots/knc/roll/debug/measurement_knc_roll_wheel_load.pdf"
+        not in reports
+    )
     for axle in ("front", "rear"):
         path = (
             f"plots/knc/roll/debug/measurement_knc_roll_roll_center_{axle}.pdf"
@@ -361,6 +380,8 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
     )
     for index in (0, 1):
         assert f"debug/series_{index}_knc_roll_ride_rate.pdf" in compared
+        for name in secants:
+            assert f"debug/series_{index}_{name}.pdf" in compared
         for axle in ("front", "rear"):
             assert (
                 f"debug/series_{index}_knc_roll_roll_center_{axle}.pdf"

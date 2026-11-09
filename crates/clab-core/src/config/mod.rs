@@ -57,7 +57,7 @@ pub struct ValidationConfig {
 
 /// KnC tests analyzed from one configured input each. `static` is not listed:
 /// it is only a baseline for these tests.
-pub const KNC_TESTS: [&str; 2] = ["vertical", "roll"];
+pub const KNC_TESTS: [&str; 3] = ["vertical", "roll", "longitudinal"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Domain {
@@ -82,6 +82,9 @@ pub struct CaseConfig {
     pub vertical: Option<VerticalConfig>,
     /// KnC roll test; shares the vertical test's configuration shape.
     pub roll: Option<VerticalConfig>,
+    /// KnC longitudinal inputs, one per stored setup (`[[input.knc.longitudinal]]`);
+    /// same shape as vertical, the travel window is unused.
+    pub longitudinal: Vec<VerticalConfig>,
     pub svc_signal_map: Option<PathBuf>,
     /// SVC measurement reference JSON key mapping: canonical metric name ->
     /// `{entity (JSON key), unit}`. Required whenever this config's SVC
@@ -95,7 +98,7 @@ impl CaseConfig {
         if !self.simulation_json.as_os_str().is_empty() {
             domains.push(Domain::Svc);
         }
-        if self.vertical.is_some() || self.roll.is_some() {
+        if self.vertical.is_some() || self.roll.is_some() || !self.longitudinal.is_empty() {
             domains.push(Domain::Knc);
         }
         domains
@@ -173,8 +176,14 @@ fn validate_run_input_tables(
     }
     if let Some(knc) = input.get("knc").and_then(Value::as_table) {
         for test in KNC_TESTS {
-            if let Some(input) = knc.get(test).and_then(Value::as_table) {
-                validate_run_input_table(input, run)?;
+            match knc.get(test) {
+                Some(Value::Table(input)) => validate_run_input_table(input, run)?,
+                Some(Value::Array(inputs)) => {
+                    for input in inputs.iter().filter_map(Value::as_table) {
+                        validate_run_input_table(input, run)?;
+                    }
+                }
+                _ => {}
             }
         }
         if let Some(static_input) = knc.get("static").and_then(Value::as_table) {
@@ -436,6 +445,26 @@ mod tests {
         assert_eq!((branch.measurement.index, branch.simulation.index), (1, 1));
         assert_eq!(branch.measurement.plot_branches, "all");
         assert_eq!(branch.simulation.plot_branches, "selected");
+        fs::write(
+            &p,
+            format!("{base}[vertical.metric]\nedge_width=50\nmin_reversal_fraction=0.02\n[vertical.metric.simulation]\nedge_percentile=0.9\n"),
+        )
+        .unwrap();
+        let branch = load_config(&p).unwrap().vertical.unwrap().branch;
+        assert_eq!(branch.measurement.edge_width, Some(50));
+        assert_eq!(branch.measurement.min_reversal_fraction, Some(0.02));
+        assert_eq!(branch.measurement.edge_percentile, None);
+        assert_eq!(branch.simulation.edge_percentile, Some(0.9));
+        assert_eq!(branch.measurement.min_branch_fraction, None);
+        for invalid in [
+            "edge_width=0",
+            "edge_percentile=0",
+            "min_branch_fraction=1",
+            "min_reversal_fraction=-0.1",
+        ] {
+            fs::write(&p, format!("{base}[vertical.metric]\n{invalid}\n")).unwrap();
+            assert!(load_config(&p).is_err(), "accepted {invalid}");
+        }
         for invalid in [
             "index=0",
             "smooth_window=5",
@@ -458,32 +487,18 @@ mod tests {
             "travel_minimum_mm=-10\ntravel_maximum_mm=10\nstep_mm=1\nmetric_gradient_points_mm=5",
         );
         let window = load_config(&p).unwrap().vertical.unwrap().window;
-        assert_eq!(
-            (window.minimum_mm, window.maximum_mm, window.step_mm),
-            (-10.0, 10.0, 1.0)
-        );
         assert_eq!(window.gradient_points_mm, Some(5.0));
         write("minimum_mm=-1\nmaximum_mm=1\nstep_mm=1");
         let window = load_config(&p).unwrap().vertical.unwrap().window;
         assert_eq!(window.gradient_points_mm, None);
-        for (window, error) in [
-            (
-                "travel_minimum_mm=-1\nminimum_mm=-1\ntravel_maximum_mm=1\nstep_mm=1",
-                "cannot define both travel_minimum_mm and minimum_mm",
-            ),
-            (
-                "travel_minimum_mm=-10\ntravel_maximum_mm=10\nstep_mm=1\nmetric_gradient_points_mm=0",
-                "gradient_points_mm must be positive",
-            ),
-            (
-                "travel_minimum_mm=-10\ntravel_maximum_mm=4\nstep_mm=1\nmetric_gradient_points_mm=5",
-                "must lie inside travel window",
-            ),
-        ] {
-            write(window);
-            let message = load_config(&p).unwrap_err().to_string();
-            assert!(message.contains(error), "{message}");
-        }
+        write("metric_gradient_points_mm=0");
+        let message = load_config(&p).unwrap_err().to_string();
+        assert!(
+            message.contains("gradient_points_mm must be positive"),
+            "{message}"
+        );
+        write("plot_branches='all'");
+        assert!(load_config(&p).is_ok());
     }
 
     #[test]
@@ -852,20 +867,62 @@ mod tests {
         let vertical = load_config(&p).unwrap().vertical.unwrap();
 
         // Vertical overrides per key; unset keys inherit from [knc].
-        assert_eq!(
-            (
-                vertical.window.minimum_mm,
-                vertical.window.maximum_mm,
-                vertical.window.step_mm
-            ),
-            (-60.0, 60.0, 1.0)
-        );
         assert_eq!(vertical.window.gradient_points_mm, Some(5.0));
         let (measurement, simulation) = (&vertical.branch.measurement, &vertical.branch.simulation);
         assert_eq!((measurement.index, simulation.index), (1, 3));
         assert_eq!(measurement.direction, "fall");
         assert_eq!(simulation.plot_branches, "selected");
         assert!(measurement.defaulted.is_empty() && simulation.defaulted.is_empty());
+    }
+
+    #[test]
+    fn flat_setup_keys_override_per_level_and_reject_duplicates() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("input.toml"),
+            "[knc.vertical.simulation]\nfile='simulation.h5'\n",
+        )
+        .unwrap();
+        fs::write(
+            d.path().join("signals.toml"),
+            "[simulation.knc.vertical.signals.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n[measurement.knc.vertical.signals.front_left_travel]\nentity='fl'\nunit='mm'\n",
+        )
+        .unwrap();
+        let case = d.path().join("case.toml");
+        fs::write(
+            &case,
+            "[meta]\nname='n'\nloadcase='l'\n[input]\nfile='input.toml'\n[setup]\nfile='setup.toml'\n[signals]\nfile='signals.toml'\n",
+        )
+        .unwrap();
+        let load = |setup: &str| {
+            fs::write(d.path().join("setup.toml"), setup).unwrap();
+            load_config(&case)
+        };
+
+        let flat = load(
+            "[knc]\nindex=3\nplot_branches='selected'\n\
+             [knc.vertical]\ngradient_points_mm=5\ndirection='fall'\n",
+        )
+        .unwrap()
+        .vertical
+        .unwrap();
+        let nested = load(
+            "[knc.window]\nplot_branches='selected'\n[knc.metric]\nindex=3\n\
+             [knc.vertical.metric]\ngradient_points_mm=5\ndirection='fall'\n",
+        )
+        .unwrap()
+        .vertical
+        .unwrap();
+        assert_eq!(flat.window, nested.window);
+        assert_eq!(flat.branch, nested.branch);
+        assert_eq!(flat.window.gradient_points_mm, Some(5.0));
+        assert_eq!(flat.branch.simulation.index, 3);
+        assert_eq!(flat.branch.simulation.direction, "fall");
+
+        let message = load("[knc.vertical]\nindex=1\n[knc.vertical.metric]\nindex=2\n")
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("defines index both directly"), "{message}");
     }
 
     #[test]
