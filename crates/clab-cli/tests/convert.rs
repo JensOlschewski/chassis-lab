@@ -367,7 +367,7 @@ fn stores_domain_and_test_when_data_has_no_identity_to_disagree_with() {
     };
     assert_eq!(
         (read("domain"), read("test"), read("setup")),
-        ("knc".into(), "vertical".into(), "B1E0F1R1".into())
+        ("knc".into(), "vertical".into(), "b1e0f1r1".into())
     );
     assert!(file.attr("phase").is_err());
     // MINIMAL_RES has no motion channels, so the test cannot be verified.
@@ -394,7 +394,7 @@ fn stores_lateral_phase_and_offset() {
     assert!(result.status.success());
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(
-        stdout.contains("setup B1E0F1R1: B=1 [declared]"),
+        stdout.contains("setup b1e0f1r1: B=1 [declared]"),
         "{stdout}"
     );
     let file = hdf5::File::open(&output).unwrap();
@@ -408,7 +408,7 @@ fn stores_lateral_phase_and_offset() {
     };
     assert_eq!(
         (text("setup"), text("phase")),
-        ("B1E0F1R1".into(), "anti".into())
+        ("b1e0f1r1".into(), "anti".into())
     );
     assert_eq!(
         file.attr("offset_mm")

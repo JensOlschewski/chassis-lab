@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::CStr;
 use std::fs;
@@ -14,8 +14,8 @@ use clab_converter::conditions::Setup;
 use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
 use clab_core::config::{CaseConfig, SignalRef, VerticalBranch, VerticalConfig};
 use clab_core::conventions::{
-    BaselinePolicy, ROLL_AXLE_SIGNALS, SignalConvention, apply_convention, roll_conventions,
-    vertical_conventions,
+    BaselinePolicy, ROLL_AXLE_SIGNALS, SignalConvention, apply_convention,
+    longitudinal_conventions, roll_conventions, vertical_conventions,
 };
 
 use crate::progress::ReportProgress;
@@ -23,7 +23,6 @@ use crate::progress::ReportProgress;
 use super::display::{mapping_missing, missing_unit_warning, tag_warnings};
 
 const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
-const AXES: [&str; 3] = ["x", "y", "z"];
 const DEFAULT_GRADIENT_POINTS_MM: f64 = 10.0;
 const DEFAULT_GRADIENT_POINTS_DEG: f64 = 1.0;
 pub(crate) const DEBUG_RATE_WARNING: &str =
@@ -35,6 +34,7 @@ pub(crate) const DEBUG_RATE_WARNING: &str =
 pub(crate) enum KncTest {
     Vertical,
     Roll,
+    Longitudinal,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,8 +47,10 @@ struct RenderRequest {
     gradient_mm: Option<f64>,
     branch: String,
     gradient_deg: Option<f64>,
+    gradient_n: Option<f64>,
     debug: Option<String>,
     mass: String,
+    brakes: bool,
     selected: Vec<String>,
 }
 
@@ -173,6 +175,10 @@ pub(crate) fn render_worker(input: &Path, output: &Path) -> Result<()> {
         match request.test {
             KncTest::Vertical => kwargs.set_item("corner_mass_kg", &request.mass)?,
             KncTest::Roll => kwargs.set_item("gradient_points_deg", request.gradient_deg)?,
+            KncTest::Longitudinal => {
+                kwargs.set_item("brakes", request.brakes)?;
+                kwargs.set_item("gradient_points_n", request.gradient_n)?;
+            }
         }
         let function = if let Some(candidates) = &request.candidates {
             kwargs.set_item("baseline_json", &request.curves)?;
@@ -205,10 +211,14 @@ pub(crate) fn render_worker(input: &Path, output: &Path) -> Result<()> {
 }
 
 impl KncTest {
+    /// Every KnC test `analyze` supports, in console order.
+    pub(crate) const ALL: [Self; 3] = [Self::Vertical, Self::Roll, Self::Longitudinal];
+
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         match name {
             "vertical" => Some(Self::Vertical),
             "roll" => Some(Self::Roll),
+            "longitudinal" => Some(Self::Longitudinal),
             _ => None,
         }
     }
@@ -217,6 +227,7 @@ impl KncTest {
         match self {
             Self::Vertical => "vertical",
             Self::Roll => "roll",
+            Self::Longitudinal => "longitudinal",
         }
     }
 
@@ -225,6 +236,7 @@ impl KncTest {
         match self {
             Self::Vertical => "KnC Vertical",
             Self::Roll => "KnC Roll",
+            Self::Longitudinal => "KnC Longitudinal",
         }
     }
 
@@ -232,6 +244,17 @@ impl KncTest {
         match self {
             Self::Vertical => config.vertical.as_ref(),
             Self::Roll => config.roll.as_ref(),
+            // Analyses run on a single-input configuration (`analyze::knc_units`).
+            Self::Longitudinal => config.longitudinal.first(),
+        }
+    }
+
+    /// File stem of this test's detail documents (`knc-<stem>.json`). Longitudinal
+    /// inputs of one run differ by stored setup, so it names the setup.
+    pub(crate) fn report_stem(self, brakes: bool) -> String {
+        match self {
+            Self::Longitudinal => format!("longitudinal-b{}", u8::from(brakes)),
+            Self::Vertical | Self::Roll => self.name().into(),
         }
     }
 
@@ -244,6 +267,35 @@ impl KncTest {
         match self {
             Self::Vertical => vertical_conventions(),
             Self::Roll => roll_conventions(),
+            Self::Longitudinal => longitudinal_conventions(),
+        }
+    }
+
+    /// Signals every corner must map, as canonical suffixes.
+    fn required_signals(self) -> &'static [&'static str] {
+        match self {
+            Self::Vertical | Self::Roll => &["wheel_center_x", "wheel_center_y", "wheel_center_z"],
+            Self::Longitudinal => &["force_x"],
+        }
+    }
+
+    /// Whether a measurement channel is stored relative to its static row.
+    /// Longitudinal follows the legacy evaluation: every response is relative,
+    /// the driving force is not.
+    fn measurement_relative(self, suffix: &str) -> bool {
+        match self {
+            Self::Longitudinal => suffix != "force_x",
+            Self::Vertical | Self::Roll => matches!(
+                suffix,
+                "wheel_center_x"
+                    | "wheel_center_y"
+                    | "wheel_center_z"
+                    | "wheel_pad_z"
+                    | "tire_deflection"
+                    | "contact_patch_x"
+                    | "contact_patch_y"
+                    | "center_of_pressure_y"
+            ),
         }
     }
 
@@ -272,13 +324,21 @@ impl KncTest {
                 "wheel_center_global_y",
                 "wheel_center_global_z",
             ],
+            Self::Longitudinal => &[
+                "wheel_center_x",
+                "wheel_center_y",
+                "projected_contact_patch_x",
+                "toe",
+                "camber",
+                "spin",
+            ],
         }
     }
 
     /// Axle-level signals as `(location, signal, required)`.
     fn axle_signals(self) -> Vec<(&'static str, &'static str, bool)> {
         match self {
-            Self::Vertical => Vec::new(),
+            Self::Vertical | Self::Longitudinal => Vec::new(),
             Self::Roll => ROLL_AXLE_SIGNALS
                 .iter()
                 .map(|(location, signal, _)| (*location, *signal, *signal == "roll_angle"))
@@ -291,6 +351,7 @@ impl KncTest {
         match self {
             Self::Vertical => &[CORE_KERNEL, PLOT_KERNEL, VERTICAL_KERNEL],
             Self::Roll => &[CORE_KERNEL, PLOT_KERNEL, ROLL_KERNEL],
+            Self::Longitudinal => &[CORE_KERNEL, PLOT_KERNEL, LONGITUDINAL_KERNEL],
         }
     }
 }
@@ -334,6 +395,15 @@ const ROLL_KERNEL: Kernel = Kernel(
     c"chassis_lab.knc_roll_kernel",
 );
 
+const LONGITUDINAL_KERNEL: Kernel = Kernel(
+    concat!(
+        include_str!("../../../../py-chassislab/src/chassis_lab/knc_longitudinal_kernel.py"),
+        "\0"
+    ),
+    c"knc_longitudinal_kernel.py",
+    c"chassis_lab.knc_longitudinal_kernel",
+);
+
 /// One sampled signal. `corner` is a corner (`front_left`, ...) or, for roll
 /// axle signals, an axle location (`front`, `rear`, `total`). `offset` is the
 /// baseline subtracted from relative values (measurement channel offset or
@@ -361,6 +431,8 @@ pub(crate) struct Reports {
     pub normalization: serde_json::Value,
     pub branch: VerticalBranch,
     pub measurement: bool,
+    /// Brakes applied in the stored setup; selects the longitudinal metrics.
+    pub brakes: bool,
     /// Per-corner mass backing `ride_frequency`: config override, else this
     /// run's SVC `<corner>_mass_kg`, else absent. Computed once here and
     /// reused by both the metric calculation and the `ride_frequency` plot
@@ -409,6 +481,14 @@ impl Conditions {
             phase: conditions.phase.map(|phase| phase.as_str().to_owned()),
             offset_mm: conditions.offset_mm,
         })
+    }
+
+    pub(crate) fn brakes(&self) -> bool {
+        self.setup.brakes
+    }
+
+    pub(crate) fn setup_code(&self) -> String {
+        self.setup.to_string()
     }
 
     /// Short form for report footers: `B1E0F1R1 | in-phase | 30 mm`.
@@ -564,6 +644,7 @@ pub(crate) fn analyze_input(
         relative_travel,
         measurement,
         (&corner_mass_kg, &corner_mass_source),
+        conditions.setup.brakes,
         &mut warnings,
     )?;
 
@@ -582,6 +663,7 @@ pub(crate) fn analyze_input(
         "normalization": normalization,
     });
     let curve_count = detail["curves"].as_array().unwrap().len();
+    let brakes = conditions.setup.brakes;
     Ok(Reports {
         input: path.to_path_buf(),
         name: config.name.clone(),
@@ -598,8 +680,32 @@ pub(crate) fn analyze_input(
         normalization: detail["normalization"].clone(),
         branch: knc.branch.for_measurement(measurement).clone(),
         measurement,
+        brakes,
         corner_mass_kg,
     })
+}
+
+/// Whether a metric row is a placeholder for a setup the input does not cover.
+pub(crate) fn is_not_covered(metric: &serde_json::Value) -> bool {
+    metric["status"] == "not_covered"
+}
+
+/// A placeholder is dropped once another input of the run covers its metric.
+pub(crate) fn drop_resolved_placeholders(reports: &mut [&mut Reports]) {
+    let covered: BTreeSet<String> = reports
+        .iter()
+        .flat_map(|report| &report.metrics)
+        .filter(|metric| !is_not_covered(metric))
+        .filter_map(|metric| metric["metric"].as_str().map(str::to_owned))
+        .collect();
+    for report in reports {
+        report.metrics.retain(|metric| {
+            !is_not_covered(metric)
+                || !metric["metric"]
+                    .as_str()
+                    .is_some_and(|name| covered.contains(name))
+        });
+    }
 }
 
 /// Display source label for plot titles: the counterpart to `Reports::measurement`.
@@ -615,40 +721,29 @@ pub(crate) fn source_label(measurement: bool) -> &'static str {
 fn default_warnings(test: KncTest, knc: &VerticalConfig, measurement: bool) -> Vec<String> {
     let branch = knc.branch.for_measurement(measurement);
     let mut warnings = Vec::new();
-    let mut warn = |key: &str, table: &str, default: String| {
+    let table = format!("setup.knc.{}", test.name());
+    let mut warn = |key: &str, default: String| {
         warnings.push(format!(
             "config key '{key}' missing in [{table}]; using default {default}"
         ));
     };
-    if knc.window.gradient_points_mm.is_none() {
-        let effective = effective_gradient_points(&knc.window);
-        let limited = if effective < DEFAULT_GRADIENT_POINTS_MM {
-            format!(" (limited to travel window: {effective} mm)")
-        } else {
-            String::new()
-        };
+    if test != KncTest::Longitudinal && knc.window.gradient_points_mm.is_none() {
         warn(
             "gradient_points_mm",
-            "setup.knc.metric",
-            format!("{DEFAULT_GRADIENT_POINTS_MM} mm{limited}"),
+            format!("{DEFAULT_GRADIENT_POINTS_MM} mm"),
         );
     }
     if test == KncTest::Roll && knc.window.gradient_points_deg.is_none() {
         warn(
             "gradient_points_deg",
-            "setup.knc.metric",
             format!("{DEFAULT_GRADIENT_POINTS_DEG} deg"),
         );
     }
     for key in &branch.defaulted {
         match *key {
-            "direction" => warn("direction", "setup.knc.metric", branch.direction.clone()),
-            "index" => warn("index", "setup.knc.metric", branch.index.to_string()),
-            "plot_branches" => warn(
-                "plot_branches",
-                "setup.knc.window",
-                branch.plot_branches.clone(),
-            ),
+            "direction" => warn("direction", branch.direction.clone()),
+            "index" => warn("index", branch.index.to_string()),
+            "plot_branches" => warn("plot_branches", branch.plot_branches.clone()),
             _ => {}
         }
     }
@@ -666,7 +761,7 @@ fn vertical_branch(config: &CaseConfig, measurement: bool) -> &VerticalBranch {
 
 /// Rust/Python interface for test-specific scalar metrics.
 ///
-/// Wheel-travel points default to 10 mm, limited to the travel window; roll
+/// Wheel-travel points default to 10 mm; roll
 /// angle points default to 1 deg. Wheel-center Z must be relative travel:
 /// measurement offsets or a static simulation baseline. Unavailable metrics
 /// keep `value: null` and add one warning with reason. Rust serializes canonical
@@ -675,6 +770,7 @@ fn vertical_branch(config: &CaseConfig, measurement: bool) -> &VerticalBranch {
 /// `knc_kernel.py` and the test module; it calls that module's `metrics(request)`.
 /// Python returns a JSON string of metric rows and warnings. Rust adds domain
 /// and test, tags warnings, and leaves report writing to the caller.
+#[allow(clippy::too_many_arguments)]
 fn gradient_metrics(
     test: KncTest,
     knc: &VerticalConfig,
@@ -682,17 +778,11 @@ fn gradient_metrics(
     relative_travel: bool,
     measurement: bool,
     (corner_mass_kg, corner_mass_source): (&BTreeMap<String, f64>, &BTreeMap<String, &'static str>),
+    brakes: bool,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<serde_json::Value>> {
     let window = &knc.window;
     let gradient = effective_gradient_points(window);
-    if gradient <= 0.0 {
-        warnings.push(format!(
-            "travel window {}..{} mm does not contain 0 mm; metrics skipped",
-            window.minimum_mm, window.maximum_mm
-        ));
-        return Ok(Vec::new());
-    }
     if !relative_travel {
         warnings.push("metrics require static_simulation normalization; metrics skipped".into());
         return Ok(Vec::new());
@@ -714,6 +804,10 @@ fn gradient_metrics(
                 .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG)
                 .to_string(),
         )],
+        KncTest::Longitudinal => window
+            .gradient_points_n
+            .map(|half| vec![("gradient_n", half.to_string())])
+            .unwrap_or_default(),
     };
 
     let response: String = with_kernel(test, |py, module| {
@@ -724,6 +818,7 @@ fn gradient_metrics(
         for (key, value) in &extras {
             request.set_item(key, value)?;
         }
+        request.set_item("brakes", brakes)?;
         module.getattr("metrics")?.call1((request,))?.extract()
     })
     .with_context(|| {
@@ -795,11 +890,9 @@ fn corner_mass(
 }
 
 fn effective_gradient_points(window: &clab_core::config::VerticalWindow) -> f64 {
-    window.gradient_points_mm.unwrap_or_else(|| {
-        DEFAULT_GRADIENT_POINTS_MM
-            .min(-window.minimum_mm)
-            .min(window.maximum_mm)
-    })
+    window
+        .gradient_points_mm
+        .unwrap_or(DEFAULT_GRADIENT_POINTS_MM)
 }
 
 /// Render same canonical curves together. Rust owns input selection; Python only draws arrays.
@@ -859,8 +952,12 @@ pub(crate) fn compare_plots(
                 .config(config)
                 .and_then(|knc| knc.window.gradient_points_deg)
                 .or(Some(DEFAULT_GRADIENT_POINTS_DEG)),
+            gradient_n: test
+                .config(config)
+                .and_then(|knc| knc.window.gradient_points_n),
             debug: options.debug.map(str::to_owned),
             mass: corner_mass_kg,
+            brakes: false,
             selected: Vec::new(),
         },
         &format!("{prefix}/"),
@@ -938,55 +1035,45 @@ fn simulation_curves(
     let mut curves = Vec::new();
     let mut warnings = Vec::new();
     for corner in CORNERS {
-        let travel_name = format!("{corner}_travel");
-        let travel_reference = mapping(test, knc, &travel_name)?;
-        let mut travel_convention = convention(&conventions, &travel_name)?;
-        travel_convention.source_unit = travel_reference.unit.clone();
-        let travel_signal = simulation.read_signal(
-            &travel_reference.entity,
-            Some(&travel_reference.component),
-            Some(&travel_convention.source_unit),
-        )?;
-        let travel = apply_convention(
-            &travel_signal.values,
-            &travel_name,
-            format!("{}/{}", travel_reference.entity, travel_reference.component),
-            travel_convention,
-            config.gravity,
-        )?
-        .values;
-        let travel = drop_initial_sample(travel);
-        for axis in AXES {
-            let name = format!("{corner}_wheel_center_{axis}");
-            let reference = mapping(test, knc, &name)?;
-            let mut convention = convention(&conventions, &name)?;
-            convention.source_unit = reference.unit.clone();
-            let signal = simulation.read_signal(
-                &reference.entity,
-                Some(&reference.component),
-                Some(&convention.source_unit),
+        let travel = if test == KncTest::Longitudinal {
+            None
+        } else {
+            let travel_name = format!("{corner}_travel");
+            let travel_reference = mapping(test, knc, &travel_name)?;
+            let mut travel_convention = convention(&conventions, &travel_name)?;
+            travel_convention.source_unit = travel_reference.unit.clone();
+            let travel_signal = simulation.read_signal(
+                &travel_reference.entity,
+                Some(&travel_reference.component),
+                Some(&travel_convention.source_unit),
             )?;
-            if signal.info.unit.is_empty() {
-                warnings.push(missing_unit_warning(
-                    &reference.entity,
-                    &reference.component,
-                    &convention.source_unit,
-                ));
-            }
-            let value = apply_convention(
-                &signal.values,
-                &name,
-                format!("{}/{}", reference.entity, reference.component),
-                convention,
+            let travel = apply_convention(
+                &travel_signal.values,
+                &travel_name,
+                format!("{}/{}", travel_reference.entity, travel_reference.component),
+                travel_convention,
                 config.gravity,
             )?
             .values;
+            Some(drop_initial_sample(travel))
+        };
+        for suffix in test.required_signals() {
+            let name = format!("{corner}_{suffix}");
+            let reference = mapping(test, knc, &name)?;
+            let (values, unit) = simulation_signal(
+                config,
+                simulation,
+                &conventions,
+                &name,
+                reference,
+                &mut warnings,
+            )?;
             curves.push(Curve {
                 corner: corner.into(),
-                signal: format!("wheel_center_{axis}"),
-                values: drop_initial_sample(value),
-                unit: "mm".into(),
-                travel: Some(travel.clone()),
+                signal: (*suffix).into(),
+                values: drop_initial_sample(values),
+                unit,
+                travel: travel.clone(),
                 offset: None,
             });
         }
@@ -1035,15 +1122,19 @@ fn measurement_curves(
 ) -> Result<Vec<Curve>> {
     let mut curves = Vec::new();
     for corner in CORNERS {
-        for axis in AXES {
-            let name = format!("{corner}_wheel_center_{axis}");
+        for suffix in test.required_signals() {
+            let name = format!("{corner}_{suffix}");
             let reference = measurement_mapping(test, knc, &name)?;
             let channel =
                 measurement.read_signal(&reference.entity, None, Some(&reference.unit))?;
-            let offset = channel.info.offset.unwrap_or_default();
+            let offset = if test.measurement_relative(suffix) {
+                channel.info.offset.unwrap_or_default()
+            } else {
+                0.0
+            };
             curves.push(Curve {
                 corner: corner.into(),
-                signal: format!("wheel_center_{axis}"),
+                signal: (*suffix).into(),
                 values: channel
                     .values
                     .into_iter()
@@ -1051,7 +1142,7 @@ fn measurement_curves(
                     .collect(),
                 unit: reference.unit.clone(),
                 travel: None,
-                offset: Some(offset),
+                offset: test.measurement_relative(suffix).then_some(offset),
             });
         }
         optional_measurement_curves(test, knc, measurement, corner, &mut curves)?;
@@ -1204,14 +1295,7 @@ fn optional_measurement_curves(
             continue;
         }
         let channel = measurement.read_signal(&reference.entity, None, Some(&reference.unit))?;
-        let relative = matches!(
-            suffix,
-            "wheel_pad_z"
-                | "tire_deflection"
-                | "contact_patch_x"
-                | "contact_patch_y"
-                | "center_of_pressure_y"
-        );
+        let relative = test.measurement_relative(suffix);
         let sign = if suffix == "toe" && matches!(corner, "front_right" | "rear_right") {
             -1.0
         } else {
@@ -1273,6 +1357,18 @@ pub(crate) struct PlotOptions<'a> {
     pub footer: &'a str,
     pub debug: Option<&'a str>,
     pub workers: usize,
+    /// Setup code appended to every plot file name; `None` for comparisons.
+    pub setup: Option<&'a str>,
+}
+
+/// `knc_x.pdf` → `knc_x_<setup>.pdf`, likewise `.plot.json`.
+fn suffix_plot_name(name: &str, setup: &str) -> String {
+    for extension in [".plot.json", ".pdf"] {
+        if let Some(stem) = name.strip_suffix(extension) {
+            return format!("{stem}_{setup}{extension}");
+        }
+    }
+    name.to_owned()
 }
 
 /// Render KnC corner PDF plots. Separate from `analyze_input` so slow
@@ -1282,12 +1378,14 @@ pub(crate) struct PlotOptions<'a> {
 /// mass the metric uses: config override, else this run's SVC
 /// `<corner>_mass_kg` -- see `corner_mass`). Empty when neither is available;
 /// the plot is then skipped like any other optional signal.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn curve_plots(
     config: &CaseConfig,
     test: KncTest,
     curves: &serde_json::Value,
     measurement: bool,
     corner_mass_kg: &BTreeMap<String, f64>,
+    brakes: bool,
     options: PlotOptions<'_>,
     progress: &ReportProgress,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
@@ -1312,8 +1410,10 @@ pub(crate) fn curve_plots(
             knc.and_then(|config| config.window.gradient_points_deg)
                 .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG),
         ),
+        gradient_n: knc.and_then(|config| config.window.gradient_points_n),
         debug: options.debug.map(str::to_owned),
         mass: corner_mass_kg,
+        brakes,
         selected: Vec::new(),
     };
     let mut files = render_parallel(request, "", 1, options.workers, progress).with_context(|| {
@@ -1322,8 +1422,17 @@ pub(crate) fn curve_plots(
             test.name()
         )
     })?;
+    if let Some(setup) = options.setup {
+        files = files
+            .into_iter()
+            .map(|(name, bytes)| (suffix_plot_name(&name, setup), bytes))
+            .collect();
+    }
     if let Some(series) = merge_plot_series("analyze", test, &mut files)? {
-        files.insert(format!("knc-{}.plots.json", test.name()), series);
+        files.insert(
+            format!("knc-{}.plots.json", test.report_stem(brakes)),
+            series,
+        );
     }
     Ok(files)
 }
@@ -1478,11 +1587,11 @@ mod tests {
             offset_mm: Some(0.0),
         };
         assert!(base.differences(&base).is_empty());
-        assert_eq!(base.summary(), "B1E0F1R1 | in-phase | 0 mm");
-        assert_eq!(base.csv_cells(), ["B1E0F1R1", "in", "0"]);
+        assert_eq!(base.summary(), "b1e0f1r1 | in-phase | 0 mm");
+        assert_eq!(base.csv_cells(), ["b1e0f1r1", "in", "0"]);
         assert_eq!(
             base.json(),
-            serde_json::json!({"setup": "B1E0F1R1", "phase": "in", "offset_mm": 0.0})
+            serde_json::json!({"setup": "b1e0f1r1", "phase": "in", "offset_mm": 0.0})
         );
         let other = super::Conditions {
             phase: Some("anti".into()),
@@ -1490,13 +1599,13 @@ mod tests {
             ..base.clone()
         };
         assert_eq!(base.differences(&other), ["phase", "offset"]);
-        assert_eq!(other.summary(), "B1E0F1R1 | anti-phase | 30 mm");
+        assert_eq!(other.summary(), "b1e0f1r1 | anti-phase | 30 mm");
         let unknown = super::Conditions {
             phase: None,
             offset_mm: None,
             ..base.clone()
         };
         assert_eq!(base.differences(&unknown), ["phase", "offset"]);
-        assert_eq!(unknown.json(), serde_json::json!({"setup": "B1E0F1R1"}));
+        assert_eq!(unknown.json(), serde_json::json!({"setup": "b1e0f1r1"}));
     }
 }

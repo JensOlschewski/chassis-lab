@@ -36,7 +36,7 @@ fn header(file: &File, source_kind: &str, test: &str, samples: u64) {
     scalar(file, "sample_count", samples);
     string(file, "source_kind", source_kind);
     string(file, "domain", "knc");
-    string(file, "setup", "B1E0F1R1");
+    string(file, "setup", "b1e0f1r1");
     string(file, "test", test);
     string(file, "source_file", "fixture");
 }
@@ -366,7 +366,7 @@ fn analyzes_roll_measurement_as_curve_bundle() {
     assert_eq!(report["domains"][0]["test"], "roll");
     assert!(
         output
-            .join("plots/knc/roll/knc_roll_wcz_vs_wcx.pdf")
+            .join("plots/knc/roll/knc_roll_wcz_vs_wcx_b1e0f1r1.pdf")
             .is_file()
     );
 }
@@ -434,7 +434,7 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
     assert!(result.status.success(), "{stderr}");
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(
-        stdout.contains("KnC Roll\n  Setup   B1E0F1R1") && stdout.contains("running 36 metrics\n"),
+        stdout.contains("KnC Roll\nrunning") && stdout.contains("running 36 metrics\n"),
         "{stdout}"
     );
     assert_roll_console_order(&stdout);
@@ -456,7 +456,7 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
     );
     assert!(!stdout.contains("knc::roll::roll_wheel_rate_"), "{stdout}");
     assert!(stderr.contains(
-        "knc::roll: config key 'gradient_points_deg' missing in [setup.knc.metric]; using default 1 deg"
+        "knc::roll: config key 'gradient_points_deg' missing in [setup.knc.roll]; using default 1 deg"
     ));
     assert!(stderr.contains(
         "knc::roll: metric 'roll_steer_front_left_deg_per_mm' unavailable: missing canonical signal front_left_toe"
@@ -514,28 +514,28 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
     );
     assert!(
         output
-            .join("plots/knc/roll/debug/measurement_knc_roll_suspension_rate.pdf")
+            .join("plots/knc/roll/debug/measurement_knc_roll_suspension_rate_b1e0f1r1.pdf")
             .is_file()
     );
     for axle in ["front", "rear"] {
         assert!(
             output
                 .join(format!(
-                    "plots/knc/roll/debug/measurement_knc_roll_roll_center_{axle}.pdf"
+                    "plots/knc/roll/debug/measurement_knc_roll_roll_center_{axle}_b1e0f1r1.pdf"
                 ))
                 .is_file()
         );
     }
     assert!(
         output
-            .join("plots/knc/roll/knc_roll_ride_rate.pdf")
+            .join("plots/knc/roll/knc_roll_ride_rate_b1e0f1r1.pdf")
             .is_file()
     );
     for name in [
-        "knc_roll_roll_moment_vs_roll_angle.pdf",
-        "knc_roll_roll_stiffness_vs_roll_angle.pdf",
-        "knc_roll_roll_center_front.pdf",
-        "knc_roll_roll_center_rear.pdf",
+        "knc_roll_roll_moment_vs_roll_angle_b1e0f1r1.pdf",
+        "knc_roll_roll_stiffness_vs_roll_angle_b1e0f1r1.pdf",
+        "knc_roll_roll_center_front_b1e0f1r1.pdf",
+        "knc_roll_roll_center_rear_b1e0f1r1.pdf",
     ] {
         assert!(output.join("plots/knc/roll").join(name).is_file(), "{name}");
     }
@@ -689,12 +689,12 @@ fn analyzes_and_compares_roll_combined_with_vertical_in_one_run() {
     assert!(output.join("knc-roll.json").is_file());
     assert!(
         output
-            .join("plots/knc/roll/knc_roll_wcz_vs_wcx.pdf")
+            .join("plots/knc/roll/knc_roll_wcz_vs_wcx_b1e0f1r1.pdf")
             .is_file()
     );
     assert!(
         output
-            .join("plots/knc/vertical/knc_vertical_wcz_vs_wcx.pdf")
+            .join("plots/knc/vertical/knc_vertical_wcz_vs_wcx_b1e0f1r1.pdf")
             .is_file()
     );
 
@@ -791,7 +791,7 @@ fn compares_roll_metrics_between_measurements() {
         serde_json::from_str(&fs::read_to_string(output.join("knc-roll.json")).unwrap()).unwrap();
     assert_eq!(
         report["domains"],
-        serde_json::json!([{"domain": "knc", "test": "roll", "conditions": {"setup": "B1E0F1R1"}}])
+        serde_json::json!([{"domain": "knc", "test": "roll", "conditions": {"setup": "b1e0f1r1"}}])
     );
     let stiffness = report["candidates"][0]["metrics"]
         .as_array()

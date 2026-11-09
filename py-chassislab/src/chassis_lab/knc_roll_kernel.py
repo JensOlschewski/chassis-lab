@@ -46,6 +46,7 @@ from chassis_lab.knc_plot_kernel import (
     render_contact_path_debug,
     render_rate_debug,
     render_reports,
+    render_secant_debug,
     selected_specs,
 )
 from chassis_lab.knc_plot_kernel import (
@@ -485,6 +486,19 @@ def plot(
             )
         )
         reports.update(
+            render_secant_debug(
+                curves,
+                _secant_specs(selected, "debug:0"),
+                options,
+                "plots/knc/roll",
+                info,
+                info["inputs"][0],
+                gradient_points_mm,
+                logo,
+                half_deg=gradient_points_deg,
+            )
+        )
+        reports.update(
             _roll_center_debug(
                 curves,
                 options,
@@ -499,9 +513,38 @@ def plot(
     return reports
 
 
+SECANT_DEBUG_SPECS = tuple(
+    f"knc_roll_{name}"
+    for name in (
+        "toe",
+        "toe_vs_roll_angle",
+        "toe_vs_suspension_roll_angle",
+        "camber",
+        "camber_vs_roll_angle",
+        "camber_vs_suspension_roll_angle",
+    )
+)
+
+
+def _secant_specs(
+    selected: list[str] | None, kind: str
+) -> tuple[PlotSpec, ...]:
+    """Roll steer and camber: the secant plots that get a debug view."""
+    return tuple(
+        spec
+        for spec in selected_specs(PLOT_SPECS, selected, kind)
+        if spec.name in SECANT_DEBUG_SPECS
+    )
+
+
 def plot_jobs(debug: bool, series_count: int = 1) -> list[str]:
     jobs = catalog_jobs(PLOT_SPECS, AXLE_PLOT_SPECS, debug, series_count)
     if debug:
+        jobs += [
+            f"debug:{index}:{name}"
+            for index in range(series_count)
+            for name in SECANT_DEBUG_SPECS
+        ]
         jobs += [
             f"center:{index}:{axle}"
             for index in range(series_count)
@@ -579,6 +622,20 @@ def plot_compare(
                     info["inputs"][index],
                     logo,
                     f"series_{index}",
+                )
+            )
+            reports.update(
+                render_secant_debug(
+                    curves,
+                    _secant_specs(selected, f"debug:{index}"),
+                    options,
+                    "",
+                    info,
+                    info["inputs"][index],
+                    gradient_points_mm,
+                    logo,
+                    f"series_{index}",
+                    gradient_points_deg,
                 )
             )
             reports.update(

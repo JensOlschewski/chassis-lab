@@ -67,7 +67,7 @@ impl fmt::Display for Setup {
         let bit = |on: bool| u8::from(on);
         write!(
             f,
-            "B{}E{}F{}R{}",
+            "b{}e{}f{}r{}",
             bit(self.brakes),
             bit(self.engine),
             bit(self.front_arb),
@@ -423,7 +423,7 @@ mod tests {
                 rear_arb: true
             }
         );
-        assert_eq!(setup.to_string(), "B1E0F1R1");
+        assert_eq!(setup.to_string(), "b1e0f1r1");
         for bad in ["", "b1e0f1", "b1e0f1r2", "e1b0f1r1", "b1e0f1r1x"] {
             assert!(bad.parse::<Setup>().is_err(), "{bad}");
         }

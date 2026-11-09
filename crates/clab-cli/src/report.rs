@@ -54,9 +54,14 @@ pub(crate) fn prepare(mut files: Vec<(&str, Vec<u8>)>) -> Result<Vec<(&str, Vec<
 fn add_summary(report: &mut Value) {
     if report["command"] == "analyze" {
         let metrics = report["metrics"].as_array().expect("analysis metrics");
+        let not_covered = metrics
+            .iter()
+            .filter(|metric| metric["status"] == "not_covered")
+            .count();
         report["summary"] = json!({
-            "metric_count": metrics.len(),
-            "missing_count": metrics.iter().filter(|metric| metric["value"].is_null()).count(),
+            "metric_count": metrics.len() - not_covered,
+            "missing_count": metrics.iter().filter(|metric| metric["value"].is_null()).count() - not_covered,
+            "not_covered_count": not_covered,
             "warning_count": report["warnings"].as_array().expect("analysis warnings").len(),
         });
         return;
@@ -123,11 +128,12 @@ fn overview(report: &Value, files: &[(&str, Vec<u8>)]) -> String {
     if report["command"] == "analyze" {
         let case = &report["case"];
         html.push_str(&format!(
-            "<p>Analysis: <strong>{}</strong> ({})</p><p>{} metrics · {} missing · {} warnings</p>",
+            "<p>Analysis: <strong>{}</strong> ({})</p><p>{} metrics · {} missing · {} not covered · {} warnings</p>",
             escape(case["name"].as_str().unwrap_or_default()),
             escape(case["loadcase"].as_str().unwrap_or_default()),
             report["summary"]["metric_count"],
             report["summary"]["missing_count"],
+            report["summary"]["not_covered_count"],
             report["summary"]["warning_count"],
         ));
     } else {
