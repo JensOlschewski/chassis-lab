@@ -622,3 +622,68 @@ def test_plot_metrics_name_catalog_metrics() -> None:
     named = {spec.metric for spec in PLOT_SPECS if spec.metric}
     assert named
     assert named <= catalog
+
+
+def _sweep_curves() -> list[dict[str, object]]:
+    z = np.concatenate(
+        [np.linspace(-20, 20, 100), np.linspace(20, -20, 100)] * 2
+    )
+    return [
+        {"corner": corner, "signal": signal, "unit": unit, "values": values}
+        for corner in ("front_left", "front_right", "rear_left", "rear_right")
+        for signal, unit, values in (
+            ("wheel_center_z", "mm", z.tolist()),
+            ("wheel_center_x", "mm", (0.1 * z).tolist()),
+            ("wheel_center_y", "mm", (0.2 * z).tolist()),
+            ("wheel_load", "newton", (50 * z + 4000).tolist()),
+            ("tire_deflection", "mm", (0.5 * z).tolist()),
+            ("toe", "deg", (0.01 * z).tolist()),
+            ("camber", "deg", (-0.02 * z).tolist()),
+            ("spin", "deg", (0.03 * z).tolist()),
+        )
+    ]
+
+
+def test_debug_adds_secant_branch_plots_for_bump_steer_camber_and_spin():
+    info = json.dumps(
+        {
+            "config": "c.toml",
+            "inputs": ["a.h5", "b.h5"],
+            "creator": "t",
+            "version": "0",
+        }
+    )
+    options = json.dumps({"measurement": True})
+    names = {f"knc_vertical_{name}" for name in ("toe", "camber", "spin")}
+    reports = plot(
+        json.dumps(_sweep_curves()),
+        gradient_points_mm=5.0,
+        branch=options,
+        debug=info,
+    )
+    assert {
+        Path(name).stem
+        for name in reports
+        if "/debug/" in name and "wheel_load" not in name
+    } >= {f"measurement_{name}" for name in names}
+    compared = plot_compare(
+        json.dumps(_sweep_curves()),
+        json.dumps([{"label": "c", "curves": _sweep_curves()}]),
+        "base",
+        "",
+        None,
+        gradient_points_mm=5.0,
+        branches_json=json.dumps([{"measurement": True}] * 2),
+        debug=info,
+    )
+    assert {f"debug/series_1_{name}.pdf" for name in names} <= set(compared)
+
+
+def test_small_reversal_inside_a_ramp_does_not_split_the_branch() -> None:
+    up = np.linspace(-1000, 1000, 200)
+    up[100:104] = up[100] - 30.0
+    travel = np.r_[up, np.linspace(1000, -1000, 200), up]
+    options = BranchOptions()
+    assert len(branch_ranges(travel, options)) == 3
+    split = BranchOptions(min_reversal_fraction=0.0)
+    assert len(branch_ranges(travel, split)) > 3

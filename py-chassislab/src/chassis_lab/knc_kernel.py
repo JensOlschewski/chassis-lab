@@ -35,6 +35,8 @@ class BranchOptions:
     sweeps the plots draw.
     min_branch_fraction: measured branches shorter than this fraction of all
     samples are ignored (noise flips at turnarounds).
+    min_reversal_fraction: a reversal that travels back less than this
+    fraction of the total travel span does not split a branch.
     edge_width: samples searched for the curvature cut at each sweep end.
     edge_percentile: |d²y/dx²| percentile (0-1) above which a point is an
     outlier that starts the cut.
@@ -45,6 +47,7 @@ class BranchOptions:
     plot_branches: str = "all"
     measurement: bool = False
     min_branch_fraction: float = 0.05
+    min_reversal_fraction: float = 0.01
     edge_width: int = 200
     edge_percentile: float = 0.95
 
@@ -85,6 +88,38 @@ def _fill_zeros(signs: np.ndarray) -> np.ndarray:
     return forward(forward(signs)[::-1])[::-1]
 
 
+def _merge_small_reversals(
+    starts: np.ndarray,
+    ends: np.ndarray,
+    signs: np.ndarray,
+    steps: np.ndarray,
+    fraction: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Join a run with its neighbors when it travels back less than the limit.
+
+    The limit is `fraction` of the total travel span. A small dip inside a
+    ramp then no longer splits it into two branches.
+    """
+    path = np.cumsum(steps)
+    span = float(np.ptp(path)) if path.size else 0.0
+    limit = fraction * span
+    runs = [[int(a), int(b)] for a, b in zip(starts, ends, strict=True)]
+    merged = True
+    while merged and limit > 0:
+        merged = False
+        for i in range(1, len(runs) - 1):
+            first, middle, last = runs[i - 1], runs[i], runs[i + 1]
+            small = abs(steps[middle[0] : middle[1]].sum()) < limit
+            if small and signs[first[0]] == signs[last[0]] != 0:
+                runs[i - 1 : i + 2] = [[first[0], last[1]]]
+                merged = True
+                break
+    return (
+        np.array([run[0] for run in runs], dtype=int),
+        np.array([run[1] for run in runs], dtype=int),
+    )
+
+
 def branch_ranges(
     travel: np.ndarray, options: BranchOptions
 ) -> list[tuple[slice, int]]:
@@ -96,9 +131,13 @@ def branch_ranges(
     dz = np.diff(travel)
     if not np.isfinite(dz).any():
         return []
-    signs = _fill_zeros(np.where(np.isfinite(dz), np.sign(dz), 0.0))
+    steps = np.where(np.isfinite(dz), dz, 0.0)
+    signs = _fill_zeros(np.sign(steps))
     starts = np.r_[0, np.flatnonzero(signs[1:] != signs[:-1]) + 1]
     ends = np.r_[starts[1:], len(signs)]
+    starts, ends = _merge_small_reversals(
+        starts, ends, signs, steps, options.min_reversal_fraction
+    )
     minimum = (
         max(2, int(options.min_branch_fraction * len(travel)))
         if options.measurement
@@ -313,7 +352,8 @@ class GradientMetric:
     The metric is named `<name>_<location>_<suffix>`. `gradient` divides by
     the axis span, or by the span of `denominator` when given. `angle` is
     atan(-delta / axis span) in degrees. `points` selects the half-width of
-    the secant window ("mm" or "deg").
+    the secant window ("mm", "deg" or "N"). `scale` converts the result to
+    `unit`, e.g. 1000 for mm/kN from an axis in N.
     """
 
     name: str
@@ -324,6 +364,7 @@ class GradientMetric:
     axis: Signal = Signal("wheel_center_z")
     denominator: str | None = None
     points: str = "mm"
+    scale: float = 1.0
 
 
 def metric_row(
@@ -403,7 +444,7 @@ def gradient_metrics(
                 result["value"] = (
                     degrees(atan(-delta / (2.0 * half)))
                     if metric.kind == "angle"
-                    else delta / span
+                    else metric.scale * delta / span
                 )
             results.append(result)
     return results
