@@ -12,8 +12,7 @@ use std::{collections::BTreeMap, path::Path};
 use toml::{Value, map::Map};
 
 use super::support::{
-    keys, parse_tolerance_table, parse_validation, positive, require, resolve,
-    string, table, value,
+    keys, parse_tolerance_table, parse_validation, positive, require, resolve, string, table, value,
 };
 use super::support::{parse_measurement_signals, parse_signals};
 use super::{
@@ -125,7 +124,11 @@ impl VerticalBranch {
         }
         for (key, target, low_open) in [
             ("min_branch_fraction", &mut self.min_branch_fraction, false),
-            ("min_reversal_fraction", &mut self.min_reversal_fraction, false),
+            (
+                "min_reversal_fraction",
+                &mut self.min_reversal_fraction,
+                false,
+            ),
             ("edge_percentile", &mut self.edge_percentile, true),
         ] {
             if let Some(raw) = table.get(key) {
