@@ -435,38 +435,41 @@ mod tests {
         let base = "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\nminimum_mm=-10\nmaximum_mm=10\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n";
         fs::write(&p, base).unwrap();
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
-        assert_eq!((branch.measurement.index, branch.simulation.index), (2, 2));
+        assert_eq!((branch.measurement.cycle, branch.simulation.cycle), (1, 1));
         fs::write(
             &p,
-            format!("{base}[vertical.branch]\nindex=1\n[vertical.branch.simulation]\nplot_branches='selected'\n"),
+            format!("{base}[vertical.branch]\nmetric_cycle=2\n[vertical.branch.simulation]\nplot_branches='selected'\n"),
         )
         .unwrap();
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
-        assert_eq!((branch.measurement.index, branch.simulation.index), (1, 1));
+        assert_eq!((branch.measurement.cycle, branch.simulation.cycle), (2, 2));
         assert_eq!(branch.measurement.plot_branches, "all");
         assert_eq!(branch.simulation.plot_branches, "selected");
         fs::write(
             &p,
-            format!("{base}[vertical.metric]\nedge_width=50\nmin_reversal_fraction=0.02\n[vertical.metric.simulation]\nedge_percentile=0.9\n"),
+            format!("{base}[vertical.metric]\nedge_trim_width=50\nreversal_min_fraction=0.02\n[vertical.metric.simulation]\nedge_trim_percentile=0.9\n"),
         )
         .unwrap();
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
-        assert_eq!(branch.measurement.edge_width, Some(50));
-        assert_eq!(branch.measurement.min_reversal_fraction, Some(0.02));
-        assert_eq!(branch.measurement.edge_percentile, None);
-        assert_eq!(branch.simulation.edge_percentile, Some(0.9));
-        assert_eq!(branch.measurement.min_branch_fraction, None);
+        assert_eq!(branch.measurement.edge_trim_width, Some(50));
+        assert_eq!(branch.measurement.reversal_min_fraction, Some(0.02));
+        assert_eq!(branch.measurement.edge_trim_percentile, None);
+        assert_eq!(branch.simulation.edge_trim_percentile, Some(0.9));
+        assert_eq!(branch.measurement.branch_min_fraction, None);
         for invalid in [
-            "edge_width=0",
-            "edge_percentile=0",
-            "min_branch_fraction=1",
-            "min_reversal_fraction=-0.1",
+            "edge_trim_width=0",
+            "edge_trim_percentile=0",
+            "branch_min_fraction=1",
+            "reversal_min_fraction=-0.1",
+            "gradient_points_mm=5",
+            "direction='fall'",
+            "index=1",
         ] {
             fs::write(&p, format!("{base}[vertical.metric]\n{invalid}\n")).unwrap();
             assert!(load_config(&p).is_err(), "accepted {invalid}");
         }
         for invalid in [
-            "index=0",
+            "metric_cycle=0",
             "smooth_window=5",
             "min_samples=5",
             "plot_branches='other'",
@@ -477,27 +480,30 @@ mod tests {
     }
 
     #[test]
-    fn parses_vertical_travel_window_and_metric_gradient_points() {
+    fn parses_vertical_travel_window_and_metric_window() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        let write = |window: &str| {
-            fs::write(&p, format!("[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\n{window}\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n")).unwrap();
+        let write = |window: &str, metric: &str| {
+            fs::write(&p, format!("[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\n{window}\n[vertical.metric]\n{metric}\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n")).unwrap();
         };
         write(
-            "travel_minimum_mm=-10\ntravel_maximum_mm=10\nstep_mm=1\nmetric_gradient_points_mm=5",
+            "travel_minimum_mm=-10\ntravel_maximum_mm=10\nstep_mm=1",
+            "metric_window_mm=5",
         );
         let window = load_config(&p).unwrap().vertical.unwrap().window;
-        assert_eq!(window.gradient_points_mm, Some(5.0));
-        write("minimum_mm=-1\nmaximum_mm=1\nstep_mm=1");
+        assert_eq!(window.metric_window_mm, Some(5.0));
+        write("minimum_mm=-1\nmaximum_mm=1\nstep_mm=1", "");
         let window = load_config(&p).unwrap().vertical.unwrap().window;
-        assert_eq!(window.gradient_points_mm, None);
-        write("metric_gradient_points_mm=0");
+        assert_eq!(window.metric_window_mm, None);
+        write("", "metric_window_mm=0");
         let message = load_config(&p).unwrap_err().to_string();
         assert!(
-            message.contains("gradient_points_mm must be positive"),
+            message.contains("metric_window_mm must be positive"),
             "{message}"
         );
-        write("plot_branches='all'");
+        write("metric_gradient_points_mm=5", "");
+        assert!(load_config(&p).is_err());
+        write("plot_branches='all'", "");
         assert!(load_config(&p).is_ok());
     }
 
@@ -846,10 +852,10 @@ mod tests {
             d.path().join("setup.toml"),
             "\
              [knc.window]\nminimum_mm=-80\nmaximum_mm=80\nstep_mm=1\nplot_branches='selected'\n\
-             [knc.metric]\ngradient_points_mm=10\ndirection='fall'\nindex=3\n\
+             [knc.metric]\nmetric_window_mm=10\nmetric_cycle=3\n\
              [knc.vertical.window]\nminimum_mm=-60\nmaximum_mm=60\n\
-             [knc.vertical.metric]\ngradient_points_mm=5\n\
-             [knc.vertical.metric.measurement]\nindex=1\n",
+             [knc.vertical.metric]\nmetric_window_mm=5\n\
+             [knc.vertical.metric.measurement]\nmetric_cycle=1\n",
         )
         .unwrap();
         fs::write(
@@ -867,10 +873,9 @@ mod tests {
         let vertical = load_config(&p).unwrap().vertical.unwrap();
 
         // Vertical overrides per key; unset keys inherit from [knc].
-        assert_eq!(vertical.window.gradient_points_mm, Some(5.0));
+        assert_eq!(vertical.window.metric_window_mm, Some(5.0));
         let (measurement, simulation) = (&vertical.branch.measurement, &vertical.branch.simulation);
-        assert_eq!((measurement.index, simulation.index), (1, 3));
-        assert_eq!(measurement.direction, "fall");
+        assert_eq!((measurement.cycle, simulation.cycle), (1, 3));
         assert_eq!(simulation.plot_branches, "selected");
         assert!(measurement.defaulted.is_empty() && simulation.defaulted.is_empty());
     }
@@ -900,29 +905,33 @@ mod tests {
         };
 
         let flat = load(
-            "[knc]\nindex=3\nplot_branches='selected'\n\
-             [knc.vertical]\ngradient_points_mm=5\ndirection='fall'\n",
+            "[knc]\nmetric_cycle=3\nplot_branches='selected'\n\
+             [knc.vertical]\nmetric_window_mm=5\nbranch_min_fraction=0.1\n",
         )
         .unwrap()
         .vertical
         .unwrap();
         let nested = load(
-            "[knc.window]\nplot_branches='selected'\n[knc.metric]\nindex=3\n\
-             [knc.vertical.metric]\ngradient_points_mm=5\ndirection='fall'\n",
+            "[knc.window]\nplot_branches='selected'\n[knc.metric]\nmetric_cycle=3\n\
+             [knc.vertical.metric]\nmetric_window_mm=5\nbranch_min_fraction=0.1\n",
         )
         .unwrap()
         .vertical
         .unwrap();
         assert_eq!(flat.window, nested.window);
         assert_eq!(flat.branch, nested.branch);
-        assert_eq!(flat.window.gradient_points_mm, Some(5.0));
-        assert_eq!(flat.branch.simulation.index, 3);
-        assert_eq!(flat.branch.simulation.direction, "fall");
+        assert_eq!(flat.window.metric_window_mm, Some(5.0));
+        assert_eq!(flat.branch.simulation.cycle, 3);
+        assert_eq!(flat.branch.simulation.branch_min_fraction, Some(0.1));
 
-        let message = load("[knc.vertical]\nindex=1\n[knc.vertical.metric]\nindex=2\n")
-            .unwrap_err()
-            .to_string();
-        assert!(message.contains("defines index both directly"), "{message}");
+        let message =
+            load("[knc.vertical]\nmetric_cycle=1\n[knc.vertical.metric]\nmetric_cycle=2\n")
+                .unwrap_err()
+                .to_string();
+        assert!(
+            message.contains("defines metric_cycle both directly"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -934,24 +943,24 @@ mod tests {
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
         assert_eq!(
             branch.simulation.defaulted,
-            ["direction", "index", "plot_branches"]
+            ["metric_cycle", "plot_branches"]
         );
-        fs::write(&p, format!("{base}[vertical.metric]\nindex=1\n")).unwrap();
+        fs::write(&p, format!("{base}[vertical.metric]\nmetric_cycle=1\n")).unwrap();
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
-        assert_eq!(branch.simulation.defaulted, ["direction", "plot_branches"]);
+        assert_eq!(branch.simulation.defaulted, ["plot_branches"]);
         // A key set only for one source kind stays defaulted for the other.
         fs::write(
             &p,
-            format!("{base}[vertical.metric.measurement]\nindex=1\n"),
+            format!("{base}[vertical.metric.measurement]\nmetric_cycle=1\n"),
         )
         .unwrap();
         let branch = load_config(&p).unwrap().vertical.unwrap().branch;
-        assert!(!branch.measurement.defaulted.contains(&"index"));
-        assert!(branch.simulation.defaulted.contains(&"index"));
+        assert!(!branch.measurement.defaulted.contains(&"metric_cycle"));
+        assert!(branch.simulation.defaulted.contains(&"metric_cycle"));
         for invalid in [
             "[vertical.metric]\nplot_branches='all'\n",
-            "[vertical.metric]\nindex=0\n",
-            "[vertical.metric.simulation]\ngradient_points_mm=1\n",
+            "[vertical.metric]\nmetric_cycle=0\n",
+            "[vertical.metric.simulation]\nmetric_window_mm=1\n",
         ] {
             fs::write(&p, format!("{base}{invalid}")).unwrap();
             assert!(load_config(&p).is_err(), "accepted {invalid}");

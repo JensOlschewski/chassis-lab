@@ -24,7 +24,7 @@ use super::display::{mapping_missing, missing_unit_warning, tag_warnings};
 
 const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
 const DEFAULT_GRADIENT_POINTS_MM: f64 = 10.0;
-const DEFAULT_GRADIENT_POINTS_DEG: f64 = 1.0;
+const DEFAULT_GRADIENT_POINTS_DEG: f64 = 2.0;
 pub(crate) const DEBUG_RATE_WARNING: &str =
     "debug rate plots require measurement input; skipped for simulation data";
 
@@ -727,22 +727,21 @@ fn default_warnings(test: KncTest, knc: &VerticalConfig, measurement: bool) -> V
             "config key '{key}' missing in [{table}]; using default {default}"
         ));
     };
-    if test != KncTest::Longitudinal && knc.window.gradient_points_mm.is_none() {
+    if test != KncTest::Longitudinal && knc.window.metric_window_mm.is_none() {
         warn(
-            "gradient_points_mm",
+            "metric_window_mm",
             format!("{DEFAULT_GRADIENT_POINTS_MM} mm"),
         );
     }
-    if test == KncTest::Roll && knc.window.gradient_points_deg.is_none() {
+    if test == KncTest::Roll && knc.window.metric_window_deg.is_none() {
         warn(
-            "gradient_points_deg",
+            "metric_window_deg",
             format!("{DEFAULT_GRADIENT_POINTS_DEG} deg"),
         );
     }
     for key in &branch.defaulted {
         match *key {
-            "direction" => warn("direction", branch.direction.clone()),
-            "index" => warn("index", branch.index.to_string()),
+            "metric_cycle" => warn("metric_cycle", branch.cycle.to_string()),
             "plot_branches" => warn("plot_branches", branch.plot_branches.clone()),
             _ => {}
         }
@@ -800,12 +799,12 @@ fn gradient_metrics(
         KncTest::Roll => vec![(
             "gradient_deg",
             window
-                .gradient_points_deg
+                .metric_window_deg
                 .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG)
                 .to_string(),
         )],
         KncTest::Longitudinal => window
-            .gradient_points_n
+            .metric_window_n
             .map(|half| vec![("gradient_n", half.to_string())])
             .unwrap_or_default(),
     };
@@ -891,7 +890,7 @@ fn corner_mass(
 
 fn effective_gradient_points(window: &clab_core::config::VerticalWindow) -> f64 {
     window
-        .gradient_points_mm
+        .metric_window_mm
         .unwrap_or(DEFAULT_GRADIENT_POINTS_MM)
 }
 
@@ -950,11 +949,11 @@ pub(crate) fn compare_plots(
             branch,
             gradient_deg: test
                 .config(config)
-                .and_then(|knc| knc.window.gradient_points_deg)
+                .and_then(|knc| knc.window.metric_window_deg)
                 .or(Some(DEFAULT_GRADIENT_POINTS_DEG)),
             gradient_n: test
                 .config(config)
-                .and_then(|knc| knc.window.gradient_points_n),
+                .and_then(|knc| knc.window.metric_window_n),
             debug: options.debug.map(str::to_owned),
             mass: corner_mass_kg,
             brakes: false,
@@ -1407,10 +1406,10 @@ pub(crate) fn curve_plots(
         gradient_mm: gradient,
         branch,
         gradient_deg: Some(
-            knc.and_then(|config| config.window.gradient_points_deg)
+            knc.and_then(|config| config.window.metric_window_deg)
                 .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG),
         ),
-        gradient_n: knc.and_then(|config| config.window.gradient_points_n),
+        gradient_n: knc.and_then(|config| config.window.metric_window_n),
         debug: options.debug.map(str::to_owned),
         mass: corner_mass_kg,
         brakes,

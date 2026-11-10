@@ -1,11 +1,11 @@
 """Path-free numerical kernel for Rust-owned KnC longitudinal analysis.
 
 Longitudinal tests drive each wheel with a force in X (+X rearward, +Y right)
-and measure the response. Metrics are secants of the response over wheel force
-at -1 kN and +1 kN on the configured sweep of that force, so they follow the
-same branch rules as vertical and roll. Strapped acceleration (brakes off)
-reports longitudinal compliance; braking (brakes on) reports brake steer and
-windup compliance.
+and measure the response. Metrics are the least-squares slope of the response
+over wheel force within +-1 kN, fitted over one full force cycle (rising and
+falling branch together). Strapped acceleration (brakes off) reports
+longitudinal compliance; braking (brakes on) reports brake steer and windup
+compliance.
 """
 
 import json
@@ -36,8 +36,8 @@ from chassis_lab.knc_plot_kernel import (
 
 FORCE = Signal("force_x")
 
-# Half-width of the secant window in N; the metrics are per kN.
-SECANT_HALF_N = 1000.0
+# Half-width of the fit window in N; the metrics are per kN.
+FIT_WINDOW_N = 1000.0
 PER_KN = 1000.0
 
 ACCELERATION_METRICS = (
@@ -177,7 +177,7 @@ def _not_covered(
 
 
 def metrics(request: dict[str, object]) -> str:
-    """Secant KnC longitudinal metrics at -1 kN and +1 kN wheel force.
+    """Least-squares KnC longitudinal metrics within +-1 kN wheel force.
 
     Metrics of the other setup are listed as `not_covered`, with the setup
     that reports them, so a single-setup run does not look complete.
@@ -186,7 +186,7 @@ def metrics(request: dict[str, object]) -> str:
     options = BranchOptions.from_json(
         cast("str | dict[str, Any] | None", request.get("branch"))
     )
-    half_n = float(cast("float", request.get("gradient_n") or SECANT_HALF_N))
+    window_n = float(cast("float", request.get("gradient_n") or FIT_WINDOW_N))
     if request["brakes"]:
         catalog, other = BRAKING_METRICS, ACCELERATION_METRICS
         needs_setup = "B0"
@@ -194,9 +194,9 @@ def metrics(request: dict[str, object]) -> str:
         catalog, other = ACCELERATION_METRICS, BRAKING_METRICS
         needs_setup = "B1"
     results = gradient_metrics(
-        curves, catalog, CORNERS, {"N": half_n}, FORCE, options
+        curves, catalog, CORNERS, {"N": window_n}, FORCE, options
     )
-    results += _not_covered(other, needs_setup, half_n)
+    results += _not_covered(other, needs_setup, window_n)
     results.sort(key=lambda item: str(item["metric"]))
     return json.dumps({"metrics": results})
 
@@ -217,7 +217,7 @@ def plot(
     """Render the longitudinal report catalog through the KnC plot kernel."""
     curves = json.loads(curves_json)
     options = BranchOptions.from_json(branch)
-    half_n = gradient_points_n or SECANT_HALF_N
+    half_n = gradient_points_n or FIT_WINDOW_N
     reports = render_reports(
         curves,
         selected_specs(plot_specs(brakes), selected, "plot"),
@@ -287,7 +287,7 @@ def plot_compare(
         baseline_label,
         footer,
         logo,
-        gradient_points_n or SECANT_HALF_N,
+        gradient_points_n or FIT_WINDOW_N,
         branches,
         series_json=series,
     )

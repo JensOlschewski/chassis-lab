@@ -31,48 +31,54 @@ class KncKernelError(ValueError):
 class BranchOptions:
     """Branch detection and edge trimming; per-plot via `PlotSpec.branch`.
 
-    direction, index, plot_branches: which sweep the metrics use and which
-    sweeps the plots draw.
-    min_branch_fraction: measured branches shorter than this fraction of all
+    cycle: which full cycle (a fall and the rise after it) the metrics fit.
+    plot_branches: which sweeps the plots draw; "selected" draws only the
+    branches of the metric cycle.
+    branch_min_fraction: measured branches shorter than this fraction of all
     samples are ignored (noise flips at turnarounds).
-    min_reversal_fraction: a reversal that travels back less than this
+    reversal_min_fraction: a reversal that travels back less than this
     fraction of the total travel span does not split a branch.
-    edge_width: samples searched for the curvature cut at each sweep end.
-    edge_percentile: |d²y/dx²| percentile (0-1) above which a point is an
-    outlier that starts the cut.
+    edge_trim_width: samples searched for the curvature cut at each sweep end.
+    edge_trim_percentile: |d²y/dx²| percentile (0-1) above which a point is
+    an outlier that starts the cut.
     """
 
-    direction: str = "rise"
-    index: int = 2
+    cycle: int = 1
     plot_branches: str = "all"
     measurement: bool = False
-    min_branch_fraction: float = 0.05
-    min_reversal_fraction: float = 0.01
-    edge_width: int = 200
-    edge_percentile: float = 0.95
+    branch_min_fraction: float = 0.05
+    reversal_min_fraction: float = 0.01
+    edge_trim_width: int = 200
+    edge_trim_percentile: float = 0.95
 
     @classmethod
     def from_json(cls, raw: str | dict[str, Any] | None) -> "BranchOptions":
         values = json.loads(raw) if isinstance(raw, str) else raw
         return cls(**(values or {}))
 
-    def sweeps(self, travel: np.ndarray) -> list[slice]:
-        """Sweeps of the configured direction, in travel order."""
-        return [
-            segment
-            for segment, sign in branch_ranges(travel, self)
-            if self.direction == "any"
-            or sign == (1 if self.direction == "rise" else -1)
+    def cycle_branches(self, travel: np.ndarray) -> tuple[slice, slice] | None:
+        """Falling and rising branch of the metric cycle, if there is one."""
+        branches = branch_ranges(travel, self)
+        starts = [
+            index
+            for index, (_, sign) in enumerate(branches[:-1])
+            if sign < 0 and branches[index + 1][1] > 0
         ]
+        if self.cycle < 1 or len(starts) < self.cycle:
+            return None
+        index = starts[self.cycle - 1]
+        return branches[index][0], branches[index + 1][0]
 
-    def metric_sweep(self, travel: np.ndarray) -> slice | None:
-        sweeps = self.sweeps(travel)
-        return sweeps[self.index - 1] if len(sweeps) >= self.index else None
+    def metric_cycle(self, travel: np.ndarray) -> slice | None:
+        """Samples of the metric cycle, if there is one."""
+        branches = self.cycle_branches(travel)
+        if branches is None:
+            return None
+        return slice(branches[0].start, branches[1].stop)
 
     def plot_sweeps(self, travel: np.ndarray) -> list[slice]:
         if self.plot_branches == "selected":
-            selected = self.metric_sweep(travel)
-            return [] if selected is None else [selected]
+            return list(self.cycle_branches(travel) or ())
         return [segment for segment, _ in branch_ranges(travel, self)]
 
 
@@ -136,10 +142,10 @@ def branch_ranges(
     starts = np.r_[0, np.flatnonzero(signs[1:] != signs[:-1]) + 1]
     ends = np.r_[starts[1:], len(signs)]
     starts, ends = _merge_small_reversals(
-        starts, ends, signs, steps, options.min_reversal_fraction
+        starts, ends, signs, steps, options.reversal_min_fraction
     )
     minimum = (
-        max(2, int(options.min_branch_fraction * len(travel)))
+        max(2, int(options.branch_min_fraction * len(travel)))
         if options.measurement
         else 2
     )
@@ -182,7 +188,9 @@ def _curvature_limit(
     valid = np.isfinite(curvature)
     if not valid.any():
         return None
-    return float(np.percentile(curvature[valid], options.edge_percentile * 100))
+    return float(
+        np.percentile(curvature[valid], options.edge_trim_percentile * 100)
+    )
 
 
 def sweep_gradient(
@@ -204,7 +212,7 @@ def sweep_gradient(
         curvature = np.abs(np.gradient(slope, travel))
     slope[~np.isfinite(slope)] = np.nan
     size = len(slope)
-    width = options.edge_width
+    width = options.edge_trim_width
     position = np.arange(size)
     at_edge = (position < width) | (position >= size - width)
     masked = np.zeros(size, dtype=bool)
@@ -323,7 +331,51 @@ def mean_monotonic(
 
 
 # ---------------------------------------------------------------------------
-# Secant metrics
+# Least-squares metric fit
+# ---------------------------------------------------------------------------
+
+
+class LineFit(NamedTuple):
+    slope: float
+    intercept: float
+    samples: int
+
+
+def metric_cycle(reference: np.ndarray, options: BranchOptions) -> slice:
+    """Samples of the metric cycle of the `reference` sweep.
+
+    A cycle runs from one upper reversal to the next: a falling branch and the
+    rising branch after it. The partial branch before the first reversal is
+    never part of a cycle.
+    """
+    cycle = options.metric_cycle(reference)
+    if cycle is None:
+        raise KncKernelError(f"sweep has no full cycle {options.cycle}")
+    return cycle
+
+
+def fit_slope(x: np.ndarray, y: np.ndarray, window: float) -> LineFit:
+    """Least-squares line of `y` on `x` over the samples with |x| <= window.
+
+    `x` must span the whole window, so a sweep that stops short is reported
+    instead of fitted over a narrower range.
+    """
+    finite = np.isfinite(x) & np.isfinite(y)
+    if (
+        not finite.any()
+        or x[finite].min() > -window
+        or x[finite].max() < window
+    ):
+        raise KncKernelError(f"data does not cover {-window:g}..{window:g}")
+    inside = finite & (np.abs(x) <= window)
+    if inside.sum() < 3 or np.unique(x[inside]).size < 2:
+        raise KncKernelError(f"fewer than 3 samples within ±{window:g}")
+    slope, intercept = np.polyfit(x[inside], y[inside], 1)
+    return LineFit(float(slope), float(intercept), int(inside.sum()))
+
+
+# ---------------------------------------------------------------------------
+# Slope metrics
 # ---------------------------------------------------------------------------
 
 
@@ -347,12 +399,12 @@ class Signal(NamedTuple):
 
 @dataclass(frozen=True)
 class GradientMetric:
-    """Secant metric of `signal` between symmetric points on `axis`.
+    """Least-squares slope metric of `signal` on `axis`.
 
-    The metric is named `<name>_<location>_<suffix>`. `gradient` divides by
-    the axis span, or by the span of `denominator` when given. `angle` is
-    atan(-delta / axis span) in degrees. `points` selects the half-width of
-    the secant window ("mm", "deg" or "N"). `scale` converts the result to
+    The metric is named `<name>_<location>_<suffix>`. `gradient` is the fitted
+    slope, divided by the slope of `denominator` when given. `angle` is
+    atan(-slope) in degrees. `points` selects the half-width of the fit
+    window ("mm", "deg" or "N"). `scale` converts the result to
     `unit`, e.g. 1000 for mm/kN from an axis in N.
     """
 
@@ -383,6 +435,37 @@ def metric_row(
     }
 
 
+def _fit(
+    curves: CurveIndex,
+    location: str,
+    signal: str,
+    axis: Signal,
+    branch: Signal,
+    window: float,
+    unit: str,
+    options: BranchOptions,
+) -> LineFit:
+    """Least-squares line of `signal` on `axis` over the metric cycle of the
+    `branch` travel, within +-`window` of the axis."""
+    axis_location = axis.location(location)
+    x = signal_values(curves, axis_location, axis.name)
+    y = signal_values(curves, location, signal)
+    branch_location = branch.location(location)
+    reference = signal_values(curves, branch_location, branch.name)
+    if not len(x) == len(y) == len(reference):
+        raise KncKernelError(
+            f"{location}_{signal} and {axis_location}_{axis.name} lengths "
+            "differ"
+        )
+    cycle = metric_cycle(reference, options)
+    try:
+        return fit_slope(x[cycle], y[cycle], window)
+    except KncKernelError as error:
+        raise KncKernelError(
+            f"{location}_{signal} vs {axis.name} {unit}: {error}"
+        ) from None
+
+
 def gradient_metrics(
     curves: CurveIndex,
     catalog: tuple[GradientMetric, ...],
@@ -393,105 +476,76 @@ def gradient_metrics(
 ) -> list[dict[str, object]]:
     """Evaluate every catalog metric at every location.
 
-    `branch` is the travel signal whose configured sweep selects the samples;
-    unavailable metrics keep `value: None` and carry a `reason`.
+    `branch` is the travel signal whose metric cycle selects the samples;
+    unavailable metrics keep `value: None` and carry a `reason`. `lower` and
+    `upper` are the fitted line at -window and +window.
     """
     results = []
     for location in locations:
         for metric in catalog:
-            half = points[metric.points]
+            window = points[metric.points]
             result = metric_row(
                 location,
                 f"{metric.name}_{location}_{metric.suffix}",
                 metric.unit,
                 metric.points,
-                half,
+                window,
             )
             try:
-                lower, upper = secant_points(
+                fit = _fit(
                     curves,
                     location,
                     metric.signal,
                     metric.axis,
                     branch,
-                    half,
+                    window,
                     metric.points,
                     options,
                 )
-                span = 2.0 * half
+                slope = fit.slope
                 if metric.denominator is not None:
-                    low, high = secant_points(
+                    reference = _fit(
                         curves,
                         location,
                         metric.denominator,
                         metric.axis,
                         branch,
-                        half,
+                        window,
                         metric.points,
                         options,
                     )
-                    span = high - low
-                    if span == 0.0:
+                    if reference.slope == 0.0:
                         raise KncKernelError(
                             "denominator signal does not change"
                         )
+                    slope /= reference.slope
             except KncKernelError as error:
                 result["reason"] = str(error)
             else:
-                delta = upper - lower
-                result["lower"] = lower
-                result["upper"] = upper
+                result["lower"] = fit.intercept - fit.slope * window
+                result["upper"] = fit.intercept + fit.slope * window
                 result["value"] = (
-                    degrees(atan(-delta / (2.0 * half)))
+                    degrees(atan(-slope))
                     if metric.kind == "angle"
-                    else metric.scale * delta / span
+                    else metric.scale * slope
                 )
             results.append(result)
     return results
 
 
-def metric_sweep(
-    travel: np.ndarray, name: str, options: BranchOptions
-) -> slice:
-    """Configured metric sweep of `travel`, the branch signal `name`."""
-    sweep = options.metric_sweep(travel)
-    if sweep is None:
-        raise KncKernelError(
-            f"{name} has no {options.direction} branch {options.index}"
-        )
-    return sweep
-
-
-def secant_points(
+def fit_ends(
     curves: CurveIndex,
     location: str,
     signal: str,
     axis: Signal,
     branch: Signal,
-    half: float,
+    window: float,
     unit: str,
     options: BranchOptions,
 ) -> tuple[float, float]:
-    """`signal` at axis = -half and +half on the configured branch sweep."""
-    axis_location = axis.location(location)
-    travel = signal_values(curves, axis_location, axis.name)
-    response = signal_values(curves, location, signal)
-    branch_location = branch.location(location)
-    reference = signal_values(curves, branch_location, branch.name)
-    if not len(travel) == len(response) == len(reference):
-        raise KncKernelError(
-            f"{location}_{signal} and {axis_location}_{axis.name} lengths "
-            "differ"
-        )
-    sweep = metric_sweep(reference, f"{branch_location}_{branch.name}", options)
-    grid = np.array([-half, half], dtype=np.float64)
-    try:
-        lower, upper = interpolate(
-            travel[sweep], response[sweep], grid, location
-        )
-    except KncKernelError:
-        raise KncKernelError(
-            f"{location}_{signal} does not cover {axis.name} travel "
-            f"{-half:g}..{half:g} {unit}"
-        ) from None
-    return float(lower), float(upper)
+    """Fitted `signal` at axis = -window and +window."""
+    fit = _fit(curves, location, signal, axis, branch, window, unit, options)
+    return (
+        fit.intercept - fit.slope * window,
+        fit.intercept + fit.slope * window,
+    )

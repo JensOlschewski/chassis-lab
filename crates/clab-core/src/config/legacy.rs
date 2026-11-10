@@ -22,15 +22,15 @@ use super::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalWindow {
-    /// Symmetric wheel-center travel offset for secant gradient metrics;
+    /// Half-width of the least-squares fit window on wheel-center travel;
     /// `None` when the configuration does not set it.
-    pub gradient_points_mm: Option<f64>,
-    /// Symmetric roll-angle offset for roll-angle secant metrics (roll only);
-    /// `None` when the configuration does not set it.
-    pub gradient_points_deg: Option<f64>,
-    /// Symmetric wheel-force offset in N for longitudinal secant metrics;
+    pub metric_window_mm: Option<f64>,
+    /// Half-width of the fit window on roll angle (roll only); `None` when
+    /// the configuration does not set it.
+    pub metric_window_deg: Option<f64>,
+    /// Half-width of the fit window on wheel force in N (longitudinal only);
     /// `None` keeps the kernel default.
-    pub gradient_points_n: Option<f64>,
+    pub metric_window_n: Option<f64>,
     /// Per-corner fallback mass for `ride_frequency`, keyed by corner name
     /// (`"front_left"` etc.). Only used when SVC's `<corner>_mass_kg` is not
     /// available in the same run; a configured value always overrides it.
@@ -56,20 +56,20 @@ pub struct VerticalConfig {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct VerticalBranch {
-    pub direction: String,
-    pub index: usize,
+    /// Full cycle (1-based) the metrics are fitted over.
+    pub cycle: usize,
     pub plot_branches: String,
     /// Source kind, set by the parser rather than exposed as a config key.
     pub measurement: bool,
     /// Detection and trimming limits; unset keeps the kernel default.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_branch_fraction: Option<f64>,
+    pub branch_min_fraction: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_reversal_fraction: Option<f64>,
+    pub reversal_min_fraction: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub edge_width: Option<usize>,
+    pub edge_trim_width: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub edge_percentile: Option<f64>,
+    pub edge_trim_percentile: Option<f64>,
     /// Keys the configuration left unset, so their defaults apply.
     #[serde(skip)]
     pub defaulted: Vec<&'static str>,
@@ -78,15 +78,14 @@ pub struct VerticalBranch {
 impl VerticalBranch {
     fn defaults(measurement: bool) -> Self {
         Self {
-            direction: "rise".into(),
-            index: 2,
+            cycle: 1,
             plot_branches: "all".into(),
             measurement,
-            min_branch_fraction: None,
-            min_reversal_fraction: None,
-            edge_width: None,
-            edge_percentile: None,
-            defaulted: vec!["direction", "index", "plot_branches"],
+            branch_min_fraction: None,
+            reversal_min_fraction: None,
+            edge_trim_width: None,
+            edge_trim_percentile: None,
+            defaulted: vec!["metric_cycle", "plot_branches"],
         }
     }
 
@@ -96,40 +95,26 @@ impl VerticalBranch {
         table: &toml::map::Map<String, Value>,
         scope: &str,
     ) -> Result<(), ConfigError> {
-        for (key, target, choices) in [
-            (
-                "direction",
-                &mut self.direction,
-                &["rise", "fall", "any"][..],
-            ),
-            (
-                "plot_branches",
-                &mut self.plot_branches,
-                &["all", "selected"][..],
-            ),
-        ] {
-            if let Some(raw) = table.get(key) {
-                let text = raw
-                    .as_str()
-                    .ok_or_else(|| ConfigError(format!("{scope}.{key} must be a string")))?;
-                if !choices.contains(&text) {
-                    return Err(ConfigError(format!(
-                        "{scope}.{key} must be one of {}",
-                        choices.join(", ")
-                    )));
-                }
-                *target = text.to_owned();
-                self.defaulted.retain(|name| *name != key);
+        if let Some(raw) = table.get("plot_branches") {
+            let text = raw
+                .as_str()
+                .ok_or_else(|| ConfigError(format!("{scope}.plot_branches must be a string")))?;
+            if !["all", "selected"].contains(&text) {
+                return Err(ConfigError(format!(
+                    "{scope}.plot_branches must be one of all, selected"
+                )));
             }
+            self.plot_branches = text.to_owned();
+            self.defaulted.retain(|name| *name != "plot_branches");
         }
         for (key, target, low_open) in [
-            ("min_branch_fraction", &mut self.min_branch_fraction, false),
+            ("branch_min_fraction", &mut self.branch_min_fraction, false),
             (
-                "min_reversal_fraction",
-                &mut self.min_reversal_fraction,
+                "reversal_min_fraction",
+                &mut self.reversal_min_fraction,
                 false,
             ),
-            ("edge_percentile", &mut self.edge_percentile, true),
+            ("edge_trim_percentile", &mut self.edge_trim_percentile, true),
         ] {
             if let Some(raw) = table.get(key) {
                 let value = raw
@@ -149,17 +134,19 @@ impl VerticalBranch {
                 *target = Some(value);
             }
         }
-        if let Some(raw) = table.get("edge_width") {
-            self.edge_width = Some(
+        if let Some(raw) = table.get("edge_trim_width") {
+            self.edge_trim_width = Some(
                 raw.as_integer()
                     .and_then(|count| usize::try_from(count).ok())
                     .filter(|count| *count > 0)
                     .ok_or_else(|| {
-                        ConfigError(format!("{scope}.edge_width must be a positive integer"))
+                        ConfigError(format!(
+                            "{scope}.edge_trim_width must be a positive integer"
+                        ))
                     })?,
             );
         }
-        let (key, target) = ("index", &mut self.index);
+        let (key, target) = ("metric_cycle", &mut self.cycle);
         if let Some(raw) = table.get(key) {
             *target = raw
                 .as_integer()
@@ -173,18 +160,17 @@ impl VerticalBranch {
 }
 
 const METRIC_KEYS: &[&str] = &[
-    "direction",
-    "index",
-    "min_branch_fraction",
-    "min_reversal_fraction",
-    "edge_width",
-    "edge_percentile",
+    "metric_cycle",
+    "branch_min_fraction",
+    "reversal_min_fraction",
+    "edge_trim_width",
+    "edge_trim_percentile",
 ];
 
 /// Branch settings; measurement and simulation sweeps differ in sampling
 /// density, so each source kind resolves its own options.
 ///
-/// `[metric]` chooses the sweep the metrics use (`direction`, `index`);
+/// `[metric]` chooses the sweep the metrics use (`metric_cycle`);
 /// `[window]` chooses which sweeps the plots draw (`plot_branches`). Either
 /// table may override per source kind in `[metric.measurement]`,
 /// `[metric.simulation]`, `[window.measurement]` or `[window.simulation]`.
@@ -553,15 +539,14 @@ pub(crate) fn parse_vertical(
     keys(
         &metric,
         &[
-            "gradient_points_mm",
-            "gradient_points_deg",
-            "gradient_points_n",
-            "direction",
-            "index",
-            "min_branch_fraction",
-            "min_reversal_fraction",
-            "edge_width",
-            "edge_percentile",
+            "metric_window_mm",
+            "metric_window_deg",
+            "metric_window_n",
+            "metric_cycle",
+            "branch_min_fraction",
+            "reversal_min_fraction",
+            "edge_trim_width",
+            "edge_trim_percentile",
             "measurement",
             "simulation",
             "sprung_mass_front_left_kg",
@@ -597,7 +582,6 @@ pub(crate) fn parse_vertical(
                     "minimum_mm",
                     "maximum_mm",
                     "step_mm",
-                    "metric_gradient_points_mm",
                     "plot_branches",
                     "measurement",
                     "simulation",
@@ -608,20 +592,17 @@ pub(crate) fn parse_vertical(
         }
         None => Map::new(),
     };
-    // Deprecated: `metric_gradient_points_mm` in the window table.
-    let gradient = metric
-        .get("gradient_points_mm")
-        .or_else(|| window_table.get("metric_gradient_points_mm"))
-        .map(|value| positive(value, "gradient_points_mm"))
-        .transpose()?;
-    let gradient_deg = metric
-        .get("gradient_points_deg")
-        .map(|value| positive(value, "gradient_points_deg"))
-        .transpose()?;
-    let gradient_n = metric
-        .get("gradient_points_n")
-        .map(|value| positive(value, "gradient_points_n"))
-        .transpose()?;
+    let window_of = |key: &str| {
+        metric
+            .get(key)
+            .map(|value| positive(value, key))
+            .transpose()
+    };
+    let (window_mm, window_deg, window_n) = (
+        window_of("metric_window_mm")?,
+        window_of("metric_window_deg")?,
+        window_of("metric_window_n")?,
+    );
     let mut window_branch = window_table;
     for (key, value) in window_extra {
         window_branch.entry(key).or_insert(value);
@@ -662,9 +643,9 @@ pub(crate) fn parse_vertical(
             .map(|value| resolve(value, path, "static_simulation_hdf5"))
             .transpose()?,
         window: VerticalWindow {
-            gradient_points_mm: gradient,
-            gradient_points_deg: gradient_deg,
-            gradient_points_n: gradient_n,
+            metric_window_mm: window_mm,
+            metric_window_deg: window_deg,
+            metric_window_n: window_n,
             sprung_mass_kg,
         },
         branch,

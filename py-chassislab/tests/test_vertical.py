@@ -24,9 +24,15 @@ from chassis_lab.knc_vertical_kernel import (
 )
 
 
+def _cycle_travel() -> list[float]:
+    """One fall and one rise between +-10 mm in 1 mm steps."""
+    fall = np.arange(10.0, -10.5, -1.0)
+    return [*fall, *fall[::-1]]
+
+
 def _metric_curves(**overrides: list[float]) -> str:
-    # Up and down branches with hysteresis-free linear responses.
-    z = [-10.0, -5.0, 0.0, 5.0, 10.0, 10.0, 5.0, 0.0, -5.0, -10.0]
+    # Down and up branches with hysteresis-free linear responses.
+    z = _cycle_travel()
     responses = {
         "wheel_center_z": z,
         "wheel_center_x": [-0.1 * value for value in z],
@@ -84,42 +90,37 @@ def test_rates_follow_each_branch_without_mixing_hysteresis() -> None:
     assert np.nanmin(rate) == pytest.approx(25.0)
     assert np.nanmax(np.abs(rate)) == pytest.approx(40.0)
     assert np.isfinite(x).sum() > 0
-    curves = json.loads(_metric_curves())
-    for curve in curves:
-        if curve["signal"] == "wheel_load":
-            curve["values"] = force.tolist()
-        else:
-            curve["values"] = (
-                (0.1 * travel).tolist()
-                if curve["signal"] == "tire_deflection"
-                else travel.tolist()
-            )
+
+
+def test_metrics_fit_the_whole_cycle_through_hysteresis() -> None:
+    z = np.array(_cycle_travel())
+    load = 3000.0 + 25.0 * z
+    load[len(z) // 2 :] += 200.0
     response = json.loads(
         metrics(
             {
-                "curves": json.dumps(curves),
-                "gradient_mm": 5,
-                "branch": {"index": 2},
+                "gradient_mm": 5.0,
+                "curves": _metric_curves(wheel_load=load.tolist()),
+                "branch": {},
             }
         )
     )
-    rate_metric = next(
-        m
-        for m in response["metrics"]
-        if m["metric"] == "suspension_rate_front_left_n_per_mm"
+    rate = next(
+        item
+        for item in response["metrics"]
+        if item["metric"] == "suspension_rate_front_left_n_per_mm"
     )
-    assert rate_metric["value"] == pytest.approx(40.0)
+    assert rate["value"] == pytest.approx(25.0, rel=1e-6)
+    assert rate["lower"] == pytest.approx(3100.0 - 5.0 * 25.0)
 
 
-def test_metrics_use_secants_at_symmetric_travel_points() -> None:
+def test_metrics_fit_slopes_within_symmetric_travel() -> None:
     response = json.loads(
         metrics(
             {
                 "gradient_mm": 5.0,
                 "curves": _metric_curves(),
-                "branch": {
-                    "index": 1,
-                },
+                "branch": {},
             }
         )
     )
@@ -163,9 +164,7 @@ def test_metrics_report_unavailable_reasons() -> None:
             {
                 "gradient_mm": 20.0,
                 "curves": json.dumps(curves),
-                "branch": {
-                    "index": 1,
-                },
+                "branch": {},
             }
         )
     )
@@ -175,11 +174,11 @@ def test_metrics_report_unavailable_reasons() -> None:
     assert toe["reason"] == "missing canonical signal front_left_toe"
     camber = values["bump_camber_front_left_deg_per_mm"]
     assert camber["value"] is None
-    assert "does not cover wheel_center_z travel -20..20 mm" in camber["reason"]
+    assert "does not cover -20..20" in camber["reason"]
 
 
 def test_brake_support_angle_uses_contact_patch_and_wheel_pad_travel() -> None:
-    z = [-10.0, -5.0, 0.0, 5.0, 10.0, 10.0, 5.0, 0.0, -5.0, -10.0]
+    z = _cycle_travel()
     # wheel_pad_z = wheel_center_z + tire_deflection = 1.1 * z (default
     # curves), so contact_patch_x = -0.1 * wheel_pad_z gives a clean
     # atan(0.1), same shape as the existing wheel_recession_angle check but
@@ -192,7 +191,7 @@ def test_brake_support_angle_uses_contact_patch_and_wheel_pad_travel() -> None:
                 "curves": _metric_curves(
                     contact_patch_x=[-0.11 * value for value in z]
                 ),
-                "branch": {"index": 1},
+                "branch": {},
             }
         )
     )
@@ -208,7 +207,7 @@ def test_ride_frequency_uses_suspension_rate_and_corner_mass() -> None:
             {
                 "gradient_mm": 5.0,
                 "curves": _metric_curves(),
-                "branch": {"index": 1},
+                "branch": {},
                 "corner_mass_kg": json.dumps({"front_left": 180.0}),
                 "corner_mass_source": json.dumps({"front_left": "config"}),
             }
@@ -546,7 +545,7 @@ def test_gradient_overlay_and_metric_table_only_on_selected_plots() -> None:
         "Config: case.toml",
         None,
         5.0,
-        json.dumps({"index": 1}),
+        json.dumps({}),
     )
     tables = {
         "knc_vertical_wheel_load": "Left front suspension rate in N/mm:",
@@ -562,7 +561,7 @@ def test_gradient_overlay_and_metric_table_only_on_selected_plots() -> None:
             assert tables[name] in text
             assert "Simulation" in text
         else:
-            assert "secant between" not in text
+            assert "least-squares fit within" not in text
 
 
 def test_metric_table_lists_every_source_with_metric_values() -> None:
@@ -576,18 +575,7 @@ def test_metric_table_lists_every_source_with_metric_values() -> None:
                         _metric_curves(
                             wheel_load=[
                                 3000.0 + 50.0 * value
-                                for value in (
-                                    -10.0,
-                                    -5.0,
-                                    0.0,
-                                    5.0,
-                                    10.0,
-                                    10.0,
-                                    5.0,
-                                    0.0,
-                                    -5.0,
-                                    -10.0,
-                                )
+                                for value in _cycle_travel()
                             ]
                         )
                     ),
@@ -598,7 +586,7 @@ def test_metric_table_lists_every_source_with_metric_values() -> None:
         "Config: case.toml",
         None,
         5.0,
-        json.dumps([{"index": 1}, {"index": 1}]),
+        json.dumps([{}, {}]),
     )
     text = _pdf_text(reports["knc_vertical_wheel_load.pdf"])
     assert "Left front suspension rate in N/mm:" in text
@@ -685,5 +673,5 @@ def test_small_reversal_inside_a_ramp_does_not_split_the_branch() -> None:
     travel = np.r_[up, np.linspace(1000, -1000, 200), up]
     options = BranchOptions()
     assert len(branch_ranges(travel, options)) == 3
-    split = BranchOptions(min_reversal_fraction=0.0)
+    split = BranchOptions(reversal_min_fraction=0.0)
     assert len(branch_ranges(travel, split)) > 3

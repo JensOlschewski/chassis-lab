@@ -30,7 +30,6 @@ from chassis_lab.knc_kernel import (
     gradient_metrics,
     index_curves,
     metric_row,
-    metric_sweep,
     signal_values,
     sweep_gradient,
     with_pad_travel,
@@ -62,8 +61,8 @@ WHEEL_TRAVEL = Signal("wheel_center_z")
 # Roll-specific metric catalog. knc_kernel.gradient_metrics evaluates every
 # entry for every corner on the selected body-roll sweep. At each corner:
 #   steer/camber per mm: Δtoe or Δcamber / Δwheel-center Z, at ±gradient_mm.
-#   steer/camber per deg: Δtoe or Δcamber / Δaxle suspension roll,
-#                         at ±gradient_deg of suspension roll.
+#   steer/camber per deg: Δtoe or Δcamber / Δbody roll, as in the Ford
+#                         reports, within ±gradient_deg of body roll.
 #   suspension rate: Δwheel load / Δwheel-center Z, at ±gradient_mm.
 #   ride rate: Δwheel load / Δwheel-pad Z, at ±gradient_mm.
 # These are roll-test metrics, not rates from the vertical test's bounce sweep.
@@ -79,7 +78,7 @@ CORNER_METRICS = (
         "deg_per_deg",
         "toe",
         "deg/deg",
-        axis=SUSPENSION_ROLL_ANGLE,
+        axis=ROLL_ANGLE,
         points="deg",
     ),
     GradientMetric(
@@ -87,7 +86,7 @@ CORNER_METRICS = (
         "deg_per_deg",
         "camber",
         "deg/deg",
-        axis=SUSPENSION_ROLL_ANGLE,
+        axis=ROLL_ANGLE,
         points="deg",
     ),
     GradientMetric(
@@ -189,16 +188,16 @@ PLOT_SPECS = (
         "toe_vs_roll_angle",
         "roll_angle",
         "toe",
-        GradientDisplay("body-roll steer", "deg/deg"),
+        GradientDisplay("roll steer", "deg/deg"),
         "total",
+        metric="roll_steer_{corner}_deg_per_deg",
     ),
     _plot_spec(
         "toe_vs_suspension_roll_angle",
         "suspension_roll_angle",
         "toe",
-        GradientDisplay("roll steer", "deg/deg"),
+        None,
         "axle",
-        metric="roll_steer_{corner}_deg_per_deg",
     ),
     _plot_spec(
         "camber",
@@ -211,16 +210,16 @@ PLOT_SPECS = (
         "camber_vs_roll_angle",
         "roll_angle",
         "camber",
-        GradientDisplay("body-roll camber", "deg/deg"),
+        GradientDisplay("roll camber", "deg/deg"),
         "total",
+        metric="roll_camber_{corner}_deg_per_deg",
     ),
     _plot_spec(
         "camber_vs_suspension_roll_angle",
         "suspension_roll_angle",
         "camber",
-        GradientDisplay("roll camber", "deg/deg"),
+        None,
         "axle",
-        metric="roll_camber_{corner}_deg_per_deg",
     ),
     _plot_spec(
         "wheel_load",
@@ -1002,7 +1001,10 @@ def _roll_center_samples(
     covering the interval. Do not bridge invalid samples or extrapolate.
     """
     samples = _roll_center_inputs(curves, axle, lateral)
-    sweep = metric_sweep(samples["roll"], "total_roll_angle", options)
+    branches = options.cycle_branches(samples["roll"])
+    if branches is None:
+        raise KncKernelError(f"sweep has no full cycle {options.cycle}")
+    sweep = branches[1]
     if not all(np.isfinite(values[sweep]).all() for values in samples.values()):
         raise KncKernelError(f"{axle} roll-center sweep has nonfinite input")
     height, position, roll = _branch_roll_center(samples, sweep, options)

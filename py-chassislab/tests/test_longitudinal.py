@@ -72,7 +72,7 @@ def test_acceleration_reports_longitudinal_compliance_per_kn():
     assert row["value"] == pytest.approx(2.0)
     assert row["unit"] == "mm/kN"
     assert row["interval_N"] == [-1000.0, 1000.0]
-    assert (row["lower"], row["upper"]) == pytest.approx((-2.0, 2.0))
+    assert (row["lower"], row["upper"]) == pytest.approx((-2.0, 2.0), abs=1e-6)
 
 
 def test_braking_reports_brake_steer_and_windup_with_sign():
@@ -87,7 +87,7 @@ def test_braking_reports_brake_steer_and_windup_with_sign():
     )
 
 
-def test_secant_uses_the_configured_sweep_and_keeps_hysteresis():
+def test_fit_pools_rise_and_fall_of_one_cycle():
     force = _force()
     sign = np.sign(np.gradient(force))
     curves = []
@@ -97,21 +97,26 @@ def test_secant_uses_the_configured_sweep_and_keeps_hysteresis():
             {
                 "corner": corner,
                 "signal": "wheel_center_x",
-                "values": (force / 1000.0 + 0.3 * sign).tolist(),
+                "values": (force / 1000.0 + 0.3 * sign + 0.5).tolist(),
             },
         ]
-    request = _request(curves, brakes=False)
-    rising = _by_name(metrics(request))
-    request["branch"] = json.dumps(
-        {"measurement": True, "direction": "fall", "index": 1}
-    )
-    falling = _by_name(metrics(request))
-    name = "longitudinal_compliance_front_left_mm_per_kn"
-    # Offset cancels in the secant; both branches have the same slope.
-    assert rising[name]["value"] == pytest.approx(1.0)
-    assert falling[name]["value"] == pytest.approx(1.0)
-    assert rising[name]["lower"] == pytest.approx(-0.7, abs=2e-2)
-    assert falling[name]["lower"] == pytest.approx(-1.3, abs=2e-2)
+    row = _by_name(metrics(_request(curves, brakes=False)))[
+        "longitudinal_compliance_front_left_mm_per_kn"
+    ]
+    # Hysteresis cancels over the loop; the offset only moves the intercept.
+    assert row["value"] == pytest.approx(1.0, abs=2e-2)
+    assert row["lower"] == pytest.approx(-0.5, abs=3e-2)
+    assert row["upper"] == pytest.approx(1.5, abs=3e-2)
+
+
+def test_cycle_selects_the_fitted_cycle():
+    request = _request(_curves({"wheel_center_x": 2.0}), brakes=False)
+    request["branch"] = json.dumps({"measurement": True, "cycle": 2})
+    row = _by_name(metrics(request))[
+        "longitudinal_compliance_front_left_mm_per_kn"
+    ]
+    assert row["value"] is None
+    assert "sweep has no full cycle 2" in row["reason"]
 
 
 @pytest.mark.parametrize(
@@ -147,14 +152,19 @@ def test_missing_channel_is_unavailable_with_reason_not_zero():
     assert result["brake_steer_rear_left_deg_per_kn"]["value"] is None
 
 
-def test_force_range_not_reached_is_unavailable():
-    force = _force() * 0.2
+def test_sweep_without_full_cycle_is_unavailable():
+    force = np.concatenate(
+        [
+            np.linspace(a, b, 400, endpoint=False)
+            for a, b in ((0, -4000), (-4000, 4000))
+        ]
+    )
     result = _by_name(
         metrics(_request(_curves({"wheel_center_x": 2.0}, force), brakes=False))
     )
     row = result["longitudinal_compliance_front_left_mm_per_kn"]
     assert row["value"] is None
-    assert "does not cover force_x travel -1000..1000 N" in row["reason"]
+    assert "sweep has no full cycle 1" in row["reason"]
 
 
 def _plots(brakes, debug=None):

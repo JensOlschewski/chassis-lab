@@ -20,8 +20,8 @@ from chassis_lab.knc_kernel import (
     CurveIndex,
     KncKernelError,
     Signal,
+    fit_ends,
     gradient_curve,
-    secant_points,
     sweep_gradient,
 )
 
@@ -214,7 +214,7 @@ class PlotSpec:
     y_limits: tuple[float, float] | None = None
     # BranchOptions fields overriding the run's branch detection and edge
     # trimming for this plot only. `measurement` is never overridden.
-    # Example: {"edge_width": 100, "edge_percentile": 0.9}
+    # Example: {"edge_trim_width": 100, "edge_trim_percentile": 0.9}
     branch: dict[str, Any] = field(default_factory=dict)
     # Roll uses a body-roll sweep even when the displayed x is wheel travel
     # or an axle-level suspension angle. Vertical keeps the travel defaults.
@@ -772,7 +772,7 @@ def _secant(
 ) -> tuple[float, float] | None:
     """Same interpolated secant and sweep as the scalar KnC metric."""
     try:
-        return secant_points(
+        return fit_ends(
             curves,
             corner,
             spec.y_signal,
@@ -936,7 +936,7 @@ def _secant_debug_plot(
             curves, spec.sweep.location(corner), spec.sweep.name
         )
         plotted = options.plot_sweeps(sweep_values)
-        metric = options.metric_sweep(sweep_values)
+        metric = options.metric_cycle(sweep_values)
         _draw_branches(branch, sweep_values, plotted, metric)
         response.plot(
             x, y, color=RAW_COLOR, alpha=0.4, linewidth=0.8, label="raw"
@@ -955,11 +955,11 @@ def _secant_debug_plot(
                 y[metric],
                 color=METRIC_COLOR,
                 linewidth=1.6,
-                label="metric branch",
+                label="metric cycle",
             )
         for point in (-half, half) if half else ():
             response.axvline(
-                point, color=CUT_COLOR, linewidth=0.8, label="secant points"
+                point, color=CUT_COLOR, linewidth=0.8, label="fit window"
             )
         branch.set_xlabel("sample")
         sweep_unit = "deg" if spec.sweep.name == "roll_angle" else "mm"
@@ -1001,7 +1001,7 @@ def render_contact_path_debug(
         curvature_panel.set_title("Second derivative |d²y/dz²|", loc="left")
         raw_panel.set_title("Raw contact slope", loc="left")
         final_panel.set_title("Final contact slope (both paths)", loc="left")
-        _draw_branches(branch, roll, plotted, options.metric_sweep(roll))
+        _draw_branches(branch, roll, plotted, options.metric_cycle(roll))
         for sweep in plotted:
             if not all(
                 np.isfinite(values[sweep]).all() for values in samples.values()
@@ -1070,12 +1070,12 @@ def _debug_footer(
         (
             f"Config: {info['config']}",
             f"BranchData: {input_path}",
-            f"Debug branch: direction={options.direction} "
-            f"index={options.index} plot_branches={options.plot_branches}",
+            f"Debug branch: cycle={options.cycle} "
+            f"plot_branches={options.plot_branches}",
             "Debug cut: ends from first |d²y/dx²| > "
-            f"P{options.edge_percentile * 100:g}",
-            f"Debug edge zone: {options.edge_width} samples per end, "
-            f"min branch {options.min_branch_fraction:g} of samples",
+            f"P{options.edge_trim_percentile * 100:g}",
+            f"Debug edge zone: {options.edge_trim_width} samples per end, "
+            f"min branch {options.branch_min_fraction:g} of samples",
             f"Created by: {info['creator']}",
             f"clab version: {info['version']}",
         )
@@ -1106,7 +1106,7 @@ def _rate_debug_plot(
         )
         plotted = options.plot_sweeps(sweep_values)
         _draw_branches(
-            branch, sweep_values, plotted, options.metric_sweep(sweep_values)
+            branch, sweep_values, plotted, options.metric_cycle(sweep_values)
         )
         for sweep in plotted:
             _draw_sweep(
@@ -1378,7 +1378,7 @@ def _add_metric_table(
     put(
         METRIC_LEFT,
         top,
-        f"{gradient.label.capitalize()}, secant between "
+        f"{gradient.label.capitalize()}, least-squares fit within "
         f"{-gradient_mm:+g} {unit} and {gradient_mm:+g} {unit} "
         f"{axis_label.lower()}",
         color=METRIC_TITLE_COLOR,

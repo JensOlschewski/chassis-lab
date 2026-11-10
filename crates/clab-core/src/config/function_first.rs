@@ -611,7 +611,6 @@ fn function_knc_input(
             "minimum_mm",
             "maximum_mm",
             "step_mm",
-            "metric_gradient_points_mm",
         ] {
             if let Some(value) = setup_copy.remove(key) {
                 w.insert(key.into(), value);
@@ -635,16 +634,15 @@ fn function_knc_input(
 
 /// Settings written directly in `[setup.knc]` or `[setup.knc.<test>]`; they are
 /// moved into the `metric` table so each level keeps its own precedence.
-const FLAT_METRIC_KEYS: [&str; 13] = [
-    "gradient_points_mm",
-    "gradient_points_deg",
-    "gradient_points_n",
-    "direction",
-    "index",
-    "min_branch_fraction",
-    "min_reversal_fraction",
-    "edge_width",
-    "edge_percentile",
+const FLAT_METRIC_KEYS: [&str; 12] = [
+    "metric_window_mm",
+    "metric_window_deg",
+    "metric_window_n",
+    "metric_cycle",
+    "branch_min_fraction",
+    "reversal_min_fraction",
+    "edge_trim_width",
+    "edge_trim_percentile",
     "sprung_mass_front_left_kg",
     "sprung_mass_front_right_kg",
     "sprung_mass_rear_left_kg",
