@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -60,20 +62,20 @@ def test_fit_slope_rejects_too_few_samples():
 
 
 def test_metric_cycle_runs_between_upper_reversals():
-    cycle = metric_cycle(FORCE, 1, OPTIONS)
+    cycle = metric_cycle(FORCE, replace(OPTIONS, cycle=1))
     assert FORCE[cycle][0] == pytest.approx(4000.0, abs=20)
     assert FORCE[cycle][-1] == pytest.approx(4000.0, abs=20)
     assert FORCE[cycle].min() == pytest.approx(-4000.0, abs=20)
 
 
 def test_metric_cycle_selects_later_cycle():
-    first = metric_cycle(FORCE, 1, OPTIONS)
-    second = metric_cycle(FORCE, 2, OPTIONS)
+    first = metric_cycle(FORCE, replace(OPTIONS, cycle=1))
+    second = metric_cycle(FORCE, replace(OPTIONS, cycle=2))
     assert second.start >= first.stop - 1
 
 
 def test_metric_cycle_requires_a_full_cycle():
     with pytest.raises(KncKernelError, match="no full cycle 3"):
-        metric_cycle(FORCE, 3, OPTIONS)
+        metric_cycle(FORCE, replace(OPTIONS, cycle=3))
     with pytest.raises(KncKernelError, match="no full cycle"):
-        metric_cycle(_sweep([0.0, -4000.0, 4000.0]), 1, OPTIONS)
+        metric_cycle(_sweep([0.0, -4000.0, 4000.0]), replace(OPTIONS, cycle=1))

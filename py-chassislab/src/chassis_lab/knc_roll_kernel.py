@@ -30,7 +30,6 @@ from chassis_lab.knc_kernel import (
     gradient_metrics,
     index_curves,
     metric_row,
-    metric_sweep,
     signal_values,
     sweep_gradient,
     with_pad_travel,
@@ -1002,7 +1001,10 @@ def _roll_center_samples(
     covering the interval. Do not bridge invalid samples or extrapolate.
     """
     samples = _roll_center_inputs(curves, axle, lateral)
-    sweep = metric_sweep(samples["roll"], "total_roll_angle", options)
+    branches = options.cycle_branches(samples["roll"])
+    if branches is None:
+        raise KncKernelError(f"sweep has no full cycle {options.cycle}")
+    sweep = branches[1]
     if not all(np.isfinite(values[sweep]).all() for values in samples.values()):
         raise KncKernelError(f"{axle} roll-center sweep has nonfinite input")
     height, position, roll = _branch_roll_center(samples, sweep, options)

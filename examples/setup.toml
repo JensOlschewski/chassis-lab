@@ -7,34 +7,29 @@
 # Optional keys that are left out fall back to their default, and clab warns
 # about each one (details with --verbose).
 
-# Which sweep is used for the metrics (use --debug for more details)
+# Metrics are least-squares slopes over one full cycle: a falling branch and
+# the rise after it. The sweep before the first fall is never part of a cycle.
 [knc]
-direction = "rise"        # rise | fall | any
-index = 1                 # nth sweep of that direction, 1-based
-plot_branches = "all"     # all | selected (only the sweep used by the metrics)
+metric_cycle = 1          # nth full cycle, 1-based
+plot_branches = "all"     # all | selected (only the cycle used by the metrics)
 
 # Branch detection and edge trimming, optional (kernel defaults shown, no warning)
-# min_reversal_fraction = 0.01   # a reversal shorter than this fraction of the span does not split a branch
-# min_branch_fraction = 0.05     # measured branches shorter than this fraction of all samples are dropped
-# edge_width = 200               # samples searched at each sweep end
-# edge_percentile = 0.95         # curvature percentile above which the edge cut starts
+# reversal_min_fraction = 0.01    # a reversal shorter than this fraction of the span does not split a branch
+# branch_min_fraction = 0.05      # measured branches shorter than this fraction of all samples are dropped
+# edge_trim_width = 200           # samples searched at each sweep end
+# edge_trim_percentile = 0.95     # curvature percentile above which the edge cut starts
 
-# The ADAMS results starts with a short settling rise before the full sweep
-# Therefore use second index here!
-[knc.metric.simulation]
-index = 2
-
-# Secant half-widths depend on the unit of each test, so set them per test.
+# Fit window half-widths depend on the unit of each test, so set them per test.
 
 # Vertical test: wheel-center travel in mm
 [knc.vertical]
-gradient_points_mm = 10
+metric_window_mm = 10
 
 # Roll test: travel in mm and roll angle in deg
 [knc.roll]
-gradient_points_mm = 10
-gradient_points_deg = 1
+metric_window_mm = 10
+metric_window_deg = 2
 
 # Longitudinal compliance: force in N
 [knc.longitudinal]
-gradient_points_n = 1000
+metric_window_n = 1000

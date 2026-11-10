@@ -471,7 +471,7 @@ fn analyzes_measurement_vertical_gradient_metrics() {
     let measurement_path = directory.path().join("measurement.h5");
     closed_fixture(&measurement_path, measurement);
     // Explicit gradient points, and the reported default.
-    for gradient in ["gradient_points_mm=0.5\n", ""] {
+    for gradient in ["metric_window_mm=0.5\n", ""] {
         assert_measurement_metrics(directory.path(), &measurement_path, gradient);
     }
 }
@@ -488,9 +488,7 @@ fn assert_measurement_metrics(
         .replace("step_mm=1\n", "step_mm=1\nplot_branches='all'\n");
     fs::write(
         &config_path,
-        format!(
-            "{text}\n[setup.knc.vertical.metric]\n{gradient}direction='any'\nindex=1\n{SPRUNG_MASS_KG}"
-        ),
+        format!("{text}\n[setup.knc.vertical.metric]\n{gradient}metric_cycle=1\n{SPRUNG_MASS_KG}"),
     )
     .unwrap();
     let output = directory.join("reports");
@@ -521,7 +519,7 @@ fn assert_measurement_metrics(
     if gradient.is_empty() {
         // The 10 mm default exceeds the ±1 mm fixture, so metrics are unavailable.
         assert!(stderr.contains(
-            "warning: knc::vertical: config key 'gradient_points_mm' missing in [setup.knc.vertical]; \
+            "warning: knc::vertical: config key 'metric_window_mm' missing in [setup.knc.vertical]; \
              using default 10 mm\n"
         ));
         return;
@@ -717,9 +715,10 @@ fn skips_vertical_metrics_without_static_normalization() {
     closed_fixture(&simulation_path, simulation);
     let config_path = directory.path().join("case.toml");
     config(&config_path, false);
-    let text = fs::read_to_string(&config_path)
-        .unwrap()
-        .replace("step_mm=1\n", "step_mm=1\nmetric_gradient_points_mm=0.5\n");
+    let text = fs::read_to_string(&config_path).unwrap().replace(
+        "[setup.knc.vertical]\n",
+        "[setup.knc.vertical]\nmetric_window_mm=0.5\n",
+    );
     fs::write(&config_path, text).unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .args([
@@ -925,8 +924,8 @@ fn comparison_config(path: &std::path::Path, tolerance: &str) {
         .unwrap()
         .write_all(
             format!(
-                "\n[setup.knc.vertical.metric]\ngradient_points_mm=0.5\n{SPRUNG_MASS_KG}\n\
-                 [setup.knc.vertical.branch]\ndirection='any'\nindex=1\n{tolerance}"
+                "\n[setup.knc.vertical.metric]\nmetric_window_mm=0.5\n{SPRUNG_MASS_KG}\n\
+                 [setup.knc.vertical.branch]\nmetric_cycle=1\n{tolerance}"
             )
             .as_bytes(),
         )

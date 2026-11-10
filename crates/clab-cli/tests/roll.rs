@@ -234,7 +234,7 @@ fn config(path: &Path, roll_angle: bool) {
          \
          [setup.knc.window]\nminimum_mm=-30\nmaximum_mm=30\nstep_mm=1\n\
          [setup.knc.vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n\
-         [setup.knc.roll.metric]\ngradient_points_mm=5\n",
+         [setup.knc.roll.metric]\nmetric_window_mm=5\n",
     );
     for (corner, prefix) in CORNERS {
         for (name, channel) in [
@@ -456,7 +456,7 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
     );
     assert!(!stdout.contains("knc::roll::roll_wheel_rate_"), "{stdout}");
     assert!(stderr.contains(
-        "knc::roll: config key 'gradient_points_deg' missing in [setup.knc.roll]; using default 1 deg"
+        "knc::roll: config key 'metric_window_deg' missing in [setup.knc.roll]; using default 2 deg"
     ));
     assert!(stderr.contains(
         "knc::roll: metric 'roll_steer_front_left_deg_per_mm' unavailable: missing canonical signal front_left_toe"
@@ -474,7 +474,7 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
     };
     let stiffness = metric("roll_stiffness_front_nm_per_deg");
     assert_eq!(stiffness["test"], "roll");
-    assert_eq!(stiffness["interval_deg"], serde_json::json!([-1., 1.]));
+    assert_eq!(stiffness["interval_deg"], serde_json::json!([-2., 2.]));
     assert!((stiffness["value"].as_f64().unwrap() - 500.).abs() < 1e-6);
     let distribution = metric("roll_stiffness_distribution_front_pct")["value"]
         .as_f64()
@@ -570,7 +570,7 @@ fn roll_run_subtracts_static_baseline_from_corner_signals_only() {
     let text = fs::read_to_string(&config_path).unwrap();
     fs::write(
         &config_path,
-        format!("{text}\n[setup.knc.roll.metric.simulation]\nindex=1\n"),
+        format!("{text}\n[setup.knc.roll.metric.simulation]\nmetric_cycle=1\n"),
     )
     .unwrap();
     let run = directory.path().join("run.toml");

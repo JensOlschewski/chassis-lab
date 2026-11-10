@@ -120,9 +120,7 @@ def test_metrics_fit_slopes_within_symmetric_travel() -> None:
             {
                 "gradient_mm": 5.0,
                 "curves": _metric_curves(),
-                "branch": {
-                    "index": 1,
-                },
+                "branch": {},
             }
         )
     )
@@ -166,9 +164,7 @@ def test_metrics_report_unavailable_reasons() -> None:
             {
                 "gradient_mm": 20.0,
                 "curves": json.dumps(curves),
-                "branch": {
-                    "index": 1,
-                },
+                "branch": {},
             }
         )
     )
@@ -195,7 +191,7 @@ def test_brake_support_angle_uses_contact_patch_and_wheel_pad_travel() -> None:
                 "curves": _metric_curves(
                     contact_patch_x=[-0.11 * value for value in z]
                 ),
-                "branch": {"index": 1},
+                "branch": {},
             }
         )
     )
@@ -211,7 +207,7 @@ def test_ride_frequency_uses_suspension_rate_and_corner_mass() -> None:
             {
                 "gradient_mm": 5.0,
                 "curves": _metric_curves(),
-                "branch": {"index": 1},
+                "branch": {},
                 "corner_mass_kg": json.dumps({"front_left": 180.0}),
                 "corner_mass_source": json.dumps({"front_left": "config"}),
             }
@@ -549,7 +545,7 @@ def test_gradient_overlay_and_metric_table_only_on_selected_plots() -> None:
         "Config: case.toml",
         None,
         5.0,
-        json.dumps({"index": 1}),
+        json.dumps({}),
     )
     tables = {
         "knc_vertical_wheel_load": "Left front suspension rate in N/mm:",
@@ -590,7 +586,7 @@ def test_metric_table_lists_every_source_with_metric_values() -> None:
         "Config: case.toml",
         None,
         5.0,
-        json.dumps([{"index": 1}, {"index": 1}]),
+        json.dumps([{}, {}]),
     )
     text = _pdf_text(reports["knc_vertical_wheel_load.pdf"])
     assert "Left front suspension rate in N/mm:" in text
@@ -677,5 +673,5 @@ def test_small_reversal_inside_a_ramp_does_not_split_the_branch() -> None:
     travel = np.r_[up, np.linspace(1000, -1000, 200), up]
     options = BranchOptions()
     assert len(branch_ranges(travel, options)) == 3
-    split = BranchOptions(min_reversal_fraction=0.0)
+    split = BranchOptions(reversal_min_fraction=0.0)
     assert len(branch_ranges(travel, split)) > 3

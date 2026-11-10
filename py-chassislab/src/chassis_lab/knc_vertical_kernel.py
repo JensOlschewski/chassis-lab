@@ -121,8 +121,8 @@ def _wheel_recession_angle(
 #  `name` is the output filename
 #  `title` is the figure heading.
 #  `branch` optionally overrides BranchOptions for that plot only, e.g.
-#  branch={"direction": "fall", "index": 1, "plot_branches": "selected"} or
-#  branch={"edge_width": 100, "edge_percentile": 0.9}.
+#  branch={"cycle": 1, "plot_branches": "selected"} or
+#  branch={"edge_trim_width": 100, "edge_trim_percentile": 0.9}.
 #  Fields: see BranchOptions.
 PLOT_SPECS = (
     PlotSpec(
@@ -146,7 +146,7 @@ PLOT_SPECS = (
         "wheel_center_z",
         "wheel_center_x",
         "wheel_recession_angle",
-        branch={"edge_width": 100, "edge_percentile": 0.95},
+        branch={"edge_trim_width": 100, "edge_trim_percentile": 0.95},
         transform=_wheel_recession_angle,
         from_gradient=_recession_angle,
         metric="wheel_recession_angle_{corner}_deg",
@@ -177,7 +177,7 @@ PLOT_SPECS = (
         "wheel_pad_z",
         "wheel_load",
         "ride_rate",
-        branch={"edge_width": 100, "edge_percentile": 0.99},
+        branch={"edge_trim_width": 100, "edge_trim_percentile": 0.99},
         transform=gradient_curve,
         optional=True,
         y_limits=(0, 100),
@@ -241,7 +241,7 @@ PLOT_SPECS = (
         "wheel_pad_z",
         "contact_patch_x",
         "brake_support_angle",
-        branch={"edge_width": 100, "edge_percentile": 0.95},
+        branch={"edge_trim_width": 100, "edge_trim_percentile": 0.95},
         transform=_wheel_recession_angle,
         from_gradient=_recession_angle,
         optional=True,

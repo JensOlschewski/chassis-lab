@@ -94,7 +94,7 @@ def _metrics(
                 "gradient_mm": 10.0,
                 "gradient_deg": 1.0,
                 "curves": json.dumps(curves),
-                "branch": {"index": 2},
+                "branch": {},
                 **request,
             }
         )
@@ -126,7 +126,7 @@ def test_roll_corner_plot_catalog_and_secant_axes() -> None:
         json.dumps(_plot_fixture()),
         gradient_points_mm=10.0,
         gradient_points_deg=0.9,
-        branch=json.dumps({"index": 2}),
+        branch=json.dumps({}),
     )
     assert set(reports) == {
         f"plots/knc/roll/knc_roll_{name}.pdf"
@@ -191,7 +191,7 @@ def test_roll_corner_plot_catalog_and_secant_axes() -> None:
 
 
 def test_axle_plot_curves_use_derived_moments_and_body_roll_gradient() -> None:
-    curves = index_curves(_plot_curves(_curves(), BranchOptions(index=2)))
+    curves = index_curves(_plot_curves(_curves(), BranchOptions()))
     for location, stiffness, quadratic in (
         ("front", 450.0, 0.6),
         ("rear", 600.0, 1.6),
@@ -212,12 +212,12 @@ def test_axle_plot_curves_use_derived_moments_and_body_roll_gradient() -> None:
     assert height[at_zero] == pytest.approx(
         HALF_TRACK * CONTACT_SLOPE["front"], rel=1e-2
     )
-    sweep = BranchOptions(index=2).metric_sweep(ROLL)
+    sweep = _rising(BranchOptions())
     assert sweep is not None
     z, y, _ = _branch_roll_center(
         _roll_center_inputs(curves, "front", "center_of_pressure_y"),
         sweep,
-        BranchOptions(index=2),
+        BranchOptions(),
     )
     finite = np.isfinite(height[sweep])
     assert height[sweep][finite] == pytest.approx(z[finite])
@@ -257,7 +257,7 @@ def test_axle_compare_overlays_and_skips_missing_geometry() -> None:
         "Baseline",
         "Config: fixture",
         logo,
-        branches_json=json.dumps([{"index": 2}, {"index": 2}]),
+        branches_json=json.dumps([{}, {}]),
     )
     for spec in AXLE_PLOT_SPECS:
         text = _pdf_text(reports[f"{spec.name}.pdf"])
@@ -401,7 +401,7 @@ def test_roll_local_rates_differentiate_within_body_roll_sweeps() -> None:
                 spec,
                 curves,
                 corner,
-                BranchOptions(plot_branches="selected", index=2),
+                BranchOptions(plot_branches="selected"),
             )
             assert np.isfinite(rate).any()
             assert rate[np.isfinite(rate)] == pytest.approx(expected)
@@ -657,12 +657,16 @@ def test_raw_roll_center_uses_actual_sample_angles_and_span() -> None:
     )
 
 
+def _rising(options: BranchOptions) -> slice | None:
+    branches = options.cycle_branches(ROLL)
+    return None if branches is None else branches[1]
+
+
 def test_raw_roll_center_does_not_average_opposite_sweep() -> None:
-    from chassis_lab.knc_kernel import BranchOptions, metric_sweep
 
     curves = _curves()
     original, _ = _metrics(curves)
-    selected = metric_sweep(ROLL, "total_roll_angle", BranchOptions(index=2))
+    selected = _rising(BranchOptions())
     for curve in curves:
         if curve["signal"] == "center_of_pressure_y":
             samples = np.asarray(curve["values"])
@@ -692,12 +696,11 @@ def test_measured_roll_center_masks_both_contact_path_turnarounds() -> None:
     curves = _curves()
     options = BranchOptions(
         measurement=True,
-        index=1,
         plot_branches="selected",
-        edge_width=8,
-        edge_percentile=0.9,
+        edge_trim_width=8,
+        edge_trim_percentile=0.9,
     )
-    sweep = options.metric_sweep(ROLL)
+    sweep = _rising(options)
     assert sweep is not None
     for curve in curves:
         if (
@@ -747,7 +750,7 @@ def test_measured_roll_center_masks_both_contact_path_turnarounds() -> None:
     assert "does not cover roll_angle" in row["reason"]
     simulated_values, _ = _metrics(
         curves,
-        branch={**vars(options), "measurement": False, "direction": "fall"},
+        branch={**vars(options), "measurement": False},
         gradient_deg=2.99,
     )
     assert simulated_values["roll_center_height_front_mm"]["value"] is not None
@@ -917,7 +920,7 @@ def test_roll_plot_series_json_is_versioned_deterministic_and_paired() -> None:
     kwargs = {
         "gradient_points_mm": 10.0,
         "gradient_points_deg": 0.9,
-        "branch": json.dumps({"index": 2}),
+        "branch": json.dumps({}),
         "footer": "Footer",
     }
     plain = plot(json.dumps(_plot_fixture()), **kwargs)
