@@ -685,6 +685,55 @@ pub(crate) fn analyze_input(
     })
 }
 
+/// One analysis unit per configured KnC input: its test, a configuration
+/// holding only that input, and its file. Longitudinal yields one per listed file.
+pub(crate) fn knc_units(config: &CaseConfig) -> Vec<(KncTest, CaseConfig, PathBuf)> {
+    let mut units = Vec::new();
+    for test in KncTest::ALL {
+        let inputs: Vec<_> = match test {
+            KncTest::Vertical => config.vertical.iter().collect(),
+            KncTest::Roll => config.roll.iter().collect(),
+            KncTest::Longitudinal => config.longitudinal.iter().collect(),
+        };
+        for knc in inputs {
+            let path = match knc.source_kind {
+                clab_core::config::SourceKind::Simulation => knc.simulation_hdf5.clone(),
+                clab_core::config::SourceKind::Measurement => knc.measurement_hdf5.clone(),
+            };
+            let mut unit = config.clone();
+            if test == KncTest::Longitudinal {
+                unit.longitudinal = vec![knc.clone()];
+            }
+            units.push((test, unit, path));
+        }
+    }
+    units
+}
+
+/// Two longitudinal inputs with the same brake state would report the same
+/// metrics twice; refuse instead of picking one.
+pub(crate) fn ensure_distinct_setups<'a>(
+    inputs: impl Iterator<Item = (KncTest, &'a Path, &'a Reports)>,
+) -> Result<()> {
+    let mut seen: Vec<(bool, &Path)> = Vec::new();
+    for (test, path, report) in inputs {
+        if test != KncTest::Longitudinal {
+            continue;
+        }
+        let brakes = report.conditions.brakes();
+        if let Some((_, first)) = seen.iter().find(|(seen, _)| *seen == brakes) {
+            anyhow::bail!(
+                "two longitudinal files with setup B{}: '{}' and '{}'; metrics would be ambiguous",
+                u8::from(brakes),
+                first.display(),
+                path.display()
+            );
+        }
+        seen.push((brakes, path));
+    }
+    Ok(())
+}
+
 /// Whether a metric row is a placeholder for a setup the input does not cover.
 pub(crate) fn is_not_covered(metric: &serde_json::Value) -> bool {
     metric["status"] == "not_covered"
@@ -901,6 +950,7 @@ fn effective_gradient_points(window: &clab_core::config::VerticalWindow) -> f64 
 /// since baseline and candidate can each resolve mass from their own SVC
 /// run. It renders the `ride_frequency` curve plot for series that have it,
 /// same as `curve_plots` does for a single-source `analyze` report.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compare_plots(
     config: &CaseConfig,
     test: KncTest,
@@ -916,6 +966,7 @@ pub(crate) fn compare_plots(
         BTreeMap<String, f64>,
     )],
     (baseline_label, prefix): (&str, &str),
+    brakes: bool,
     options: PlotOptions<'_>,
     progress: &ReportProgress,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
@@ -956,7 +1007,7 @@ pub(crate) fn compare_plots(
                 .and_then(|knc| knc.window.metric_window_n),
             debug: options.debug.map(str::to_owned),
             mass: corner_mass_kg,
-            brakes: false,
+            brakes,
             selected: Vec::new(),
         },
         &format!("{prefix}/"),
@@ -970,8 +1021,14 @@ pub(crate) fn compare_plots(
             test.name()
         )
     })?;
+    if let Some(setup) = options.setup {
+        reports = suffix_plot_names(reports, setup);
+    }
     if let Some(series) = merge_plot_series("compare", test, &mut reports)? {
-        reports.insert(format!("knc-{}.plots.json", test.name()), series);
+        reports.insert(
+            format!("knc-{}.plots.json", test.report_stem(brakes)),
+            series,
+        );
     }
     Ok(reports)
 }
@@ -1356,8 +1413,16 @@ pub(crate) struct PlotOptions<'a> {
     pub footer: &'a str,
     pub debug: Option<&'a str>,
     pub workers: usize,
-    /// Setup code appended to every plot file name; `None` for comparisons.
+    /// Setup code appended to every plot file name, for tests whose inputs of
+    /// one run differ by setup (longitudinal); `None` otherwise.
     pub setup: Option<&'a str>,
+}
+
+fn suffix_plot_names(files: BTreeMap<String, Vec<u8>>, setup: &str) -> BTreeMap<String, Vec<u8>> {
+    files
+        .into_iter()
+        .map(|(name, bytes)| (suffix_plot_name(&name, setup), bytes))
+        .collect()
 }
 
 /// `knc_x.pdf` → `knc_x_<setup>.pdf`, likewise `.plot.json`.
@@ -1422,10 +1487,7 @@ pub(crate) fn curve_plots(
         )
     })?;
     if let Some(setup) = options.setup {
-        files = files
-            .into_iter()
-            .map(|(name, bytes)| (suffix_plot_name(&name, setup), bytes))
-            .collect();
+        files = suffix_plot_names(files, setup);
     }
     if let Some(series) = merge_plot_series("analyze", test, &mut files)? {
         files.insert(

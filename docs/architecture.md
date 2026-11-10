@@ -356,7 +356,13 @@ example a sweep that does not span ±1 kN or has no full cycle. `analyze` requir
 
 Configure with `[[input.knc.longitudinal]]` (a list, one file per brake state; the
 single table is still accepted). Two files with the same brake state are refused.
-`compare` and tolerances for longitudinal are not supported yet (#207).
+`compare` runs the same per-file analysis as `analyze` and merges the metrics of a
+run's files. Plots are never overlaid across brake states: each baseline file is
+overlaid only on candidate files with the same brake state (`..._b1e1f1r1`), and a
+baseline file without a match gets no plots. A metric that either side lists as
+`not covered` is left out of the comparison, with one warning naming them.
+Tolerances use `[validation.knc.longitudinal.tolerances]` by metric name; a
+direct HDF5 input compares the metrics its stored setup covers.
 
 Console output has one `KnC Longitudinal` section per run; conditions stay in
 JSON, CSV and PDFs. PDF and `.plot.json` names carry the full lowercase setup
