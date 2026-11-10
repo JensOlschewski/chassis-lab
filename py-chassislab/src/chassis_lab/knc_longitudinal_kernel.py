@@ -15,15 +15,11 @@ from typing import Any, cast
 from chassis_lab.knc_kernel import (
     CORNERS,
     BranchOptions,
-    CurveIndex,
     GradientMetric,
-    KncKernelError,
     Signal,
-    fit_slope,
+    gradient_metrics,
     index_curves,
-    metric_cycle,
     metric_row,
-    signal_values,
 )
 from chassis_lab.knc_plot_kernel import (
     GradientDisplay,
@@ -180,45 +176,6 @@ def _not_covered(
     return rows
 
 
-def _fit_metrics(
-    curves: CurveIndex,
-    catalog: tuple[GradientMetric, ...],
-    window_n: float,
-    cycle: int,
-    options: BranchOptions,
-) -> list[dict[str, object]]:
-    """Least-squares slope per corner; `lower` and `upper` are the fitted
-    response at -window and +window."""
-    results = []
-    for location in CORNERS:
-        for metric in catalog:
-            row = metric_row(
-                location,
-                f"{metric.name}_{location}_{metric.suffix}",
-                metric.unit,
-                metric.points,
-                window_n,
-            )
-            try:
-                force = signal_values(curves, location, FORCE.name)
-                response = signal_values(curves, location, metric.signal)
-                if len(force) != len(response):
-                    raise KncKernelError(
-                        f"{location}_{metric.signal} and "
-                        f"{location}_{FORCE.name} lengths differ"
-                    )
-                span = metric_cycle(force, cycle, options)
-                fit = fit_slope(force[span], response[span], window_n)
-            except KncKernelError as error:
-                row["reason"] = str(error)
-            else:
-                row["value"] = metric.scale * fit.slope
-                row["lower"] = fit.intercept - fit.slope * window_n
-                row["upper"] = fit.intercept + fit.slope * window_n
-            results.append(row)
-    return results
-
-
 def metrics(request: dict[str, object]) -> str:
     """Least-squares KnC longitudinal metrics within +-1 kN wheel force.
 
@@ -230,14 +187,15 @@ def metrics(request: dict[str, object]) -> str:
         cast("str | dict[str, Any] | None", request.get("branch"))
     )
     window_n = float(cast("float", request.get("gradient_n") or FIT_WINDOW_N))
-    cycle = int(cast("int", request.get("cycle") or 1))
     if request["brakes"]:
         catalog, other = BRAKING_METRICS, ACCELERATION_METRICS
         needs_setup = "B0"
     else:
         catalog, other = ACCELERATION_METRICS, BRAKING_METRICS
         needs_setup = "B1"
-    results = _fit_metrics(curves, catalog, window_n, cycle, options)
+    results = gradient_metrics(
+        curves, catalog, CORNERS, {"N": window_n}, FORCE, options
+    )
     results += _not_covered(other, needs_setup, window_n)
     results.sort(key=lambda item: str(item["metric"]))
     return json.dumps({"metrics": results})

@@ -111,7 +111,7 @@ def test_fit_pools_rise_and_fall_of_one_cycle():
 
 def test_cycle_selects_the_fitted_cycle():
     request = _request(_curves({"wheel_center_x": 2.0}), brakes=False)
-    request["cycle"] = 2
+    request["branch"] = json.dumps({"measurement": True, "cycle": 2})
     row = _by_name(metrics(request))[
         "longitudinal_compliance_front_left_mm_per_kn"
     ]

@@ -764,7 +764,7 @@ def test_roll_metrics_report_unavailable_reasons() -> None:
     assert values["roll_steer_front_left_deg_per_mm"]["reason"] == (
         "missing canonical signal front_left_toe"
     )
-    assert "does not cover suspension_roll_angle travel -5..5 deg" in str(
+    assert "suspension_roll_angle deg: data does not cover -5..5" in str(
         values["roll_camber_front_left_deg_per_deg"]["reason"]
     )
     assert values["roll_stiffness_distribution_front_pct"]["reason"] == (
