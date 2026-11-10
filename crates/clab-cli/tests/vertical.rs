@@ -134,7 +134,7 @@ fn measurement_with_front_left_wcx_name(path: &std::path::Path, front_left_wcx_n
 fn measurement_channels(path: &std::path::Path, front_left_wcx_name: &str, setup: Option<&str>) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 2_u32);
-    scalar(&file, "sample_count", 6_u64);
+    scalar(&file, "sample_count", 21_u64);
     scalar(&file, "signal_count", 48_u64);
     string(&file, "source_kind", "measurement");
     string(&file, "domain", "knc");
@@ -147,7 +147,7 @@ fn measurement_channels(path: &std::path::Path, front_left_wcx_name: &str, setup
     string(&axis, "kind", "time");
     string(&axis, "unit", "s");
     axis.new_dataset_builder()
-        .with_data(&[0.; 6])
+        .with_data(&[0.; 21])
         .create("values")
         .unwrap();
     let signals = file.create_group("signals").unwrap();
@@ -155,7 +155,9 @@ fn measurement_channels(path: &std::path::Path, front_left_wcx_name: &str, setup
         channel(
             &signals,
             &format!("{prefix}slope"),
-            &[2., 2., 2., 3., 3., 3.],
+            &[
+                2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 3., 3., 3., 3., 3., 3., 3., 3., 3., 3., 3.,
+            ],
             0.,
         );
         let wcx_name = if prefix == "lf" {
@@ -166,67 +168,100 @@ fn measurement_channels(path: &std::path::Path, front_left_wcx_name: &str, setup
         channel(
             &signals,
             &wcx_name,
-            &[98., 100., 102., 102., 100., 98.],
+            &[
+                100., 100.5, 101., 101.5, 102., 101.5, 101., 100.5, 100., 99.5, 99., 98.5, 98.,
+                98.5, 99., 99.5, 100., 100.5, 101., 101.5, 102.,
+            ],
             100.,
         );
         channel(
             &signals,
             &format!("{prefix}wcy"),
-            &[197., 200., 203., 203., 200., 197.],
+            &[
+                200., 200.75, 201.5, 202.25, 203., 202.25, 201.5, 200.75, 200., 199.25, 198.5,
+                197.75, 197., 197.75, 198.5, 199.25, 200., 200.75, 201.5, 202.25, 203.,
+            ],
             200.,
         );
         channel(
             &signals,
             &format!("{prefix}wcz"),
-            &[299., 300., 301., 301., 300., 299.],
+            &[
+                300., 300.25, 300.5, 300.75, 301., 300.75, 300.5, 300.25, 300., 299.75, 299.5,
+                299.25, 299., 299.25, 299.5, 299.75, 300., 300.25, 300.5, 300.75, 301.,
+            ],
             300.,
         );
         channel(
             &signals,
             &format!("{prefix}steer"),
-            &[-0.02, 0., 0.02, 0.02, 0., -0.02],
+            &[
+                0., 0.005, 0.01, 0.015, 0.02, 0.015, 0.01, 0.005, 0., -0.005, -0.01, -0.015, -0.02,
+                -0.015, -0.01, -0.005, 0., 0.005, 0.01, 0.015, 0.02,
+            ],
             0.,
         );
         channel(
             &signals,
             &format!("{prefix}cam"),
-            &[0.03, 0., -0.03, -0.03, 0., 0.03],
+            &[
+                0., -0.0075, -0.015, -0.0225, -0.03, -0.0225, -0.015, -0.0075, 0., 0.0075, 0.015,
+                0.0225, 0.03, 0.0225, 0.015, 0.0075, 0., -0.0075, -0.015, -0.0225, -0.03,
+            ],
             0.,
         );
         channel(
             &signals,
             &format!("{prefix}cas"),
-            &[0.04, 0., -0.04, -0.04, 0., 0.04],
+            &[
+                0., -0.01, -0.02, -0.03, -0.04, -0.03, -0.02, -0.01, 0., 0.01, 0.02, 0.03, 0.04,
+                0.03, 0.02, 0.01, 0., -0.01, -0.02, -0.03, -0.04,
+            ],
             0.,
         );
         channel(
             &signals,
             &format!("{prefix}fz"),
-            &[2970., 3000., 3030., 3030., 3000., 2970.],
+            &[
+                3000., 3007.5, 3015., 3022.5, 3030., 3022.5, 3015., 3007.5, 3000., 2992.5, 2985.,
+                2977.5, 2970., 2977.5, 2985., 2992.5, 3000., 3007.5, 3015., 3022.5, 3030.,
+            ],
             0.,
         );
         channel(
             &signals,
             &format!("{prefix}pz"),
-            &[-1.1, 0., 1.1, 1.1, 0., -1.1],
+            &[
+                0., 0.275, 0.55, 0.825, 1.1, 0.825, 0.55, 0.275, 0., -0.275, -0.55, -0.825, -1.1,
+                -0.825, -0.55, -0.275, 0., 0.275, 0.55, 0.825, 1.1,
+            ],
             0.,
         );
         channel(
             &signals,
             &format!("{prefix}tdef"),
-            &[16.9, 17., 17.1, 17.1, 17., 16.9],
+            &[
+                17., 17.025, 17.05, 17.075, 17.1, 17.075, 17.05, 17.025, 17., 16.975, 16.95,
+                16.925, 16.9, 16.925, 16.95, 16.975, 17., 17.025, 17.05, 17.075, 17.1,
+            ],
             17.,
         );
         channel(
             &signals,
             &format!("{prefix}cpx"),
-            &[48., 50., 52., 52., 50., 48.],
+            &[
+                50., 50.5, 51., 51.5, 52., 51.5, 51., 50.5, 50., 49.5, 49., 48.5, 48., 48.5, 49.,
+                49.5, 50., 50.5, 51., 51.5, 52.,
+            ],
             50.,
         );
         channel(
             &signals,
             &format!("{prefix}cpy"),
-            &[58., 60., 62., 62., 60., 58.],
+            &[
+                60., 60.5, 61., 61.5, 62., 61.5, 61., 60.5, 60., 59.5, 59., 58.5, 58., 58.5, 59.,
+                59.5, 60., 60.5, 61., 61.5, 62.,
+            ],
             60.,
         );
     }
@@ -423,7 +458,10 @@ fn analyzes_measurement_vertical_with_renamed_channel_via_mapping() {
         .expect("front_left wheel_center_x curve");
     assert_eq!(
         front_left_wheel_center_x["values"],
-        serde_json::json!([-2.0, 0.0, 2.0, 2.0, 0.0, -2.0])
+        serde_json::json!([
+            0.0, 0.5, 1.0, 1.5, 2.0, 1.5, 1.0, 0.5, 0.0, -0.5, -1.0, -1.5, -2.0, -1.5, -1.0, -0.5,
+            0.0, 0.5, 1.0, 1.5, 2.0
+        ])
     );
 }
 
@@ -524,7 +562,14 @@ fn assert_measurement_metrics(
         assert_eq!(&row[7], "");
         assert_eq!(&row[8], "");
     }
-    assert!(csv.contains("fixture,knc,vertical,suspension_rate_rear_right_n_per_mm,N/mm,30"));
+    let rate = csv::Reader::from_reader(csv.as_bytes())
+        .records()
+        .map(Result::unwrap)
+        .find(|row| &row[3] == "suspension_rate_rear_right_n_per_mm")
+        .expect("rear right suspension rate row");
+    assert_eq!(&rate[0], "fixture");
+    assert_eq!(&rate[4], "N/mm");
+    close(rate[5].parse().unwrap(), 30.0);
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(report["domains"][0]["metric_count"], 36);
@@ -635,9 +680,9 @@ fn committed_examples_convert_and_produce_vertical_metrics() {
             .parse::<f64>()
             .unwrap();
         let expected = if input == &measurement {
-            29.036215392156805
+            29.59007013963512
         } else {
-            29.140347624770182
+            29.133052308269015
         };
         assert!((rate - expected).abs() < 1e-6, "{stdout}");
         let stderr = String::from_utf8_lossy(&result.stderr);

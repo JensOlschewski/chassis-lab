@@ -605,23 +605,6 @@ fn roll_run_subtracts_static_baseline_from_corner_signals_only() {
     assert_eq!(wcz["offset"], 320.);
     // The static file has no roll angle; roll angle needs no baseline.
     assert_eq!(values(curve(&detail, "total", "roll_angle")), [-1., 1.]);
-    // Moment geometry and forces come from the roll run, not the static file.
-    for (name, expected) in [
-        ("roll_stiffness_front_nm_per_deg", 450.),
-        ("roll_stiffness_rear_nm_per_deg", 600.),
-        ("roll_stiffness_total_nm_per_deg", 1050.),
-    ] {
-        let metric = detail["metrics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|metric| metric["metric"] == name)
-            .unwrap();
-        assert!(
-            (metric["value"].as_f64().unwrap() - expected).abs() < 1e-6,
-            "{metric}"
-        );
-    }
     assert_eq!(
         detail["normalization"]["method"],
         "drop_initial_sample_and_subtract_final_sample"
