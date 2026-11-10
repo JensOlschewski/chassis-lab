@@ -321,7 +321,7 @@ sweep with no full cycle, samples that do not cover ±window, or fewer than 3
 samples in the window make the metric `missing`. Roll wheel-travel metrics use
 `metric_window_mm`, roll-angle metrics `metric_window_deg` (default 2 deg). Roll metrics:
 `roll_steer|roll_camber_<corner>_deg_per_mm` (over wheel-center Z) and
-`_deg_per_deg` (over the axle's `suspension_roll_angle`),
+`_deg_per_deg` (over the body `roll_angle`, as in the Ford reports),
 `roll_suspension_rate_<corner>_n_per_mm` (over wheel-center Z) and
 `roll_ride_rate_<corner>_n_per_mm` (over wheel-pad Z) — both can include
 anti-roll-bar engagement during the roll sweep, unlike vertical's isolated
