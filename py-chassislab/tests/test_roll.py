@@ -158,17 +158,12 @@ def test_roll_corner_plot_catalog_and_secant_axes() -> None:
     travel = _pdf_text(reports["plots/knc/roll/knc_roll_toe.pdf"])
     assert "Left front roll steer in deg/mm:" in travel
     assert "Simulation 0.01" in travel
-    angle = _pdf_text(
-        reports["plots/knc/roll/knc_roll_toe_vs_suspension_roll_angle.pdf"]
-    )
-    assert "Left front roll steer in deg/deg:" in angle
-    assert "-0.9 deg and +0.9 deg suspension roll angle" in angle
-    assert "Simulation 0.1111" in angle
     body = _pdf_text(reports["plots/knc/roll/knc_roll_toe_vs_roll_angle.pdf"])
-    assert "Left front body-roll steer in deg/deg:" in body
-    assert "-0.9 deg and +0.9 deg body roll angle" in body
+    assert "Left front roll steer in deg/deg:" in body
+    assert "least-squares fit within" in body
+    assert "deg body roll angle" in body
     assert "Simulation 0.1" in body
-    assert "body-roll camber in deg/deg:" in _pdf_text(
+    assert "roll camber in deg/deg:" in _pdf_text(
         reports["plots/knc/roll/knc_roll_camber_vs_roll_angle.pdf"]
     )
     assert "Roll suspension rate [newton/mm]" in _pdf_text(
@@ -338,10 +333,8 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
         for name in (
             "toe",
             "toe_vs_roll_angle",
-            "toe_vs_suspension_roll_angle",
             "camber",
             "camber_vs_roll_angle",
-            "camber_vs_suspension_roll_angle",
         )
     ]
     for name in secants:
@@ -468,13 +461,13 @@ def test_roll_secant_metrics_follow_linear_fixture() -> None:
     assert values["roll_steer_rear_right_deg_per_mm"]["value"] == pytest.approx(
         0.02
     )
-    # Front toe 0.01 deg/mm * 10 mm/deg over 0.9 deg suspension roll per deg.
+    # Front toe 0.01 deg/mm * 10 mm per deg of body roll.
     assert values["roll_steer_front_left_deg_per_deg"][
         "value"
-    ] == pytest.approx(0.1 / 0.9)
+    ] == pytest.approx(0.1)
     assert values["roll_steer_rear_right_deg_per_deg"][
         "value"
-    ] == pytest.approx(-0.2 / 0.8)
+    ] == pytest.approx(-0.2)
     assert values["roll_camber_front_right_deg_per_mm"][
         "value"
     ] == pytest.approx(-0.03)
@@ -570,7 +563,7 @@ def test_suspension_roll_derived_from_moving_axle_geometry() -> None:
     curves = [c for c in _curves() if c["signal"] != "suspension_roll_angle"]
     derived, warnings = _metrics(_with_global_wheel_centers(curves))
     for name, row in explicit.items():
-        if name.endswith("deg_per_deg"):
+        if name.startswith("roll_stiffness_suspension"):
             assert derived[name]["value"] == pytest.approx(row["value"])
     assert sum("suspension roll derived" in w for w in warnings) == 2
 
@@ -583,7 +576,7 @@ def test_explicit_suspension_roll_takes_priority_over_geometry() -> None:
     values, warnings = _metrics(curves)
     assert values["roll_steer_front_left_deg_per_deg"][
         "value"
-    ] == pytest.approx(0.1 / 0.9)
+    ] == pytest.approx(0.1)
     assert warnings == []
 
 
@@ -595,7 +588,7 @@ def test_invalid_suspension_roll_geometry_does_not_produce_a_metric() -> None:
         if c["signal"] == "wheel_center_global_y":
             c["values"] = np.zeros_like(ROLL).tolist()
     values, warnings = _metrics(curves)
-    assert values["roll_steer_front_left_deg_per_deg"]["value"] is None
+    assert values["roll_stiffness_suspension_front_nm_per_deg"]["value"] is None
     assert any("invalid wheel-center geometry" in w for w in warnings)
 
 
@@ -767,8 +760,9 @@ def test_roll_metrics_report_unavailable_reasons() -> None:
     assert values["roll_steer_front_left_deg_per_mm"]["reason"] == (
         "missing canonical signal front_left_toe"
     )
-    assert "suspension_roll_angle deg: data does not cover -5..5" in str(
-        values["roll_camber_front_left_deg_per_deg"]["reason"]
+    assert (
+        "front_left_camber vs roll_angle deg: data does not cover -5..5"
+        in str(values["roll_camber_front_left_deg_per_deg"]["reason"])
     )
     assert values["roll_stiffness_distribution_front_pct"]["reason"] == (
         "front and total roll stiffness unavailable"

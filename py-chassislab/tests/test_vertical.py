@@ -561,7 +561,7 @@ def test_gradient_overlay_and_metric_table_only_on_selected_plots() -> None:
             assert tables[name] in text
             assert "Simulation" in text
         else:
-            assert "secant between" not in text
+            assert "least-squares fit within" not in text
 
 
 def test_metric_table_lists_every_source_with_metric_values() -> None:

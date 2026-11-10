@@ -1378,7 +1378,7 @@ def _add_metric_table(
     put(
         METRIC_LEFT,
         top,
-        f"{gradient.label.capitalize()}, secant between "
+        f"{gradient.label.capitalize()}, least-squares fit within "
         f"{-gradient_mm:+g} {unit} and {gradient_mm:+g} {unit} "
         f"{axis_label.lower()}",
         color=METRIC_TITLE_COLOR,
