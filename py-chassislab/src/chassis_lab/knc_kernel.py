@@ -495,3 +495,45 @@ def secant_points(
             f"{-half:g}..{half:g} {unit}"
         ) from None
     return float(lower), float(upper)
+
+
+# ---------------------------------------------------------------------------
+# Least-squares metric fit
+# ---------------------------------------------------------------------------
+
+
+class LineFit(NamedTuple):
+    slope: float
+    intercept: float
+    samples: int
+
+
+def metric_cycle(
+    reference: np.ndarray, cycle: int, options: BranchOptions
+) -> slice:
+    """Full cycle `cycle` (1-based) of the `reference` sweep.
+
+    A cycle runs from one upper reversal to the next: a falling branch and the
+    rising branch after it. The partial branch before the first reversal is
+    never part of a cycle.
+    """
+    branches = branch_ranges(reference, options)
+    starts = [
+        index
+        for index, (_, sign) in enumerate(branches[:-1])
+        if sign < 0 and branches[index + 1][1] > 0
+    ]
+    if cycle < 1 or len(starts) < cycle:
+        raise KncKernelError(f"sweep has no full cycle {cycle}")
+    first = branches[starts[cycle - 1]][0]
+    last = branches[starts[cycle - 1] + 1][0]
+    return slice(first.start, last.stop)
+
+
+def fit_slope(x: np.ndarray, y: np.ndarray, window: float) -> LineFit:
+    """Least-squares line of `y` on `x` over the samples with |x| <= window."""
+    inside = (np.abs(x) <= window) & np.isfinite(x) & np.isfinite(y)
+    if inside.sum() < 3 or np.unique(x[inside]).size < 2:
+        raise KncKernelError(f"fewer than 3 samples within ±{window:g}")
+    slope, intercept = np.polyfit(x[inside], y[inside], 1)
+    return LineFit(float(slope), float(intercept), int(inside.sum()))
