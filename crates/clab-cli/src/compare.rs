@@ -79,6 +79,7 @@ struct Metric {
 /// Curves of one KnC input file. Metrics of a test are merged across its
 /// files; plots are not, so a longitudinal B0 run is never overlaid on B1.
 struct KncRun {
+    source: PathBuf,
     curves: serde_json::Value,
     conditions: knc::Conditions,
     branch: clab_core::config::VerticalBranch,
@@ -109,7 +110,6 @@ struct CandidateRun<'a> {
     label: String,
     run: &'a KncRun,
     footer: String,
-    path: &'a Path,
 }
 
 enum ComparedDomain {
@@ -440,7 +440,6 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                                         candidate_conditions.summary(),
                                         absolute_path(path)?.display()
                                     ),
-                                    path: path.as_path(),
                                 });
                         }
                     }
@@ -573,8 +572,12 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         let debug = debug_info(
             args.debug,
             &args.config,
-            &std::iter::once(args.baseline.as_path())
-                .chain(candidates_for_test.iter().map(|candidate| candidate.path))
+            &std::iter::once(base_run.source.as_path())
+                .chain(
+                    candidates_for_test
+                        .iter()
+                        .map(|candidate| candidate.run.source.as_path()),
+                )
                 .collect::<Vec<_>>(),
         )?;
         let candidates = candidates_for_test
@@ -596,7 +599,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             &candidates,
             (
                 &display_label(&labels, 0),
-                &format!("plots/knc/{}/comparison", test.name()),
+                &format!("plots/knc/{}", test.name()),
             ),
             base_run.conditions.brakes(),
             knc::PlotOptions {
@@ -852,6 +855,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             .map(|report| {
                 let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
                 Ok(KncRun {
+                    source: report.input.clone(),
                     curves: detail["curves"].clone(),
                     conditions: report.conditions.clone(),
                     branch: report.branch.clone(),

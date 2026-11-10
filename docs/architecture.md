@@ -364,6 +364,13 @@ baseline file without a match gets no plots. A metric that either side lists as
 Tolerances use `[validation.knc.longitudinal.tolerances]` by metric name; a
 direct HDF5 input compares the metrics its stored setup covers.
 
+Comparison PDFs live directly in `plots/knc/<test>/`, without a `comparison/`
+subdirectory. `--debug` uses the same diagnostics as `analyze` for every
+measurement series (baseline `series_0`, then candidates), saved separately in
+`plots/knc/<test>/debug/`, never overlaid. Diagnostic footers name the source
+HDF5 file, including when the input is a run manifest. Longitudinal diagnostics
+carry the setup suffix and show only the metrics covered by that brake state.
+
 Console output has one `KnC Longitudinal` section per run; conditions stay in
 JSON, CSV and PDFs. PDF and `.plot.json` names carry the full lowercase setup
 code (`..._b1e1f1r1`). B1 plots: camber, toe, castor, projected contact patch X,

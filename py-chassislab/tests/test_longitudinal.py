@@ -9,6 +9,7 @@ from chassis_lab.knc_longitudinal_kernel import (
     PLOT_SPECS,
     metrics,
     plot,
+    plot_compare,
     plot_jobs,
 )
 
@@ -214,6 +215,61 @@ def test_debug_plots_show_the_secant_branches_of_the_setup(brakes, expected):
     for name in files:
         if "/debug/" in name:
             assert PdfReader(BytesIO(files[name])).pages
+
+
+@pytest.mark.parametrize("brakes", [False, True])
+def test_compare_debug_matches_analyze_for_each_series_and_worker(brakes):
+    curves = _curves({"wheel_center_x": 2.0, "toe": 0.1, "spin": -0.6})
+    info = {
+        "config": "c.toml",
+        "inputs": ["base.h5", "first.h5", "second.h5"],
+        "creator": "test",
+        "version": "0",
+    }
+    options = {"measurement": True}
+    single = plot(
+        json.dumps(curves),
+        branch=json.dumps(options),
+        brakes=brakes,
+        debug=json.dumps(info),
+    )
+    names = {
+        name.split("/debug/measurement_")[1]
+        for name in single
+        if "/debug/" in name
+    }
+    kwargs = dict(
+        baseline_json=json.dumps(curves),
+        candidates_json=json.dumps(
+            [
+                {"label": label, "curves": curves}
+                for label in ("first", "second")
+            ]
+        ),
+        baseline_label="base",
+        footer="",
+        logo=None,
+        branches_json=json.dumps([options] * 3),
+        brakes=brakes,
+        debug=json.dumps(info),
+    )
+    compared = plot_compare(**kwargs)
+    assert {name for name in compared if name.startswith("debug/")} == {
+        f"debug/series_{index}_{name}" for index in range(3) for name in names
+    }
+    for index in range(3):
+        for name in names:
+            path = f"debug/series_{index}_{name}"
+            text = PdfReader(BytesIO(compared[path])).pages[0].extract_text()
+            assert info["inputs"][index] in text
+            # Workers render a selected diagnostic job, not the whole catalog.
+            selected = [f"debug:{index}:{name.removesuffix('.pdf')}"]
+            worker = plot_compare(**kwargs, selected=selected)
+            assert set(worker) == {path}
+    assert not any(
+        name.startswith("debug/")
+        for name in plot_compare(**{**kwargs, "debug": None})
+    )
 
 
 def test_plot_catalog_names_match_the_report_files():

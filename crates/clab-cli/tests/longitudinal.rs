@@ -473,9 +473,7 @@ fn compare_uses_the_analyze_metrics_and_overlays_only_matching_setups() {
     );
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("4 metrics not compared"), "{stderr}");
-    let comparison = directory
-        .path()
-        .join("report/plots/knc/longitudinal/comparison");
+    let comparison = directory.path().join("report/plots/knc/longitudinal");
     let names: Vec<_> = fs::read_dir(&comparison)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
@@ -494,4 +492,61 @@ fn compare_uses_the_analyze_metrics_and_overlays_only_matching_setups() {
             .join("report/knc-longitudinal-b1.plots.json")
             .is_file()
     );
+}
+
+#[test]
+fn compare_debug_renders_each_series_and_brake_state_in_flat_test_folder() {
+    let directory = tempdir().unwrap();
+    let b0 = converted(directory.path(), "b0.h5", "b0e0f1r1", 0.1);
+    let b1 = converted(directory.path(), "b1.h5", "b1e0f1r1", 0.1);
+    let manifest = directory.path().join("run.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "[[input.knc.longitudinal]]\nfile=\"{}\"\n\
+             [[input.knc.longitudinal]]\nfile=\"{}\"\n",
+            b0.display(),
+            b1.display()
+        ),
+    )
+    .unwrap();
+    let config_path = directory.path().join("config.toml");
+    config(&config_path, None);
+    let output = directory.path().join("report");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .arg("compare")
+        .args([&config_path, &manifest, &manifest, &manifest])
+        .arg("--debug")
+        .arg("--report")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let plots = output.join("plots/knc/longitudinal");
+    assert!(!plots.join("comparison").exists());
+    let debug = plots.join("debug");
+    assert_eq!(fs::read_dir(&debug).unwrap().count(), 9);
+    for series in 0..3 {
+        for (setup, names) in [
+            ("b0e0f1r1", vec!["wc_x"]),
+            ("b1e0f1r1", vec!["toe", "castor"]),
+        ] {
+            for name in names {
+                assert!(
+                    debug
+                        .join(format!(
+                            "series_{series}_knc_longitudinal_{name}_vs_force_x_{setup}.pdf"
+                        ))
+                        .is_file()
+                );
+            }
+        }
+    }
+    let html = fs::read_to_string(output.join("index.html")).unwrap();
+    assert!(html.contains("plots/knc/longitudinal/knc_longitudinal_toe_vs_force_x_b1e0f1r1.pdf"));
+    assert!(!html.contains("/comparison/"));
 }
