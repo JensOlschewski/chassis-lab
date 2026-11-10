@@ -116,7 +116,7 @@ remain compatible until an explicitly versioned contract change.
   writers for the `clab` frontend.
 - Rust workspace crates own the unified `clab` frontend and application core.
 - `py-chassislab/src/chassis_lab/` contains the embedded KnC kernels:
-  `knc_kernel.py` (branch detection, sweep gradients, interpolation, secant
+  `knc_kernel.py` (branch detection, least-squares metric fit, interpolation,
   metric catalog evaluation), `knc_plot_kernel.py` (report plotting), and one
   thin test kernel each, `knc_vertical_kernel.py` and `knc_roll_kernel.py`,
   holding that test's metric and plot catalog. Rust loads the core, the plot
@@ -236,26 +236,29 @@ them (Refs #204).
 
 Settings are written directly in `[setup.knc]` or `[setup.knc.<test>]`; there is
 no travel window. Secant widths are per test, named for their unit:
-`gradient_points_mm` (vertical and roll, default 10), `gradient_points_deg`
-(roll only, default 1) and `gradient_points_n` (longitudinal only, default 1000).
-Branch selection uses `direction` (`rise`, `fall`, `any`), `index` (default 2) and
-`plot_branches` (`all` or `selected`). `[metric.measurement]` and
-`[metric.simulation]` override the branch keys per source kind. The older
+`metric_window_mm` (vertical and roll, default 10), `metric_window_deg`
+(roll only, default 2) and `metric_window_n` (longitudinal only, default 1000).
+The metrics fit one full cycle chosen by `metric_cycle` (default 1), and
+`plot_branches` (`all` or `selected`) sets which branches the plots draw.
+`[metric.measurement]` and `[metric.simulation]` override the branch keys per
+source kind. The pre-rename keys (`gradient_points_*`, `direction`, `index`,
+`edge_width`, `edge_percentile`, `min_*_fraction`) are rejected. The older
 `[metric]`, `[window]` and `[branch]` tables and the window's `minimum_mm`,
 `maximum_mm` and `step_mm` are still accepted (the window range is ignored);
 defining a key both directly and in `[metric]` at the same level is an error.
 Optional keys that are left out use their default and produce one analysis
 warning each.
-`index` counts sweeps of the chosen direction after the measurement's first,
-partial branch is dropped, so `index = 1` is the first full sweep.
+A cycle runs from one upper reversal to the next: a falling branch and the
+rising branch after it. The partial branch before the first reversal is never
+part of a cycle, so `metric_cycle = 1` is the first full cycle.
 Branch detection and edge trimming have four more keys, set in `[setup.knc]` or
 `[setup.knc.<test>]` and also overridable in `[metric.measurement]` and
 `[metric.simulation]`; unset keys keep
-the kernel default and add no warning: `min_reversal_fraction` (default 0.01; a
+the kernel default and add no warning: `reversal_min_fraction` (default 0.01; a
 reversal that travels back less than this fraction of the total travel span does
-not split a branch), `min_branch_fraction` (default 0.05; measured branches
-shorter than this fraction of all samples are dropped), `edge_width` (default 200
-samples searched at each sweep end) and `edge_percentile` (default 0.95;
+not split a branch), `branch_min_fraction` (default 0.05; measured branches
+shorter than this fraction of all samples are dropped), `edge_trim_width` (default 200
+samples searched at each sweep end) and `edge_trim_percentile` (default 0.95;
 curvature percentile above which a point starts the edge cut). Ranges are
 checked in Rust. A plot's own `PlotSpec.branch` override wins over the config.
 `sprung_mass_front_left_kg`/`..._front_right_kg`/`..._rear_left_kg`/`..._rear_right_kg`
@@ -308,10 +311,15 @@ Vertical evaluation compares
 measurement-offset and static-simulation X/Y/Z trajectories for all four corners
 on the configured travel grid. Incomplete coverage and setup mismatches fail.
 
-KnC metrics are secants between symmetric points on the configured branch
-sweep: vertical selects the sweep on each corner's wheel-center travel, roll on
-`total_roll_angle`. Roll wheel-travel metrics use `gradient_points_mm`,
-roll-angle metrics `gradient_points_deg` (default 1 deg). Roll metrics:
+KnC metrics are least-squares slopes, as in the Ford reports: an ordinary
+least-squares fit of the response on the axis with a free intercept, over the
+samples of one full cycle (rise and fall pooled) that lie within ±window. One
+function, `gradient_metrics`, serves vertical, roll and longitudinal. The cycle
+is found on each corner's wheel-center travel (vertical) or `total_roll_angle`
+(roll). `lower` and `upper` in the output are the fitted line at ∓window. A
+sweep with no full cycle, samples that do not cover ±window, or fewer than 3
+samples in the window make the metric `missing`. Roll wheel-travel metrics use
+`metric_window_mm`, roll-angle metrics `metric_window_deg` (default 2 deg). Roll metrics:
 `roll_steer|roll_camber_<corner>_deg_per_mm` (over wheel-center Z) and
 `_deg_per_deg` (over the axle's `suspension_roll_angle`),
 `roll_suspension_rate_<corner>_n_per_mm` (over wheel-center Z) and
@@ -330,21 +338,21 @@ legacy dissertation method: contact-path angles from d(lateral contact
 position)/d(wheel pad Z) per side, corrected by roll angle, close a triangle
 over the absolute contact points (law of sines). The lateral position is
 `center_of_pressure_y`, else `contact_patch_y` with a warning. The configured
-sweep and its adjacent opposite sweep are each smoothed by a cubic
+rising branch of the metric cycle and its adjacent opposite sweep are each smoothed by a cubic
 least-squares fit over roll angle and averaged into the hysteresis mid line.
 
 ### Longitudinal compliance
 
 Signs: viewed from behind, +Y is right, −Y left, +X rearward, −X forward.
-Metrics are secants between ±`gradient_points_n` (default 1000 N, set in
-`[setup.knc.longitudinal]`) of `force_x` on the configured branch (no
-regression, no smoothing), scaled per kN: `brake_steer` is the toe change and
+Metrics are least-squares slopes of the response over `force_x` within
+±`metric_window_n` (default 1000 N, set in `[setup.knc.longitudinal]`) on the
+metric cycle (no smoothing), scaled per kN: `brake_steer` is the toe change and
 `windup_compliance` the castor/spin change, both with brakes applied (B1);
 `longitudinal_compliance` is the wheel-center X change without brakes (B0). The
 stored setup decides which metrics a file can report; the other setup's metrics
 are listed as `not covered` (orange) and dropped when another file of the run
 covers them. `missing` (red) means data was given but the result is broken, for
-example a branch that does not span ±1 kN. `analyze` requires a stored setup.
+example a sweep that does not span ±1 kN or has no full cycle. `analyze` requires a stored setup.
 
 Configure with `[[input.knc.longitudinal]]` (a list, one file per brake state; the
 single table is still accepted). Two files with the same brake state are refused.
@@ -357,9 +365,9 @@ wheel center X and Y; B0 plots: camber, toe, wheel center X and Y. Detail files
 are `knc-longitudinal-b0.json` and `knc-longitudinal-b1.json`. `analyze` prints
 warning details only with `--verbose`; otherwise one summary line.
 
-`--debug` (measurement input only) adds secant debug plots under
+`--debug` (measurement input only) adds fit debug plots under
 `plots/knc/<test>/debug/`: per corner, branch detection of the sweep signal and
-the response with the metric branch and the secant points marked. They cover
+the response with the metric cycle and the fit window marked. They cover
 longitudinal `toe`, `castor` (B1) and `wc_x` (B0), vertical bump steer, camber and
 spin, and the six roll steer and camber plots.
 
