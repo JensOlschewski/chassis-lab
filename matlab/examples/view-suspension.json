@@ -1,7 +1,23 @@
 {
-  "bodies": {
-    "B1_Link": { "points": ["l1", "rl1"], "shape": "line" },
-    "B2_Wheelcarrier": { "points": ["rui2", "ruo2", "rl2", "rm2"], "shape": "star" },
-    "B3_Wheel": { "points": ["rm3", "rn3"], "shape": "line" }
-  }
+    "bodies": {
+        "B1_Link": {
+            "points": [
+                "l1",
+                "rl1"
+            ],
+            "shape": "line"
+        },
+        "B6_TBE": {
+            "points": [
+                "rui6",
+                "ruo6",
+                "ru6",
+                "qt6",
+                "sc6",
+                "qt6",
+                "u6"
+            ],
+            "shape": "chain"
+        }
+    }
 }
