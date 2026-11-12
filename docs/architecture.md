@@ -221,15 +221,15 @@ and roll; missing setup requires reconversion. Old setup flags and `[meta]`
 are rejected.
 
 `inspect` shows stored setup, phase and offset. `analyze` carries a `conditions`
-object in each KnC JSON section and report domain; console and PDF show it beside
-the input name. `metrics.csv` appends `setup`, `phase`, `offset_mm`; SVC cells stay
+object in each KnC JSON section and report domain; the PDF shows it beside the
+input name. Console output stays minimal: title, metric count, metrics. `metrics.csv` appends `setup`, `phase`, `offset_mm`; SVC cells stay
 empty. Phase and offset apply only to lateral tests and are omitted from other
 JSON conditions. No filename inference or missing-case substitution.
 
 `compare` pairs matching tests only. Different tests are refused for single-test
 inputs; a missing domain in a multi-test run stays `not compared`. Setup, phase
 or offset differences warn and continue, without an opt-in flag. Warnings name
-both inputs and changed conditions; console, JSON and PDF retain them. Compare
+both inputs and changed conditions; console warnings, JSON and PDF retain them. Compare
 CSV appends per-input labels and conditions. Metric formulas and tolerance exit
 codes stay unchanged. Condition source tags remain unavailable until HDF5 stores
 them (Refs #204).

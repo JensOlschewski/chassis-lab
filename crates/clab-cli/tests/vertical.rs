@@ -1033,7 +1033,7 @@ fn compares_only_gradient_metrics_with_overlays() {
     );
     assert_eq!(report["status"], "informational");
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.contains("KnC Vertical\nbaseline:"));
+    assert!(stdout.contains("KnC Vertical\nrunning "));
     assert_vertical_console_order(&stdout);
     assert!(stdout.contains("knc::vertical::bump_steer_front_left_deg_per_mm ... (baseline"));
     assert!(!stdout.contains("wheel_center_x_mm"));

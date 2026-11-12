@@ -81,8 +81,7 @@ fn compares_svc_inputs_and_protects_reports_and_inputs() {
         String::from_utf8_lossy(&result.stderr)
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.starts_with("\nSVC\nbaseline:"));
-    assert!(stdout.contains("candidate_1:"));
+    assert!(stdout.starts_with("\nSVC\nrunning 29 metrics\n"));
     assert!(stdout.contains("svc::total_mass_kg ... (baseline"));
     assert!(!stdout.contains(" ... ok") && !stdout.contains(" ... failed"));
     assert!(
@@ -355,8 +354,6 @@ fn aggregates_candidates_once_and_marks_missing_without_extra_sections() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(stdout.matches("SVC\n").count(), 1);
-    assert!(stdout.contains("candidate_1:"));
-    assert!(stdout.contains("candidate_2:"));
     assert!(stdout.contains("candidate_1 "));
     assert!(stdout.contains("diff_1 "));
     assert!(stdout.contains("candidate_2 "));

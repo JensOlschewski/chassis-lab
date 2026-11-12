@@ -499,30 +499,6 @@ impl Conditions {
         parts.join(" | ")
     }
 
-    /// Aligned console lines under the section title.
-    pub(crate) fn lines(&self) -> Vec<String> {
-        let on = |flag: bool| if flag { "on" } else { "off" };
-        let setup = self.setup;
-        let mut lines = vec![format!(
-            "  Setup   {setup}  (brakes {} · engine {} · front ARB {} · rear ARB {})",
-            on(setup.brakes),
-            on(setup.engine),
-            on(setup.front_arb),
-            on(setup.rear_arb),
-        )];
-        lines.extend(
-            self.phase
-                .iter()
-                .map(|phase| format!("  Phase   {phase}-phase")),
-        );
-        lines.extend(
-            self.offset_mm
-                .iter()
-                .map(|offset| format!("  Offset  {offset} mm")),
-        );
-        lines
-    }
-
     pub(crate) fn json(&self) -> serde_json::Value {
         let mut value = serde_json::json!({"setup": self.setup.to_string()});
         if let Some(phase) = &self.phase {

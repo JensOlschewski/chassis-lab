@@ -180,10 +180,6 @@ impl Serialize for TestConditions {
 }
 
 impl TestConditions {
-    fn lines(&self) -> Vec<String> {
-        self.0.iter().flat_map(knc::Conditions::lines).collect()
-    }
-
     /// CSV cells; the setups of several runs are joined with ` / `.
     fn csv_cells(&self) -> [String; 3] {
         let mut cells: [Vec<String>; 3] = Default::default();
@@ -514,7 +510,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
     let progress = ReportProgress::new(args.output.is_some(), args.json);
-    let mut plot_jobs = Vec::new();
+    let mut plot_jobs: Vec<(&str, Vec<_>)> = Vec::new();
     if args.output.is_some() {
         for test in KncTest::ALL {
             let Some(ComparedDomain::Knc { runs, .. }) = baseline.domains.get(knc_key(test)) else {
@@ -531,88 +527,89 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 if test == KncTest::Longitudinal && paired.is_empty() {
                     continue;
                 }
-                let title = if test == KncTest::Longitudinal {
-                    format!("{} {}", test.title(), run.conditions.setup_code())
-                } else {
-                    test.title().to_owned()
-                };
-                plot_jobs.push((title, (test, run, paired)));
+                match plot_jobs.last_mut() {
+                    Some((title, group)) if *title == test.title() => {
+                        group.push((test, run, paired));
+                    }
+                    _ => plot_jobs.push((test.title(), vec![(test, run, paired)])),
+                }
             }
         }
     }
-    let workers = knc::plot_worker_limit(plot_jobs.len());
-    let jobs = plot_jobs
-        .iter()
-        .map(|(title, job)| (title.as_str(), job))
-        .collect();
-    let rendered = progress.plot_phases(jobs, |(test, base_run, candidates_for_test)| {
-        let (test, base_run) = (*test, *base_run);
-        let mut footer = vec![format!(
-            "Config: {}",
-            absolute_path(&args.config)?.display()
-        )];
-        footer.push(format!(
-            "{}: {} | {} | {} | {}",
-            display_label(&labels, 0),
-            baseline.config.name,
-            baseline.config.loadcase,
-            base_run.conditions.summary(),
-            absolute_path(&args.baseline)?.display()
-        ));
-        footer.extend(
-            candidates_for_test
-                .iter()
-                .map(|candidate| candidate.footer.clone()),
-        );
-        if let Some(warnings) = warnings.get(knc_key(test)) {
-            footer.extend(warnings.iter().map(|warning| format!("WARNING: {warning}")));
-        }
-        footer.push(format!("Created by: {}", report_creator()));
-        footer.push(format!("clab version: {}", env!("CARGO_PKG_VERSION")));
-        let debug = debug_info(
-            args.debug,
-            &args.config,
-            &std::iter::once(base_run.source.as_path())
-                .chain(
+    let workers = knc::plot_worker_limit(plot_jobs.iter().map(|(_, group)| group.len()).sum());
+    // One progress job per test; its brake states render in turn.
+    let rendered = progress.plot_phases(plot_jobs, |group| {
+        group
+            .into_iter()
+            .map(|(test, base_run, candidates_for_test)| {
+                let mut footer = vec![format!(
+                    "Config: {}",
+                    absolute_path(&args.config)?.display()
+                )];
+                footer.push(format!(
+                    "{}: {} | {} | {} | {}",
+                    display_label(&labels, 0),
+                    baseline.config.name,
+                    baseline.config.loadcase,
+                    base_run.conditions.summary(),
+                    absolute_path(&args.baseline)?.display()
+                ));
+                footer.extend(
                     candidates_for_test
                         .iter()
-                        .map(|candidate| candidate.run.source.as_path()),
-                )
-                .collect::<Vec<_>>(),
-        )?;
-        let candidates = candidates_for_test
-            .iter()
-            .map(|candidate| {
-                (
-                    candidate.label.clone(),
-                    candidate.run.curves.clone(),
-                    candidate.run.branch.clone(),
-                    candidate.run.corner_mass_kg.clone(),
+                        .map(|candidate| candidate.footer.clone()),
+                );
+                if let Some(warnings) = warnings.get(knc_key(test)) {
+                    footer.extend(warnings.iter().map(|warning| format!("WARNING: {warning}")));
+                }
+                footer.push(format!("Created by: {}", report_creator()));
+                footer.push(format!("clab version: {}", env!("CARGO_PKG_VERSION")));
+                let debug = debug_info(
+                    args.debug,
+                    &args.config,
+                    &std::iter::once(base_run.source.as_path())
+                        .chain(
+                            candidates_for_test
+                                .iter()
+                                .map(|candidate| candidate.run.source.as_path()),
+                        )
+                        .collect::<Vec<_>>(),
+                )?;
+                let candidates = candidates_for_test
+                    .iter()
+                    .map(|candidate| {
+                        (
+                            candidate.label.clone(),
+                            candidate.run.curves.clone(),
+                            candidate.run.branch.clone(),
+                            candidate.run.corner_mass_kg.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let setup = base_run.conditions.setup_code();
+                knc::compare_plots(
+                    &baseline.config,
+                    test,
+                    (&base_run.curves, &base_run.branch, &base_run.corner_mass_kg),
+                    &candidates,
+                    (
+                        &display_label(&labels, 0),
+                        &format!("plots/knc/{}", test.name()),
+                    ),
+                    base_run.conditions.brakes(),
+                    knc::PlotOptions {
+                        label: None,
+                        footer: &footer.join("\n"),
+                        debug: debug.as_deref(),
+                        workers,
+                        setup: (test == KncTest::Longitudinal).then_some(setup.as_str()),
+                    },
+                    &progress,
                 )
             })
-            .collect::<Vec<_>>();
-        let setup = base_run.conditions.setup_code();
-        knc::compare_plots(
-            &baseline.config,
-            test,
-            (&base_run.curves, &base_run.branch, &base_run.corner_mass_kg),
-            &candidates,
-            (
-                &display_label(&labels, 0),
-                &format!("plots/knc/{}", test.name()),
-            ),
-            base_run.conditions.brakes(),
-            knc::PlotOptions {
-                label: None,
-                footer: &footer.join("\n"),
-                debug: debug.as_deref(),
-                workers,
-                setup: (test == KncTest::Longitudinal).then_some(setup.as_str()),
-            },
-            &progress,
-        )
+            .collect::<Result<Vec<_>>>()
     })?;
-    for group in rendered {
+    for group in rendered.into_iter().flatten() {
         plots.extend(group);
     }
     let mut baseline_entry = serde_json::json!({"input": provenance(&args.baseline)?, "case": {"name": baseline.config.name, "loadcase": baseline.config.loadcase}});
@@ -1192,7 +1189,7 @@ fn json_metrics(
 }
 
 fn print_metrics(
-    inputs: &[InputSummary],
+    _inputs: &[InputSummary],
     candidates: &[PathBuf],
     domains: &BTreeMap<&'static str, ComparedDomain>,
     rows: &[(PathBuf, Metric)],
@@ -1210,19 +1207,6 @@ fn print_metrics(
         println!();
         let grouped = grouped_metrics(compared, candidates, rows);
         println!("{title}");
-        for (index, input) in inputs.iter().enumerate() {
-            let role = if index == 0 {
-                "baseline".to_owned()
-            } else {
-                format!("candidate_{index}")
-            };
-            println!("{role}: {} | {}", input.label, input.path.display());
-            if let Some(conditions) = domain_test.and_then(|test| input.conditions.get(test)) {
-                for line in conditions.lines() {
-                    println!("{line}");
-                }
-            }
-        }
         println!(
             "running {} metrics",
             grouped
