@@ -77,6 +77,7 @@ export function setupInspect() {
     const fields: [string, string | number][] = [
       ["Source", summary.source_file],
       ["Kind", summary.source_kind],
+      ...(summary.setup ? [["Setup", summary.setup] as [string, string]] : []),
       ["Samples", summary.samples],
       ["Signals", summary.signals],
     ];

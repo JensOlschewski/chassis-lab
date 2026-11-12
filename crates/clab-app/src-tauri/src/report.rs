@@ -13,7 +13,11 @@ use sha2::{Digest, Sha256};
 fn is_bundle_file(name: &str) -> bool {
     matches!(
         name,
-        "report.json" | "knc-vertical.plots.json" | "knc-roll.plots.json"
+        "report.json"
+            | "knc-vertical.plots.json"
+            | "knc-roll.plots.json"
+            | "knc-longitudinal-b0.plots.json"
+            | "knc-longitudinal-b1.plots.json"
     )
 }
 

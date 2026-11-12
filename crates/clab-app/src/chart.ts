@@ -10,6 +10,7 @@ export interface SignalInfo {
 export interface Summary {
   source_file: string;
   source_kind: string;
+  setup: string | null;
   schema_version: number;
   samples: number;
   signals: number;
