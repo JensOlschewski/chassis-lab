@@ -1,5 +1,8 @@
 function ProgressBar(currentStep, totalSteps, time)
-    
+    if ~strcmp(getenv('MKS_PROGRESS'), '1')
+        return
+    end
+
     % Calculate the progress percentage
     progressPercentage = 100 * currentStep / totalSteps;
     

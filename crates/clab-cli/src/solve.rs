@@ -34,6 +34,9 @@ pub(crate) struct SolveArgs {
     /// Replace an existing output file.
     #[arg(long)]
     force: bool,
+    /// Show solver progress.
+    #[arg(long)]
+    progress: bool,
 }
 
 pub(crate) fn solve(args: SolveArgs) -> Result<()> {
@@ -69,6 +72,11 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .current_dir(model.parent().unwrap_or(Path::new(".")));
     if let Some(var) = library_path(&runtime)? {
         command.env(var.0, var.1);
+    }
+    if args.progress {
+        command
+            .env("MKS_PROGRESS", "1")
+            .stdout(std::process::Stdio::inherit());
     }
     let result = command
         .output()

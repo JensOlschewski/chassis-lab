@@ -54,7 +54,7 @@ historyStruct.dfsj = zeros(length(jointSecStruct)*6,steps);
 for i = 1:steps
 
     % Update progress bar
-    % ProgressBar(i, steps, time_array(i));
+    ProgressBar(i, steps, time_array(i));
 
     % Update solver structure for current step
     solverStruct = createSolverStruct(solverStruct,'Compliant',jointPrimStruct,jointSecStruct,bushPrimStruct,bushSecStruct,forceAddStruct);

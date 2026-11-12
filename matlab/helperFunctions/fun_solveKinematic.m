@@ -47,7 +47,7 @@ historyStruct.fsj = zeros(6*solverStruct.numSecJoints, steps);
 for i = 1:steps
 
     % Update progress bar
-    % ProgressBar(i, steps, time_array(i));
+    ProgressBar(i, steps, time_array(i));
 
     % Update solver structure for current step
     solverStruct = createSolverStruct(solverStruct, 'Kinematic', jointPrimStruct, jointSecStruct);
