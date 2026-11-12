@@ -495,6 +495,69 @@ fn compare_uses_the_analyze_metrics_and_overlays_only_matching_setups() {
 }
 
 #[test]
+fn compare_warns_when_longitudinal_conditions_differ() {
+    let directory = tempdir().unwrap();
+    let baseline = converted(directory.path(), "base.h5", "b1e0f1r1", 0.1);
+    let candidate = converted(directory.path(), "candidate.h5", "b1e1f1r1", 0.1);
+    let result = compare(directory.path(), &[&baseline, &candidate], false, false);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("test conditions differ (engine)"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("knc::longitudinal"), "{stderr}");
+}
+
+#[test]
+fn compare_report_carries_longitudinal_conditions_in_json_csv_and_footer() {
+    let directory = tempdir().unwrap();
+    let baseline = converted(directory.path(), "base.h5", "b1e0f1r1", 0.1);
+    let candidate = converted(directory.path(), "candidate.h5", "b1e1f1r1", 0.1);
+    let result = compare(directory.path(), &[&baseline, &candidate], false, true);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let output = directory.path().join("report");
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(
+        report["candidates"][0]["domains"][0]["conditions"]["setup"],
+        "b1e1f1r1"
+    );
+    let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
+    let columns = csv.headers().unwrap().clone();
+    let mut rows = 0;
+    for row in csv.records() {
+        let row = row.unwrap();
+        let cell = |name| &row[columns.iter().position(|column| column == name).unwrap()];
+        assert_eq!(cell("baseline_setup"), "b1e0f1r1");
+        assert_eq!(cell("candidate_setup"), "b1e1f1r1");
+        rows += 1;
+    }
+    assert!(rows > 0);
+    let plots: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(output.join("knc-longitudinal-b1.plots.json")).unwrap(),
+    )
+    .unwrap();
+    for plot in plots["plots"].as_array().unwrap() {
+        let footer = plot["footer"].as_str().unwrap();
+        assert!(footer.contains("b1e0f1r1"), "{footer}");
+        assert!(footer.contains("b1e1f1r1"), "{footer}");
+        assert!(
+            footer.contains("test conditions differ (engine)"),
+            "{footer}"
+        );
+    }
+}
+
+#[test]
 fn compare_debug_renders_each_series_and_brake_state_in_flat_test_folder() {
     let directory = tempdir().unwrap();
     let b0 = converted(directory.path(), "b0.h5", "b0e0f1r1", 0.1);
