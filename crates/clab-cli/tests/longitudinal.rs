@@ -67,6 +67,10 @@ fn force() -> Vec<f64> {
 /// +0.1 deg/kN as measured (the right side is flipped by the convention),
 /// castor -0.6 deg/kN. Each channel carries a static offset.
 fn measurement(path: &Path, setup: &str) {
+    measurement_with_toe(path, setup, 0.1);
+}
+
+fn measurement_with_toe(path: &Path, setup: &str, toe_gain: f64) {
     let file = File::create(path).unwrap();
     let force = force();
     scalar(&file, "schema_version", 2_u32);
@@ -93,7 +97,7 @@ fn measurement(path: &Path, setup: &str) {
             ("wcx", "mm", 2., 1200.),
             ("wcy", "mm", 0.1, 750.),
             ("pcpx", "mm", 1., 1200.),
-            ("steer", "deg", 0.1, 0.3),
+            ("steer", "deg", toe_gain, 0.3),
             ("cam", "deg", 0.05, -1.),
             ("cas", "deg", -0.6, 6.),
         ] {
@@ -371,4 +375,241 @@ fn unmapped_response_makes_its_metric_unavailable_not_zero() {
         "{stdout}"
     );
     assert!(metric(&stdout, "brake_steer_front_left_deg_per_kn").is_some());
+}
+
+fn converted(directory: &Path, name: &str, setup: &str, toe_gain: f64) -> std::path::PathBuf {
+    let input = directory.join(name);
+    let staging = input.with_extension("fixture.h5");
+    measurement_with_toe(&staging, setup, toe_gain);
+    fs::copy(&staging, &input).unwrap();
+    fs::remove_file(staging).unwrap();
+    input
+}
+
+fn compare(
+    directory: &Path,
+    inputs: &[&Path],
+    tolerances: bool,
+    report: bool,
+) -> std::process::Output {
+    let config_path = directory.join("config.toml");
+    config(&config_path, None);
+    let mut text = fs::read_to_string(&config_path).unwrap();
+    text.push_str(
+        "[validation.knc.longitudinal.tolerances.absolute]\n\
+         brake_steer_front_left_deg_per_kn=0.05\n\
+         windup_compliance_front_left_deg_per_kn=0.01\n",
+    );
+    fs::write(&config_path, text).unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
+    command.arg("compare").arg(&config_path).args(inputs);
+    if tolerances {
+        command.arg("--tolerances");
+    }
+    if report {
+        command.arg("-r").arg(directory.join("report"));
+    }
+    command.output().unwrap()
+}
+
+#[test]
+fn compare_checks_longitudinal_tolerances_like_other_tests() {
+    let directory = tempdir().unwrap();
+    let baseline = converted(directory.path(), "base.h5", "b1e0f1r1", 0.1);
+    let candidate = converted(directory.path(), "candidate.h5", "b1e0f1r1", 0.2);
+    let result = compare(directory.path(), &[&baseline, &candidate], true, false);
+    assert_eq!(result.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let line = |name: &str| {
+        stdout
+            .lines()
+            .find(|line| line.contains(&format!("knc::longitudinal::{name} ")))
+            .unwrap_or_else(|| panic!("missing {name}\n{stdout}"))
+    };
+    assert!(
+        line("brake_steer_front_left_deg_per_kn").contains("FAILED"),
+        "{stdout}"
+    );
+    assert!(
+        line("windup_compliance_front_left_deg_per_kn").contains("ok"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("0 metric missing"), "{stdout}");
+    assert!(!stdout.contains("longitudinal_compliance"), "{stdout}");
+}
+
+#[test]
+fn compare_uses_the_analyze_metrics_and_overlays_only_matching_setups() {
+    let directory = tempdir().unwrap();
+    let b0 = converted(directory.path(), "b0.h5", "b0e0f1r1", 0.1);
+    let b1 = converted(directory.path(), "b1.h5", "b1e0f1r1", 0.1);
+    let manifest = directory.path().join("run.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "[meta]\nname=\"fixture\"\nloadcase=\"L\"\n\
+             [[input.knc.longitudinal]]\nfile=\"{}\"\n\
+             [[input.knc.longitudinal]]\nfile=\"{}\"\n",
+            b0.display(),
+            b1.display()
+        ),
+    )
+    .unwrap();
+    let result = compare(directory.path(), &[&manifest, &b1], false, true);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert_eq!(stdout.matches("KnC Longitudinal").count(), 1, "{stdout}");
+    assert!(
+        stdout.contains("brake_steer_front_left_deg_per_kn"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("longitudinal_compliance_front_left_mm_per_kn ..."),
+        "{stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("4 metrics not compared"), "{stderr}");
+    let comparison = directory.path().join("report/plots/knc/longitudinal");
+    let names: Vec<_> = fs::read_dir(&comparison)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert!(
+        names.iter().any(|name| name.ends_with("_b1e0f1r1.pdf")),
+        "{names:?}"
+    );
+    assert!(
+        !names.iter().any(|name| name.contains("b0e0f1r1")),
+        "{names:?}"
+    );
+    assert!(
+        directory
+            .path()
+            .join("report/knc-longitudinal-b1.plots.json")
+            .is_file()
+    );
+}
+
+#[test]
+fn compare_warns_when_longitudinal_conditions_differ() {
+    let directory = tempdir().unwrap();
+    let baseline = converted(directory.path(), "base.h5", "b1e0f1r1", 0.1);
+    let candidate = converted(directory.path(), "candidate.h5", "b1e1f1r1", 0.1);
+    let result = compare(directory.path(), &[&baseline, &candidate], false, false);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("test conditions differ (engine)"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("knc::longitudinal"), "{stderr}");
+}
+
+#[test]
+fn compare_report_carries_longitudinal_conditions_in_json_csv_and_footer() {
+    let directory = tempdir().unwrap();
+    let baseline = converted(directory.path(), "base.h5", "b1e0f1r1", 0.1);
+    let candidate = converted(directory.path(), "candidate.h5", "b1e1f1r1", 0.1);
+    let result = compare(directory.path(), &[&baseline, &candidate], false, true);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let output = directory.path().join("report");
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
+    assert_eq!(
+        report["candidates"][0]["domains"][0]["conditions"]["setup"],
+        "b1e1f1r1"
+    );
+    let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
+    let columns = csv.headers().unwrap().clone();
+    let mut rows = 0;
+    for row in csv.records() {
+        let row = row.unwrap();
+        let cell = |name| &row[columns.iter().position(|column| column == name).unwrap()];
+        assert_eq!(cell("baseline_setup"), "b1e0f1r1");
+        assert_eq!(cell("candidate_setup"), "b1e1f1r1");
+        rows += 1;
+    }
+    assert!(rows > 0);
+    let plots: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(output.join("knc-longitudinal-b1.plots.json")).unwrap(),
+    )
+    .unwrap();
+    for plot in plots["plots"].as_array().unwrap() {
+        let footer = plot["footer"].as_str().unwrap();
+        assert!(footer.contains("b1e0f1r1"), "{footer}");
+        assert!(footer.contains("b1e1f1r1"), "{footer}");
+        assert!(
+            footer.contains("test conditions differ (engine)"),
+            "{footer}"
+        );
+    }
+}
+
+#[test]
+fn compare_debug_renders_each_series_and_brake_state_in_flat_test_folder() {
+    let directory = tempdir().unwrap();
+    let b0 = converted(directory.path(), "b0.h5", "b0e0f1r1", 0.1);
+    let b1 = converted(directory.path(), "b1.h5", "b1e0f1r1", 0.1);
+    let manifest = directory.path().join("run.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "[[input.knc.longitudinal]]\nfile=\"{}\"\n\
+             [[input.knc.longitudinal]]\nfile=\"{}\"\n",
+            b0.display(),
+            b1.display()
+        ),
+    )
+    .unwrap();
+    let config_path = directory.path().join("config.toml");
+    config(&config_path, None);
+    let output = directory.path().join("report");
+    let result = Command::new(env!("CARGO_BIN_EXE_clab"))
+        .arg("compare")
+        .args([&config_path, &manifest, &manifest, &manifest])
+        .arg("--debug")
+        .arg("--report")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let plots = output.join("plots/knc/longitudinal");
+    assert!(!plots.join("comparison").exists());
+    let debug = plots.join("debug");
+    assert_eq!(fs::read_dir(&debug).unwrap().count(), 9);
+    for series in 0..3 {
+        for (setup, names) in [
+            ("b0e0f1r1", vec!["wc_x"]),
+            ("b1e0f1r1", vec!["toe", "castor"]),
+        ] {
+            for name in names {
+                assert!(
+                    debug
+                        .join(format!(
+                            "series_{series}_knc_longitudinal_{name}_vs_force_x_{setup}.pdf"
+                        ))
+                        .is_file()
+                );
+            }
+        }
+    }
+    let html = fs::read_to_string(output.join("index.html")).unwrap();
+    assert!(html.contains("plots/knc/longitudinal/knc_longitudinal_toe_vs_force_x_b1e0f1r1.pdf"));
+    assert!(!html.contains("/comparison/"));
 }

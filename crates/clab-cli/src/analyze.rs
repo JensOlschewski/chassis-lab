@@ -107,7 +107,7 @@ fn analyze_run(args: &mut AnalyzeArgs) -> Result<()> {
     if has_svc && is_hdf5(&config.simulation_json) {
         sources.push(config.simulation_json.as_path());
     }
-    let units = knc_units(&config);
+    let units = knc::knc_units(&config);
     for (test, unit, path) in &units {
         sources.push(path.as_path());
         if let Some(static_input) = &test
@@ -154,57 +154,6 @@ fn analyze_run(args: &mut AnalyzeArgs) -> Result<()> {
     }
 }
 
-/// One analysis unit per configured KnC input: its test, a configuration
-/// holding only that input, and its file. Longitudinal yields one per listed file.
-fn knc_units(
-    config: &clab_core::config::CaseConfig,
-) -> Vec<(KncTest, clab_core::config::CaseConfig, PathBuf)> {
-    let mut units = Vec::new();
-    for test in KncTest::ALL {
-        let inputs: Vec<_> = match test {
-            KncTest::Vertical => config.vertical.iter().collect(),
-            KncTest::Roll => config.roll.iter().collect(),
-            KncTest::Longitudinal => config.longitudinal.iter().collect(),
-        };
-        for knc in inputs {
-            let path = match knc.source_kind {
-                clab_core::config::SourceKind::Simulation => knc.simulation_hdf5.clone(),
-                clab_core::config::SourceKind::Measurement => knc.measurement_hdf5.clone(),
-            };
-            let mut unit = config.clone();
-            if test == KncTest::Longitudinal {
-                unit.longitudinal = vec![knc.clone()];
-            }
-            units.push((test, unit, path));
-        }
-    }
-    units
-}
-
-/// Two longitudinal inputs with the same brake state would report the same
-/// metrics twice; refuse instead of picking one.
-fn ensure_distinct_setups<'a>(
-    inputs: impl Iterator<Item = (KncTest, &'a Path, &'a knc::Reports)>,
-) -> Result<()> {
-    let mut seen: Vec<(bool, &Path)> = Vec::new();
-    for (test, path, report) in inputs {
-        if test != KncTest::Longitudinal {
-            continue;
-        }
-        let brakes = report.conditions.brakes();
-        if let Some((_, first)) = seen.iter().find(|(seen, _)| *seen == brakes) {
-            bail!(
-                "two longitudinal files with setup B{}: '{}' and '{}'; metrics would be ambiguous",
-                u8::from(brakes),
-                first.display(),
-                path.display()
-            );
-        }
-        seen.push((brakes, path));
-    }
-    Ok(())
-}
-
 fn validate_input_file(path: &Path) -> Result<()> {
     if !path.is_file() {
         bail!("input file cannot be found: {}", path.display());
@@ -245,7 +194,7 @@ fn write_combined_run(
         warnings.extend(report.warnings.iter().cloned());
         knc_reports.push((test, unit, path, report, debug));
     }
-    ensure_distinct_setups(
+    knc::ensure_distinct_setups(
         knc_reports
             .iter()
             .map(|(test, _, path, report, _)| (*test, *path, report)),

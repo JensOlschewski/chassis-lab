@@ -700,16 +700,16 @@ fn analyzes_and_compares_roll_combined_with_vertical_in_one_run() {
     assert!(compared.join("knc-vertical.json").is_file());
     assert!(compared.join("knc-roll.json").is_file());
     let html = fs::read_to_string(compared.join("index.html")).unwrap();
-    assert!(html.contains("href=\"plots/knc/roll/comparison/knc_roll_wcz_vs_wcx.pdf\""));
-    assert!(html.contains("href=\"plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcx.pdf\""));
+    assert!(html.contains("href=\"plots/knc/roll/knc_roll_wcz_vs_wcx.pdf\""));
+    assert!(html.contains("href=\"plots/knc/vertical/knc_vertical_wcz_vs_wcx.pdf\""));
     assert!(
         compared
-            .join("plots/knc/roll/comparison/knc_roll_wcz_vs_wcx.pdf")
+            .join("plots/knc/roll/knc_roll_wcz_vs_wcx.pdf")
             .is_file()
     );
     assert!(
         compared
-            .join("plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcx.pdf")
+            .join("plots/knc/vertical/knc_vertical_wcz_vs_wcx.pdf")
             .is_file()
     );
 
@@ -786,24 +786,26 @@ fn compares_roll_metrics_between_measurements() {
     assert!((stiffness["difference"].as_f64().unwrap() - 100.).abs() < 1e-6);
     assert!(
         output
-            .join("plots/knc/roll/comparison/knc_roll_wcz_vs_wcx.pdf")
+            .join("plots/knc/roll/knc_roll_wcz_vs_wcx.pdf")
             .is_file()
     );
     assert!(
         output
-            .join("plots/knc/roll/comparison/debug/series_0_knc_roll_ride_rate.pdf")
+            .join("plots/knc/roll/debug/series_0_knc_roll_ride_rate.pdf")
             .is_file()
     );
     assert!(
         output
-            .join("plots/knc/roll/comparison/debug/series_1_knc_roll_ride_rate.pdf")
+            .join("plots/knc/roll/debug/series_1_knc_roll_ride_rate.pdf")
             .is_file()
     );
     for series in 0..2 {
         for axle in ["front", "rear"] {
             assert!(
                 output
-                    .join(format!("plots/knc/roll/comparison/debug/series_{series}_knc_roll_roll_center_{axle}.pdf"))
+                    .join(format!(
+                        "plots/knc/roll/debug/series_{series}_knc_roll_roll_center_{axle}.pdf"
+                    ))
                     .is_file()
             );
         }
@@ -814,12 +816,6 @@ fn compares_roll_metrics_between_measurements() {
         "knc_roll_roll_center_front.pdf",
         "knc_roll_roll_center_rear.pdf",
     ] {
-        assert!(
-            output
-                .join("plots/knc/roll/comparison")
-                .join(name)
-                .is_file(),
-            "{name}"
-        );
+        assert!(output.join("plots/knc/roll").join(name).is_file(), "{name}");
     }
 }

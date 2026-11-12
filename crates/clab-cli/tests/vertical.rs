@@ -1033,16 +1033,15 @@ fn compares_only_gradient_metrics_with_overlays() {
     );
     assert_eq!(report["status"], "informational");
     let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(stdout.contains("KnC Vertical\nbaseline:"));
+    assert!(stdout.contains("KnC Vertical\nrunning "));
     assert_vertical_console_order(&stdout);
     assert!(stdout.contains("knc::vertical::bump_steer_front_left_deg_per_mm ... (baseline"));
     assert!(!stdout.contains("wheel_center_x_mm"));
-    let svg = output.join("plots/knc/vertical/comparison/knc_vertical_wcz_vs_wcy.pdf");
+    let svg = output.join("plots/knc/vertical/knc_vertical_wcz_vs_wcy.pdf");
     assert!(fs::read(svg).unwrap().starts_with(b"%PDF"));
     // comparison_config sets sprung_mass_*_kg, so ride_frequency's overlay
     // plot renders for both baseline and candidate series.
-    let ride_frequency =
-        output.join("plots/knc/vertical/comparison/knc_vertical_ride_frequency.pdf");
+    let ride_frequency = output.join("plots/knc/vertical/knc_vertical_ride_frequency.pdf");
     assert!(fs::read(ride_frequency).unwrap().starts_with(b"%PDF"));
     assert!(output.join("metrics.csv").is_file());
     let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();

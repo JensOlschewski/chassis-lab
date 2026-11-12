@@ -664,7 +664,16 @@ def test_debug_adds_secant_branch_plots_for_bump_steer_camber_and_spin():
         branches_json=json.dumps([{"measurement": True}] * 2),
         debug=info,
     )
-    assert {f"debug/series_1_{name}.pdf" for name in names} <= set(compared)
+    debug_names = {
+        name.split("/debug/measurement_")[1]
+        for name in reports
+        if "/debug/" in name
+    }
+    assert {name for name in compared if name.startswith("debug/")} == {
+        f"debug/series_{index}_{name}"
+        for index in range(2)
+        for name in debug_names
+    }
 
 
 def test_small_reversal_inside_a_ramp_does_not_split_the_branch() -> None:

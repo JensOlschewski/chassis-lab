@@ -76,20 +76,48 @@ struct Metric {
     status: &'static str,
 }
 
-#[allow(clippy::large_enum_variant)]
+/// Curves of one KnC input file. Metrics of a test are merged across its
+/// files; plots are not, so a longitudinal B0 run is never overlaid on B1.
+struct KncRun {
+    source: PathBuf,
+    curves: serde_json::Value,
+    conditions: knc::Conditions,
+    branch: clab_core::config::VerticalBranch,
+    /// This series' own `ride_frequency` mass map (same source as
+    /// `knc::Reports::corner_mass_kg`): baseline and candidate
+    /// resolve it from their own SVC run, so it travels per series,
+    /// not shared.
+    corner_mass_kg: BTreeMap<String, f64>,
+}
+
+impl KncRun {
+    /// Longitudinal runs pair by brake state, every other test has one run.
+    fn pairs_with(&self, other: &Self, test: KncTest) -> bool {
+        test != KncTest::Longitudinal || self.conditions.brakes() == other.conditions.brakes()
+    }
+}
+
+/// Condition document of a test: one object per run, an array for several.
+fn runs_json(runs: &[KncRun]) -> serde_json::Value {
+    match runs {
+        [run] => run.conditions.json(),
+        runs => runs.iter().map(|run| run.conditions.json()).collect(),
+    }
+}
+
+/// A candidate run paired with a baseline run, with its plot footer line.
+struct CandidateRun<'a> {
+    label: String,
+    run: &'a KncRun,
+    footer: String,
+}
+
 enum ComparedDomain {
     Svc(Vec<svc::CanonicalMetric>),
     Knc {
         test: KncTest,
-        curves: serde_json::Value,
         metrics: Vec<serde_json::Value>,
-        conditions: knc::Conditions,
-        branch: clab_core::config::VerticalBranch,
-        /// This series' own `ride_frequency` mass map (same source as
-        /// `knc::Reports::corner_mass_kg`): baseline and candidate
-        /// resolve it from their own SVC run, so it travels per series,
-        /// not shared.
-        corner_mass_kg: BTreeMap<String, f64>,
+        runs: Vec<KncRun>,
     },
 }
 
@@ -113,7 +141,7 @@ impl ComparedDomain {
 }
 
 /// Keys of `Input::domains` in console order; KnC tests compare separately.
-const DOMAIN_KEYS: [&str; 3] = ["svc", "knc-vertical", "knc-roll"];
+const DOMAIN_KEYS: [&str; 4] = ["svc", "knc-vertical", "knc-roll", "knc-longitudinal"];
 
 fn knc_key(test: KncTest) -> &'static str {
     match test {
@@ -134,7 +162,34 @@ struct Input {
 struct InputSummary {
     label: String,
     path: PathBuf,
-    conditions: BTreeMap<&'static str, knc::Conditions>,
+    conditions: BTreeMap<&'static str, TestConditions>,
+}
+
+/// Conditions of every run of one test: serialized as an object for a single
+/// run, as an array for several.
+#[derive(Clone)]
+struct TestConditions(Vec<knc::Conditions>);
+
+impl Serialize for TestConditions {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self.0.as_slice() {
+            [one] => one.serialize(serializer),
+            many => many.serialize(serializer),
+        }
+    }
+}
+
+impl TestConditions {
+    /// CSV cells; the setups of several runs are joined with ` / `.
+    fn csv_cells(&self) -> [String; 3] {
+        let mut cells: [Vec<String>; 3] = Default::default();
+        for run in &self.0 {
+            for (column, cell) in cells.iter_mut().zip(run.csv_cells()) {
+                column.push(cell);
+            }
+        }
+        cells.map(|column| column.join(" / "))
+    }
 }
 
 struct ComparisonTolerances {
@@ -253,9 +308,10 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                 .domains
                 .values()
                 .filter_map(|domain| match domain {
-                    ComparedDomain::Knc {
-                        test, conditions, ..
-                    } => Some((test.name(), conditions.clone())),
+                    ComparedDomain::Knc { test, runs, .. } => Some((
+                        test.name(),
+                        TestConditions(runs.iter().map(|run| run.conditions.clone()).collect()),
+                    )),
                     ComparedDomain::Svc(_) => None,
                 })
                 .collect(),
@@ -268,8 +324,9 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             .as_ref()
             .map(|v| v.tolerances.clone())
             .unwrap_or_else(empty_tolerances),
-        knc: knc_configs(&baseline.config)
+        knc: KncTest::ALL
             .into_iter()
+            .filter_map(|test| test.config(&baseline.config).map(|knc| (test, knc)))
             .map(|(test, knc)| (knc_key(test), knc.tolerances.clone()))
             .collect(),
     });
@@ -311,17 +368,12 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     ComparedDomain::Knc {
                         test: base_test,
                         metrics: base_metrics,
-                        conditions: base_conditions,
-                        ..
+                        runs: base_runs,
                     },
                     ComparedDomain::Knc {
                         test,
-                        curves: candidate_curves,
                         metrics: candidate_metrics,
-                        conditions: candidate_conditions,
-                        branch: candidate_branch,
-                        corner_mass_kg: candidate_mass,
-                        ..
+                        runs: candidate_runs,
                     },
                 ) if base_test == test => {
                     let compared = compare_knc_metrics(
@@ -333,37 +385,60 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
                     failed |= compared.iter().any(|metric| metric.status == "failed");
                     incomplete |= compared.iter().any(|metric| metric.status == "missing");
                     metrics.extend(compared);
-                    domains.push(serde_json::json!({"domain": "knc", "test": test.name(), "status": "compared", "conditions": candidate_conditions.json()}));
+                    domains.push(serde_json::json!({"domain": "knc", "test": test.name(), "status": "compared", "conditions": runs_json(candidate_runs)}));
                     let label = display_label(&labels, index + 1);
-                    let differences = base_conditions.differences(candidate_conditions);
-                    if !differences.is_empty() {
+                    let skipped = not_compared(base_metrics, candidate_metrics);
+                    if !skipped.is_empty() {
                         warnings.entry(*name).or_default().push(display::tag_warning(
                             "knc",
                             Some(test.name()),
                             format!(
-                                "test conditions differ ({}): {} {} vs {} {}; results compare different physical cases",
-                                differences.join(", "),
+                                "{} metrics not compared, the stored setups of {} and {} do not both cover them: {}",
+                                skipped.len(),
                                 display_label(&labels, 0),
-                                base_conditions.summary(),
                                 label,
-                                candidate_conditions.summary(),
+                                skipped.join(", "),
                             ),
                         ));
                     }
-                    knc_candidates.entry(test.name()).or_default().push((
-                        label.clone(),
-                        candidate_curves.clone(),
-                        candidate_branch.clone(),
-                        candidate_mass.clone(),
-                        format!(
-                            "{label}: {} | {} | {} | {}",
-                            candidate.config.name,
-                            candidate.config.loadcase,
-                            candidate_conditions.summary(),
-                            absolute_path(path)?.display()
-                        ),
-                        path.as_path(),
-                    ));
+                    for base_run in base_runs {
+                        for candidate_run in candidate_runs
+                            .iter()
+                            .filter(|run| base_run.pairs_with(run, *test))
+                        {
+                            let (base_conditions, candidate_conditions) =
+                                (&base_run.conditions, &candidate_run.conditions);
+                            let differences = base_conditions.differences(candidate_conditions);
+                            if !differences.is_empty() {
+                                warnings.entry(*name).or_default().push(display::tag_warning(
+                                    "knc",
+                                    Some(test.name()),
+                                    format!(
+                                        "test conditions differ ({}): {} {} vs {} {}; results compare different physical cases",
+                                        differences.join(", "),
+                                        display_label(&labels, 0),
+                                        base_conditions.summary(),
+                                        label,
+                                        candidate_conditions.summary(),
+                                    ),
+                                ));
+                            }
+                            knc_candidates
+                                .entry(test.name())
+                                .or_default()
+                                .push(CandidateRun {
+                                    label: label.clone(),
+                                    run: candidate_run,
+                                    footer: format!(
+                                        "{label}: {} | {} | {} | {}",
+                                        candidate.config.name,
+                                        candidate.config.loadcase,
+                                        candidate_conditions.summary(),
+                                        absolute_path(path)?.display()
+                                    ),
+                                });
+                        }
+                    }
                 }
                 _ => bail!(
                     "incompatible comparison domains between '{}' and '{}'",
@@ -399,14 +474,16 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
         candidates.push(entry);
     }
     if args.debug {
-        for test in [KncTest::Vertical, KncTest::Roll] {
+        for test in KncTest::ALL {
             let key = knc_key(test);
-            let Some(ComparedDomain::Knc { branch, .. }) = baseline.domains.get(key) else {
+            let Some(ComparedDomain::Knc { runs, .. }) = baseline.domains.get(key) else {
                 continue;
             };
-            if !branch.measurement
+            if runs.iter().any(|run| !run.branch.measurement)
                 || knc_candidates.get(test.name()).is_some_and(|candidates| {
-                    candidates.iter().any(|candidate| !candidate.2.measurement)
+                    candidates
+                        .iter()
+                        .any(|candidate| !candidate.run.branch.measurement)
                 })
             {
                 warnings.entry(key).or_default().push(display::tag_warning(
@@ -433,82 +510,106 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
     );
     let status = comparison_status(failed, incomplete, &rows, args.tolerances);
     let progress = ReportProgress::new(args.output.is_some(), args.json);
-    let plot_tests = [KncTest::Vertical, KncTest::Roll]
-        .into_iter()
-        .filter(|test| args.output.is_some() && baseline.domains.contains_key(knc_key(*test)))
-        .collect::<Vec<_>>();
-    let workers = knc::plot_worker_limit(plot_tests.len());
-    let jobs = plot_tests
-        .into_iter()
-        .map(|test| {
-            let candidates = knc_candidates.remove(test.name()).unwrap_or_default();
-            (test.title(), (test, candidates))
-        })
-        .collect();
-    let rendered = progress.plot_phases(jobs, |(test, candidates_for_test)| {
-        let Some(ComparedDomain::Knc {
-            curves: base,
-            conditions: base_conditions,
-            branch: base_branch,
-            corner_mass_kg: base_mass,
-            ..
-        }) = baseline.domains.get(knc_key(test))
-        else {
-            anyhow::bail!("missing KnC {} baseline", test.name());
-        };
-        let mut footer = vec![format!(
-            "Config: {}",
-            absolute_path(&args.config)?.display()
-        )];
-        footer.push(format!(
-            "{}: {} | {} | {} | {}",
-            display_label(&labels, 0),
-            baseline.config.name,
-            baseline.config.loadcase,
-            base_conditions.summary(),
-            absolute_path(&args.baseline)?.display()
-        ));
-        footer.extend(
-            candidates_for_test
-                .iter()
-                .map(|candidate| candidate.4.clone()),
-        );
-        if let Some(warnings) = warnings.get(knc_key(test)) {
-            footer.extend(warnings.iter().map(|warning| format!("WARNING: {warning}")));
+    let mut plot_jobs: Vec<(&str, Vec<_>)> = Vec::new();
+    if args.output.is_some() {
+        for test in KncTest::ALL {
+            let Some(ComparedDomain::Knc { runs, .. }) = baseline.domains.get(knc_key(test)) else {
+                continue;
+            };
+            let candidates = knc_candidates
+                .get(test.name())
+                .map_or(&[][..], Vec::as_slice);
+            for run in runs {
+                let paired: Vec<_> = candidates
+                    .iter()
+                    .filter(|candidate| run.pairs_with(candidate.run, test))
+                    .collect();
+                if test == KncTest::Longitudinal && paired.is_empty() {
+                    continue;
+                }
+                match plot_jobs.last_mut() {
+                    Some((title, group)) if *title == test.title() => {
+                        group.push((test, run, paired));
+                    }
+                    _ => plot_jobs.push((test.title(), vec![(test, run, paired)])),
+                }
+            }
         }
-        footer.push(format!("Created by: {}", report_creator()));
-        footer.push(format!("clab version: {}", env!("CARGO_PKG_VERSION")));
-        let debug = debug_info(
-            args.debug,
-            &args.config,
-            &std::iter::once(args.baseline.as_path())
-                .chain(candidates_for_test.iter().map(|candidate| candidate.5))
-                .collect::<Vec<_>>(),
-        )?;
-        let candidates = candidates_for_test
+    }
+    let workers = knc::plot_worker_limit(plot_jobs.iter().map(|(_, group)| group.len()).sum());
+    // One progress job per test; its brake states render in turn.
+    let rendered = progress.plot_phases(plot_jobs, |group| {
+        group
             .into_iter()
-            .map(|(label, curves, branch, mass, _, _)| (label, curves, branch, mass))
-            .collect::<Vec<_>>();
-        knc::compare_plots(
-            &baseline.config,
-            test,
-            (base, base_branch, base_mass),
-            &candidates,
-            (
-                &display_label(&labels, 0),
-                &format!("plots/knc/{}/comparison", test.name()),
-            ),
-            knc::PlotOptions {
-                label: None,
-                footer: &footer.join("\n"),
-                debug: debug.as_deref(),
-                workers,
-                setup: None,
-            },
-            &progress,
-        )
+            .map(|(test, base_run, candidates_for_test)| {
+                let mut footer = vec![format!(
+                    "Config: {}",
+                    absolute_path(&args.config)?.display()
+                )];
+                footer.push(format!(
+                    "{}: {} | {} | {} | {}",
+                    display_label(&labels, 0),
+                    baseline.config.name,
+                    baseline.config.loadcase,
+                    base_run.conditions.summary(),
+                    absolute_path(&args.baseline)?.display()
+                ));
+                footer.extend(
+                    candidates_for_test
+                        .iter()
+                        .map(|candidate| candidate.footer.clone()),
+                );
+                if let Some(warnings) = warnings.get(knc_key(test)) {
+                    footer.extend(warnings.iter().map(|warning| format!("WARNING: {warning}")));
+                }
+                footer.push(format!("Created by: {}", report_creator()));
+                footer.push(format!("clab version: {}", env!("CARGO_PKG_VERSION")));
+                let debug = debug_info(
+                    args.debug,
+                    &args.config,
+                    &std::iter::once(base_run.source.as_path())
+                        .chain(
+                            candidates_for_test
+                                .iter()
+                                .map(|candidate| candidate.run.source.as_path()),
+                        )
+                        .collect::<Vec<_>>(),
+                )?;
+                let candidates = candidates_for_test
+                    .iter()
+                    .map(|candidate| {
+                        (
+                            candidate.label.clone(),
+                            candidate.run.curves.clone(),
+                            candidate.run.branch.clone(),
+                            candidate.run.corner_mass_kg.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let setup = base_run.conditions.setup_code();
+                knc::compare_plots(
+                    &baseline.config,
+                    test,
+                    (&base_run.curves, &base_run.branch, &base_run.corner_mass_kg),
+                    &candidates,
+                    (
+                        &display_label(&labels, 0),
+                        &format!("plots/knc/{}", test.name()),
+                    ),
+                    base_run.conditions.brakes(),
+                    knc::PlotOptions {
+                        label: None,
+                        footer: &footer.join("\n"),
+                        debug: debug.as_deref(),
+                        workers,
+                        setup: (test == KncTest::Longitudinal).then_some(setup.as_str()),
+                    },
+                    &progress,
+                )
+            })
+            .collect::<Result<Vec<_>>>()
     })?;
-    for group in rendered {
+    for group in rendered.into_iter().flatten() {
         plots.extend(group);
     }
     let mut baseline_entry = serde_json::json!({"input": provenance(&args.baseline)?, "case": {"name": baseline.config.name, "loadcase": baseline.config.loadcase}});
@@ -522,7 +623,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
             "domain": domain.domain(),
             "test": domain.test().map(KncTest::name),
             "conditions": match domain {
-                ComparedDomain::Knc { conditions, .. } => conditions.json(),
+                ComparedDomain::Knc { runs, .. } => runs_json(runs),
                 ComparedDomain::Svc(_) => serde_json::Value::Null,
             },
         })).collect::<Vec<_>>(),
@@ -607,12 +708,12 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             ) {
                 (Some("svc"), _) => clab_core::config::load_config_with_input(config, path, None)
                     .map(|case| (case, true, false)),
-                (Some("knc"), Some(test @ ("vertical" | "roll"))) => {
+                (Some("knc"), Some(test @ ("vertical" | "roll" | "longitudinal"))) => {
                     clab_core::config::load_config_with_input(config, path, Some(test))
                         .map(|case| (case, false, true))
                 }
                 (Some(domain), test) => bail!(
-                    "unsupported domain '{domain}'{} in '{}'; supported: svc, knc vertical, knc roll",
+                    "unsupported domain '{domain}'{} in '{}'; supported: svc, knc vertical, knc roll, knc longitudinal",
                     test.map(|test| format!(" test '{test}'"))
                         .unwrap_or_default(),
                     path.display()
@@ -646,17 +747,18 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
     .map_err(|error| {
         anyhow::anyhow!("failed to load compare input '{}': {error}", path.display())
     })?;
-    let knc_tests = if include_knc {
-        knc_configs(&case)
+    let units = if include_knc {
+        knc::knc_units(&case)
     } else {
         Vec::new()
     };
     if include_svc && case.svc_source_kind.is_some() {
         validate_comparison_input(&case.simulation_json)?;
     }
-    for (_, knc) in &knc_tests {
-        validate_comparison_input(knc_source(knc))?;
-        if knc.source_kind == clab_core::config::SourceKind::Simulation
+    for (test, unit, source) in &units {
+        validate_comparison_input(source)?;
+        if let Some(knc) = test.config(unit)
+            && knc.source_kind == clab_core::config::SourceKind::Simulation
             && let Some(static_input) = &knc.static_simulation_hdf5
         {
             validate_comparison_input(static_input)?;
@@ -667,9 +769,12 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         if include_svc && is_hdf5(&case.simulation_json) {
             paths.push(case.simulation_json.as_path());
         }
-        for (_, knc) in &knc_tests {
-            paths.push(knc_source(knc));
-            if let Some(static_input) = &knc.static_simulation_hdf5 {
+        for (test, unit, source) in &units {
+            paths.push(source.as_path());
+            if let Some(static_input) = test
+                .config(unit)
+                .and_then(|knc| knc.static_simulation_hdf5.as_ref())
+            {
                 paths.push(static_input);
             }
         }
@@ -711,23 +816,56 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         sources.push(case.simulation_json.clone());
         domains.insert("svc", ComparedDomain::Svc(svc::canonical_metrics(&values)));
     }
-    for (test, knc) in knc_tests {
-        let source = knc_source(knc);
-        let report = knc::analyze_input(&case, test, source, svc_corner_mass_kg.as_ref(), None)?;
-        let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
-        sources.push(source.to_path_buf());
-        if let Some(static_input) = &knc.static_simulation_hdf5 {
+    let mut knc_reports = Vec::new();
+    for (test, unit, source) in &units {
+        let report = knc::analyze_input(unit, *test, source, svc_corner_mass_kg.as_ref(), None)?;
+        sources.push(source.clone());
+        if let Some(static_input) = test
+            .config(unit)
+            .and_then(|knc| knc.static_simulation_hdf5.as_ref())
+        {
             sources.push(static_input.clone());
         }
+        knc_reports.push((*test, source.as_path(), report));
+    }
+    knc::ensure_distinct_setups(
+        knc_reports
+            .iter()
+            .map(|(test, source, report)| (*test, *source, report)),
+    )?;
+    for test in KncTest::ALL {
+        let mut reports: Vec<_> = knc_reports
+            .iter_mut()
+            .filter(|(candidate, ..)| *candidate == test)
+            .map(|(.., report)| report)
+            .collect();
+        if reports.is_empty() {
+            continue;
+        }
+        knc::drop_resolved_placeholders(&mut reports);
+        let metrics = reports
+            .iter()
+            .flat_map(|report| report.metrics.clone())
+            .collect();
+        let runs = reports
+            .iter()
+            .map(|report| {
+                let detail: serde_json::Value = serde_json::from_str(&report.detail)?;
+                Ok(KncRun {
+                    source: report.input.clone(),
+                    curves: detail["curves"].clone(),
+                    conditions: report.conditions.clone(),
+                    branch: report.branch.clone(),
+                    corner_mass_kg: report.corner_mass_kg.clone(),
+                })
+            })
+            .collect::<Result<_>>()?;
         domains.insert(
             knc_key(test),
             ComparedDomain::Knc {
                 test,
-                curves: detail["curves"].clone(),
-                metrics: report.metrics,
-                conditions: report.conditions,
-                branch: report.branch,
-                corner_mass_kg: report.corner_mass_kg,
+                metrics,
+                runs,
             },
         );
     }
@@ -736,23 +874,6 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         domains,
         sources,
     })
-}
-
-/// KnC tests a compare input configures.
-fn knc_configs(
-    case: &clab_core::config::CaseConfig,
-) -> Vec<(KncTest, &clab_core::config::VerticalConfig)> {
-    [KncTest::Vertical, KncTest::Roll]
-        .into_iter()
-        .filter_map(|test| test.config(case).map(|knc| (test, knc)))
-        .collect()
-}
-
-fn knc_source(knc: &clab_core::config::VerticalConfig) -> &Path {
-    match knc.source_kind {
-        clab_core::config::SourceKind::Simulation => &knc.simulation_hdf5,
-        clab_core::config::SourceKind::Measurement => &knc.measurement_hdf5,
-    }
 }
 
 fn validate_comparison_input(path: &Path) -> Result<()> {
@@ -818,26 +939,48 @@ fn compare_metrics(
         .collect()
 }
 
+fn metrics_by_name(metrics: &[serde_json::Value]) -> BTreeMap<&str, &serde_json::Value> {
+    metrics
+        .iter()
+        .filter_map(|metric| metric["metric"].as_str().map(|name| (name, metric)))
+        .collect()
+}
+
+/// Metrics that either side lists as `not_covered` by its stored setup: the
+/// other side's value has nothing to compare with.
+fn not_compared<'a>(
+    baseline: &'a [serde_json::Value],
+    candidate: &'a [serde_json::Value],
+) -> Vec<&'a str> {
+    let uncovered = |metrics: &'a [serde_json::Value]| {
+        metrics_by_name(metrics)
+            .into_iter()
+            .filter(|(_, metric)| knc::is_not_covered(metric))
+            .map(|(name, _)| name)
+            .collect::<BTreeSet<_>>()
+    };
+    uncovered(baseline)
+        .union(&uncovered(candidate))
+        .copied()
+        .collect()
+}
+
 fn compare_knc_metrics(
     test: KncTest,
     baseline: &[serde_json::Value],
     candidate: &[serde_json::Value],
     tolerances: Option<&clab_core::config::ValidationTolerances>,
 ) -> Vec<Metric> {
-    let baseline = baseline
-        .iter()
-        .filter_map(|metric| metric["metric"].as_str().map(|name| (name, metric)))
-        .collect::<BTreeMap<_, _>>();
-    let candidate = candidate
-        .iter()
-        .filter_map(|metric| metric["metric"].as_str().map(|name| (name, metric)))
-        .collect::<BTreeMap<_, _>>();
+    let skipped = not_compared(baseline, candidate);
+    let baseline = metrics_by_name(baseline);
+    let candidate = metrics_by_name(candidate);
     baseline
         .keys()
         .chain(candidate.keys())
         .copied()
         .collect::<BTreeSet<_>>()
         .into_iter()
+        .filter(|name| !skipped.contains(name))
         .map(|name| {
             let baseline = baseline.get(name);
             let candidate = candidate.get(name);
@@ -921,7 +1064,7 @@ fn metrics_csv(inputs: &[InputSummary], rows: &[(PathBuf, Metric)]) -> Result<St
             metric
                 .test
                 .and_then(|test| input.conditions.get(test))
-                .map(knc::Conditions::csv_cells)
+                .map(TestConditions::csv_cells)
                 .unwrap_or_default()
         };
         let [base_setup, base_phase, base_offset] = cells(base);
@@ -1046,7 +1189,7 @@ fn json_metrics(
 }
 
 fn print_metrics(
-    inputs: &[InputSummary],
+    _inputs: &[InputSummary],
     candidates: &[PathBuf],
     domains: &BTreeMap<&'static str, ComparedDomain>,
     rows: &[(PathBuf, Metric)],
@@ -1064,19 +1207,6 @@ fn print_metrics(
         println!();
         let grouped = grouped_metrics(compared, candidates, rows);
         println!("{title}");
-        for (index, input) in inputs.iter().enumerate() {
-            let role = if index == 0 {
-                "baseline".to_owned()
-            } else {
-                format!("candidate_{index}")
-            };
-            println!("{role}: {} | {}", input.label, input.path.display());
-            if let Some(conditions) = domain_test.and_then(|test| input.conditions.get(test)) {
-                for line in conditions.lines() {
-                    println!("{line}");
-                }
-            }
-        }
         println!(
             "running {} metrics",
             grouped

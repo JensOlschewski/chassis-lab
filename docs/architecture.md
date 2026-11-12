@@ -221,15 +221,15 @@ and roll; missing setup requires reconversion. Old setup flags and `[meta]`
 are rejected.
 
 `inspect` shows stored setup, phase and offset. `analyze` carries a `conditions`
-object in each KnC JSON section and report domain; console and PDF show it beside
-the input name. `metrics.csv` appends `setup`, `phase`, `offset_mm`; SVC cells stay
+object in each KnC JSON section and report domain; the PDF shows it beside the
+input name. Console output stays minimal: title, metric count, metrics. `metrics.csv` appends `setup`, `phase`, `offset_mm`; SVC cells stay
 empty. Phase and offset apply only to lateral tests and are omitted from other
 JSON conditions. No filename inference or missing-case substitution.
 
 `compare` pairs matching tests only. Different tests are refused for single-test
 inputs; a missing domain in a multi-test run stays `not compared`. Setup, phase
 or offset differences warn and continue, without an opt-in flag. Warnings name
-both inputs and changed conditions; console, JSON and PDF retain them. Compare
+both inputs and changed conditions; console warnings, JSON and PDF retain them. Compare
 CSV appends per-input labels and conditions. Metric formulas and tolerance exit
 codes stay unchanged. Condition source tags remain unavailable until HDF5 stores
 them (Refs #204).
@@ -356,7 +356,20 @@ example a sweep that does not span ±1 kN or has no full cycle. `analyze` requir
 
 Configure with `[[input.knc.longitudinal]]` (a list, one file per brake state; the
 single table is still accepted). Two files with the same brake state are refused.
-`compare` and tolerances for longitudinal are not supported yet (#207).
+`compare` runs the same per-file analysis as `analyze` and merges the metrics of a
+run's files. Plots are never overlaid across brake states: each baseline file is
+overlaid only on candidate files with the same brake state (`..._b1e1f1r1`), and a
+baseline file without a match gets no plots. A metric that either side lists as
+`not covered` is left out of the comparison, with one warning naming them.
+Tolerances use `[validation.knc.longitudinal.tolerances]` by metric name; a
+direct HDF5 input compares the metrics its stored setup covers.
+
+Comparison PDFs live directly in `plots/knc/<test>/`, without a `comparison/`
+subdirectory. `--debug` uses the same diagnostics as `analyze` for every
+measurement series (baseline `series_0`, then candidates), saved separately in
+`plots/knc/<test>/debug/`, never overlaid. Diagnostic footers name the source
+HDF5 file, including when the input is a run manifest. Longitudinal diagnostics
+carry the setup suffix and show only the metrics covered by that brake state.
 
 Console output has one `KnC Longitudinal` section per run; conditions stay in
 JSON, CSV and PDFs. PDF and `.plot.json` names carry the full lowercase setup

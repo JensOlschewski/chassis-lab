@@ -270,6 +270,7 @@ def plot_compare(
     series: bool = False,
     brakes: bool = False,
     gradient_points_n: float | None = None,
+    debug: str | None = None,
     **_: object,
 ) -> dict[str, bytes]:
     """Render longitudinal overlays; one branch option per series."""
@@ -279,15 +280,42 @@ def plot_compare(
         if branches_json
         else [BranchOptions()] * (len(candidates) + 1)
     )
-    return render_comparison_reports(
-        json.loads(baseline_json),
+    baseline = json.loads(baseline_json)
+    half_n = gradient_points_n or FIT_WINDOW_N
+    reports = render_comparison_reports(
+        baseline,
         candidates,
         selected_specs(plot_specs(brakes), selected, "plot"),
         PLOT_SIGNALS,
         baseline_label,
         footer,
         logo,
-        gradient_points_n or FIT_WINDOW_N,
+        half_n,
         branches,
         series_json=series,
     )
+    if debug:
+        info = json.loads(debug)
+        for index, (curves, options) in enumerate(
+            zip(
+                [baseline, *(item["curves"] for item in candidates)],
+                branches,
+                strict=True,
+            )
+        ):
+            reports.update(
+                render_secant_debug(
+                    curves,
+                    selected_specs(
+                        plot_specs(brakes), selected, f"debug:{index}"
+                    ),
+                    options,
+                    "",
+                    info,
+                    info["inputs"][index],
+                    half_n,
+                    logo,
+                    f"series_{index}",
+                )
+            )
+    return reports

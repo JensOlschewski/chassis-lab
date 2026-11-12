@@ -381,6 +381,16 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
                 in compared
             )
     assert "knc_roll_ride_rate.pdf" in compared
+    debug_names = {
+        name.split("/debug/measurement_")[1]
+        for name in reports
+        if "/debug/" in name
+    }
+    assert {name for name in compared if name.startswith("debug/")} == {
+        f"debug/series_{index}_{name}"
+        for index in range(2)
+        for name in debug_names
+    }
 
 
 def test_roll_local_rates_differentiate_within_body_roll_sweeps() -> None:
