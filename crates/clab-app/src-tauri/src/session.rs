@@ -59,6 +59,7 @@ struct ConvertState {
     input: Option<PathBuf>,
     domain: String,
     test: Option<String>,
+    setup: Option<String>,
     output: Option<PathBuf>,
     force: bool,
 }
@@ -424,6 +425,7 @@ mod tests {
                 input: Some(dir.join("data/run.res")),
                 domain: "knc".into(),
                 test: Some("vertical".into()),
+                setup: Some("b1e0f1r1".into()),
                 output: Some(PathBuf::from("/elsewhere/out")),
                 force: true,
             },

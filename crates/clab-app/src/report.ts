@@ -66,7 +66,7 @@ export const roleOf = (index: number) => (index === 0 ? "Baseline" : `Candidate 
 const keyOf = ({ domain, test }: { domain: string; test?: string | null }) => (test ? `${domain}::${test}` : domain);
 
 /** The order of the live results; `report.json` lists domains sorted by key instead. */
-const DOMAIN_ORDER = ["svc", "knc::vertical", "knc::roll"];
+const DOMAIN_ORDER = ["svc", "knc::vertical", "knc::roll", "knc::longitudinal"];
 
 const inResultOrder = (domains: ReportDomain[]) =>
   [...domains].sort((a, b) => DOMAIN_ORDER.indexOf(keyOf(a)) - DOMAIN_ORDER.indexOf(keyOf(b)));
@@ -171,18 +171,22 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
     plots = [];
     const groups: HTMLOptGroupElement[] = [];
     const missing: string[] = [];
-    for (const domain of domains.filter((domain) => domain.domain === "knc")) {
-      try {
-        const file = JSON.parse(await readFile(directory, `knc-${domain.test}.plots.json`)) as PlotsFile;
-        const group = document.createElement("optgroup");
-        group.label = titleOf(domain);
-        for (const plot of file.plots) {
-          group.append(new Option(plot.name, String(plots.length)));
-          plots.push({ plot, test: domain.test! });
+    for (const domain of inResultOrder(domains).filter((domain) => domain.domain === "knc")) {
+      const stems = domain.test === "longitudinal" ? ["longitudinal-b0", "longitudinal-b1"] : [domain.test!];
+      for (const stem of stems) {
+        const label = stems.length > 1 ? `${titleOf(domain)} (brakes ${stem.endsWith("b1") ? "on" : "off"})` : titleOf(domain);
+        try {
+          const file = JSON.parse(await readFile(directory, `knc-${stem}.plots.json`)) as PlotsFile;
+          const group = document.createElement("optgroup");
+          group.label = label;
+          for (const plot of file.plots) {
+            group.append(new Option(plot.name, String(plots.length)));
+            plots.push({ plot, test: domain.test! });
+          }
+          groups.push(group);
+        } catch {
+          missing.push(label);
         }
-        groups.push(group);
-      } catch {
-        missing.push(titleOf(domain));
       }
     }
     picker.replaceChildren(...groups);

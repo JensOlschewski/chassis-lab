@@ -24,7 +24,7 @@ const FILTERS = [{ name: "ChassisLab session", extensions: ["clab"] }];
 const BLANK: SessionFile = {
   version: 1,
   embed: false,
-  convert: { input: null, domain: "svc", test: null, output: null, force: false },
+  convert: { input: null, domain: "svc", test: null, setup: null, output: null, force: false },
   inspect: { file: null, curves: [], plotted: false },
   analyze: { config: null, inputs: [], names: [], tolerances: false, generate: true, report: null },
 };

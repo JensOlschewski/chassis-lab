@@ -13,7 +13,11 @@ use sha2::{Digest, Sha256};
 fn is_bundle_file(name: &str) -> bool {
     matches!(
         name,
-        "report.json" | "knc-vertical.plots.json" | "knc-roll.plots.json"
+        "report.json"
+            | "knc-vertical.plots.json"
+            | "knc-roll.plots.json"
+            | "knc-longitudinal-b0.plots.json"
+            | "knc-longitudinal-b1.plots.json"
     )
 }
 
@@ -128,5 +132,18 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let error = read_file(directory.path(), "knc-roll.plots.json").unwrap_err();
         assert!(error.contains("knc-roll.plots.json"));
+    }
+
+    #[test]
+    fn reads_longitudinal_plots_per_brake_state() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in [
+            "knc-longitudinal-b0.plots.json",
+            "knc-longitudinal-b1.plots.json",
+        ] {
+            std::fs::write(directory.path().join(name), name).unwrap();
+            assert_eq!(read_file(directory.path(), name).unwrap(), name);
+        }
+        assert!(read_file(directory.path(), "knc-longitudinal.plots.json").is_err());
     }
 }
