@@ -349,7 +349,6 @@ mod tests {
             bodies: vec![super::super::SceneBody {
                 label: "Link".to_owned(),
                 origin: [x, 0.0, 0.0],
-                points: vec![[x, 0.0, 1.0]],
                 segments: vec![[[x, 0.0, 0.0], [x, 0.0, 1.0]]],
             }],
             joints: vec![],

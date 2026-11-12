@@ -1,6 +1,10 @@
 //! Terminal viewer for solver solutions, adapted from kinemagic's viewer.
 
+use std::collections::BTreeMap;
+use std::path::Path;
+
 use anyhow::{Context, Result, bail};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::solution;
@@ -45,7 +49,6 @@ pub(crate) struct ViewFrame {
 struct SceneBody {
     label: String,
     origin: Vec3,
-    points: Vec<Vec3>,
     segments: Vec<[Vec3; 2]>,
 }
 
@@ -58,9 +61,8 @@ struct SceneJoint {
 
 impl ViewFrame {
     fn visit_positions(&self, mut visit: impl FnMut(Vec3)) {
-        for body in &self.bodies {
-            visit(body.origin);
-            body.points.iter().for_each(|point| visit(*point));
+        for segment in self.bodies.iter().flat_map(|body| &body.segments) {
+            segment.iter().for_each(|position| visit(*position));
         }
         for joint in &self.joints {
             visit(joint.i);
@@ -69,10 +71,53 @@ impl ViewFrame {
     }
 }
 
-/// Segments of a body: one point connects to the origin, several chain in order.
-fn body_segments(origin: Vec3, points: &[Vec3]) -> Vec<[Vec3; 2]> {
-    match points {
-        [point] => vec![[origin, *point]],
+/// What to draw: the bodies (by name) and the points on them.
+/// Without a layout everything is drawn.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ViewLayout {
+    bodies: BTreeMap<String, BodyLayout>,
+    #[serde(default)]
+    joints: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BodyLayout {
+    points: Vec<String>,
+    #[serde(default)]
+    shape: Shape,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum Shape {
+    /// Joins the points in the listed order.
+    #[default]
+    Chain,
+    /// Joins every point to the body's centre of mass.
+    Star,
+    /// One segment between exactly two points.
+    Line,
+}
+
+impl ViewLayout {
+    pub(crate) fn load(path: &Path) -> Result<Self> {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("cannot read view file {}", path.display()))?;
+        serde_json::from_str(&text).with_context(|| format!("invalid view file {}", path.display()))
+    }
+
+    pub(crate) fn shows_joints(&self) -> bool {
+        self.joints
+    }
+}
+
+fn body_segments(origin: Vec3, points: &[Vec3], shape: Shape) -> Vec<[Vec3; 2]> {
+    match (shape, points) {
+        (Shape::Star, _) | (Shape::Chain, [_]) => {
+            points.iter().map(|point| [origin, *point]).collect()
+        }
         _ => points.windows(2).map(|pair| [pair[0], pair[1]]).collect(),
     }
 }
@@ -188,6 +233,7 @@ impl Track {
 
 struct BodyTracks {
     label: String,
+    shape: Shape,
     origin: Track,
     points: Vec<Track>,
 }
@@ -200,39 +246,86 @@ struct JointTracks {
 
 /// Builds one frame per time step from the `bodies` and `joints` of a solution
 /// that was solved with `--include bodies,connectors`.
-pub(crate) fn frames_from_solution(solution: &Value) -> Result<Vec<ViewFrame>> {
+pub(crate) fn frames_from_solution(
+    solution: &Value,
+    layout: Option<&ViewLayout>,
+) -> Result<Vec<ViewFrame>> {
     let time = solution::time(solution)?;
     let steps = time.len();
 
     let bodies = solution["bodies"]
         .as_array()
         .context("solution has no body data: solve with `--include bodies,connectors`")?;
+    let mut tracks = Vec::new();
     // Ground never moves; its joint ends are drawn with the joints.
-    let bodies = bodies
+    for body in bodies
         .iter()
         .filter(|body| body["bodyID"].as_i64() != Some(0))
-        .map(|body| {
-            let label = body["name"].as_str().unwrap_or("body").to_owned();
-            let origin = Track::parse(&body["cm"]["position"], steps, &format!("{label}.cm"))?;
-            let points = body["points"]
-                .as_object()
+    {
+        let label = body["name"].as_str().unwrap_or("body").to_owned();
+        let spec = match layout {
+            None => None,
+            Some(layout) => match layout.bodies.get(&label) {
+                Some(spec) => Some(spec),
+                None => continue,
+            },
+        };
+        let available = body["points"].as_object();
+        let names: Vec<&str> = match spec {
+            Some(spec) => spec.points.iter().map(String::as_str).collect(),
+            None => available
                 .into_iter()
                 .flatten()
-                .map(|(name, point)| {
-                    Track::parse(&point["position"], steps, &format!("{label}.{name}"))
-                })
-                .collect::<Result<_>>()?;
-            Ok(BodyTracks {
-                label,
-                origin,
-                points,
+                .map(|(name, _)| name.as_str())
+                .collect(),
+        };
+        let shape = spec.map_or(Shape::Chain, |spec| spec.shape);
+        if shape == Shape::Line && names.len() != 2 {
+            bail!("body `{label}`: shape `line` needs exactly 2 points");
+        }
+        let points = names
+            .iter()
+            .map(|name| {
+                let point = available
+                    .and_then(|points| points.get(*name))
+                    .with_context(|| {
+                        let known: Vec<_> = available.into_iter().flat_map(|p| p.keys()).collect();
+                        format!("body `{label}` has no point `{name}`; available: {known:?}")
+                    })?;
+                Track::parse(&point["position"], steps, &format!("{label}.{name}"))
             })
-        })
-        .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<_>>()?;
+        let origin = Track::parse(&body["cm"]["position"], steps, &format!("{label}.cm"))?;
+        tracks.push(BodyTracks {
+            label,
+            shape,
+            origin,
+            points,
+        });
+    }
+    if let Some(layout) = layout
+        && let Some(unknown) = layout
+            .bodies
+            .keys()
+            .find(|name| !tracks.iter().any(|body| &body.label == *name))
+    {
+        let known: Vec<_> = bodies
+            .iter()
+            .filter_map(|body| body["name"].as_str())
+            .collect();
+        bail!("view file: no body `{unknown}`; available: {known:?}");
+    }
+    let bodies = tracks;
 
     let mut joints = Vec::new();
+    let show_joints = layout.is_none_or(ViewLayout::shows_joints);
     for kind in ["primary", "secondary"] {
-        for joint in solution["joints"][kind].as_array().into_iter().flatten() {
+        for joint in solution["joints"][kind]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|_| show_joints)
+        {
             let label = joint["name"].as_str().unwrap_or("joint").to_owned();
             let (i, j) = (&joint["i"]["position"], &joint["j"]["position"]);
             if i.is_null() || j.is_null() {
@@ -259,8 +352,7 @@ pub(crate) fn frames_from_solution(solution: &Value) -> Result<Vec<ViewFrame>> {
                     SceneBody {
                         label: body.label.clone(),
                         origin,
-                        segments: body_segments(origin, &points),
-                        points,
+                        segments: body_segments(origin, &points, body.shape),
                     }
                 })
                 .collect(),
@@ -303,7 +395,7 @@ mod tests {
 
     #[test]
     fn builds_one_frame_per_step() {
-        let frames = frames_from_solution(&solution()).unwrap();
+        let frames = frames_from_solution(&solution(), None).unwrap();
         assert_eq!(frames.len(), 2);
         assert_eq!(frames[1].time, 1.0);
         assert_eq!(
@@ -313,15 +405,54 @@ mod tests {
         assert_eq!(frames[1].joints[0].label, "J1");
     }
 
+    fn parse_layout(text: &str) -> ViewLayout {
+        serde_json::from_str(text).unwrap()
+    }
+
+    #[test]
+    fn layout_picks_bodies_points_and_shape() {
+        let layout = parse_layout(r#"{"bodies": {"Link": {"points": ["B", "A"]}}}"#);
+        let frames = frames_from_solution(&solution(), Some(&layout)).unwrap();
+        assert_eq!(
+            frames[0].bodies[0].segments,
+            [[[2.0, 0.0, 1.0], [0.0, 0.0, 0.0]]]
+        );
+        assert!(frames[0].joints.is_empty());
+
+        let star = parse_layout(
+            r#"{"bodies": {"Link": {"points": ["A", "B"], "shape": "star"}}, "joints": true}"#,
+        );
+        let frames = frames_from_solution(&solution(), Some(&star)).unwrap();
+        assert_eq!(frames[0].bodies[0].segments.len(), 2);
+        assert_eq!(frames[0].joints.len(), 1);
+    }
+
+    #[test]
+    fn layout_errors_name_the_problem() {
+        let check = |text: &str, expected: &str| {
+            let error = frames_from_solution(&solution(), Some(&parse_layout(text))).unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        };
+        check(r#"{"bodies": {"Nope": {"points": []}}}"#, "no body `Nope`");
+        check(r#"{"bodies": {"Link": {"points": ["Z"]}}}"#, "no point `Z`");
+        check(
+            r#"{"bodies": {"Link": {"points": ["A"], "shape": "line"}}}"#,
+            "exactly 2",
+        );
+        assert!(
+            serde_json::from_str::<ViewLayout>(r#"{"bodies": {}, "projection": "xz"}"#).is_err()
+        );
+    }
+
     #[test]
     fn asks_for_body_data() {
-        let error = frames_from_solution(&json!({ "time": [0.0] })).unwrap_err();
+        let error = frames_from_solution(&json!({ "time": [0.0] }), None).unwrap_err();
         assert!(error.to_string().contains("--include bodies,connectors"));
     }
 
     #[test]
     fn bounds_cover_all_frames_and_fit_the_viewport() {
-        let frames = frames_from_solution(&solution()).unwrap();
+        let frames = frames_from_solution(&solution(), None).unwrap();
         let bounds = ProjectedBounds::for_frames(&frames, Projection::Xz);
         assert_eq!((bounds.min(), bounds.max()), ([0.0, 0.0], [3.0, 1.0]));
         let wide = bounds.fit_aspect(300, 100);

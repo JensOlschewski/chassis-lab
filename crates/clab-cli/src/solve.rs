@@ -35,9 +35,10 @@ pub(crate) struct SolveArgs {
     /// Optional solution content for --json, comma separated.
     #[arg(long, value_enum, value_delimiter = ',', requires = "json")]
     include: Vec<Include>,
-    /// Show the solved motion in the terminal.
-    #[arg(long)]
-    view: bool,
+    /// Show the solved motion in the terminal. An optional view file (JSON)
+    /// picks the bodies and points to draw; without it everything is drawn.
+    #[arg(long, value_name = "FILE", num_args = 0..=1)]
+    view: Option<Option<PathBuf>>,
     /// Design variable JSON applied to the model.
     #[arg(long, value_name = "FILE")]
     design: Option<PathBuf>,
@@ -93,9 +94,20 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         }
     }
 
+    let layout = args
+        .view
+        .iter()
+        .flatten()
+        .map(|path| view::ViewLayout::load(path))
+        .next()
+        .transpose()?;
     let mut include = args.include;
-    if args.view {
-        for needed in [Include::Bodies, Include::Connectors] {
+    if args.view.is_some() {
+        let joints = layout.as_ref().is_none_or(view::ViewLayout::shows_joints);
+        let needed = [Include::Bodies]
+            .into_iter()
+            .chain(joints.then_some(Include::Connectors));
+        for needed in needed {
             if !include.contains(&needed) {
                 include.push(needed);
             }
@@ -154,11 +166,12 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
             .persist(output)
             .with_context(|| format!("cannot write {}", output.display()))?;
         println!("{}", output.display());
-    } else if !args.view {
+    } else if args.view.is_none() {
         print!("{}", solution::render_text(&solution)?);
     }
-    if args.view {
-        view::run_viewer(view::frames_from_solution(&solution)?)?;
+    if args.view.is_some() {
+        let frames = view::frames_from_solution(&solution, layout.as_ref())?;
+        view::run_viewer(frames)?;
     }
     Ok(())
 }
