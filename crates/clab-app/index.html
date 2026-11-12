@@ -54,9 +54,18 @@
                 <option value="vertical">vertical</option>
                 <option value="roll">roll</option>
                 <option value="static">static</option>
+                <option value="longitudinal">longitudinal</option>
               </select>
             </label>
           </div>
+
+          <fieldset id="setup-field" hidden>
+            <legend>Setup</legend>
+            <label class="check"><input type="checkbox" name="brakes" /> Brakes applied</label>
+            <label class="check"><input type="checkbox" name="engine" /> Steering engine on</label>
+            <label class="check"><input type="checkbox" name="front_arb" /> Front ARB connected</label>
+            <label class="check"><input type="checkbox" name="rear_arb" /> Rear ARB connected</label>
+          </fieldset>
 
           <label>
             Output <span class="optional">optional folder or .h5 file, defaults to the input folder</span>

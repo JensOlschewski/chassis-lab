@@ -14,10 +14,19 @@ interface ConvertRequest {
   input: string;
   domain: string;
   test: string | null;
+  setup: string | null;
   output: string | null;
   force: boolean;
   confirmed: boolean;
 }
+
+/** Setup checkboxes in code order: `b<brakes>e<engine>f<front ARB>r<rear ARB>`. */
+const SETUP_FIELDS = [
+  ["b", "brakes"],
+  ["e", "engine"],
+  ["f", "front_arb"],
+  ["r", "rear_arb"],
+] as const;
 
 /** Reads the form into a request; empty optional fields become null. */
 export function readRequest(form: HTMLFormElement): ConvertRequest {
@@ -29,6 +38,7 @@ export function readRequest(form: HTMLFormElement): ConvertRequest {
     domain,
     // Only knc has tests; clab rejects a test for svc.
     test: domain === "knc" ? text("test") : null,
+    setup: domain === "knc" ? SETUP_FIELDS.map(([letter, name]) => `${letter}${data.has(name) ? 1 : 0}`).join("") : null,
     output: text("output") || null,
     force: data.has("force"),
     confirmed: false,
@@ -40,6 +50,7 @@ export interface ConvertState {
   input: string | null;
   domain: string;
   test: string | null;
+  setup: string | null;
   output: string | null;
   force: boolean;
 }
@@ -47,6 +58,7 @@ export interface ConvertState {
 export function setupConvert() {
   const form = document.querySelector<HTMLFormElement>("#convert-form")!;
   const testField = document.querySelector<HTMLElement>("#test-field")!;
+  const setupField = document.querySelector<HTMLElement>("#setup-field")!;
   const status = document.querySelector<HTMLElement>("#convert-status")!;
   const output = document.querySelector<HTMLElement>("#convert-output")!;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
@@ -58,7 +70,7 @@ export function setupConvert() {
   };
 
   const syncTest = () => {
-    testField.hidden = readRequest(form).domain !== "knc";
+    testField.hidden = setupField.hidden = readRequest(form).domain !== "knc";
   };
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement;
 
@@ -107,6 +119,9 @@ export function setupConvert() {
       field("input").value = state.input ?? "";
       field("domain").value = state.domain;
       if (state.test) field("test").value = state.test;
+      SETUP_FIELDS.forEach(([letter, name]) => {
+        (field(name) as HTMLInputElement).checked = state.setup?.includes(`${letter}1`) ?? false;
+      });
       field("output").value = state.output ?? "";
       (field("force") as HTMLInputElement).checked = state.force;
       syncTest();

@@ -9,6 +9,9 @@ pub struct ConvertRequest {
     input: PathBuf,
     domain: String,
     test: Option<String>,
+    /// Setup code `b<0|1>e<0|1>f<0|1>r<0|1>`; clab requires it for knc.
+    #[serde(default)]
+    setup: Option<String>,
     output: Option<PathBuf>,
     force: bool,
     /// The user accepted the warnings of an earlier run.
@@ -27,6 +30,9 @@ impl ConvertRequest {
         ];
         if let Some(test) = &self.test {
             args.extend(["--test".into(), test.clone().into()]);
+        }
+        if let Some(setup) = &self.setup {
+            args.extend(["--setup".into(), setup.clone().into()]);
         }
         if let Some(output) = &self.output {
             args.extend(["--output".into(), clean_path(output).into()]);
@@ -51,6 +57,7 @@ mod tests {
             input: PathBuf::from("\"/data/run.res\" "),
             domain: "knc".into(),
             test: Some("vertical".into()),
+            setup: Some("b1e0f1r1".into()),
             output: Some(PathBuf::from("/out")),
             force: true,
             confirmed: false,
@@ -75,6 +82,8 @@ mod tests {
             "knc",
             "--test",
             "vertical",
+            "--setup",
+            "b1e0f1r1",
             "--output",
             "/out",
             "--force",
@@ -87,6 +96,7 @@ mod tests {
     fn omits_unset_options() {
         let request = ConvertRequest {
             test: None,
+            setup: None,
             output: None,
             force: false,
             domain: "svc".into(),
