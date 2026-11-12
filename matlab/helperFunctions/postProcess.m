@@ -183,7 +183,7 @@ for idx = 1:numJoints
 
     % Determine 'conMode' (joint or bushing)
     conMode = 'joint';
-    if bushStruct(idx).active && ismember(bushStruct(idx).jointID, [jointStruct.jointID])
+    if idx <= numel(bushStruct) && bushStruct(idx).active && ismember(bushStruct(idx).jointID, [jointStruct.jointID])
         conMode = 'bushing';
     end
 

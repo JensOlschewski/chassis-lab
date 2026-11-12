@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use clap::Args;
+use clap::{Args, ValueEnum};
 use serde_json::Value;
+
+use crate::{solution, view};
 
 const RUNTIME_RELEASE: &str = "R2024b";
 const SOLVER_ENV: &str = "CLAB_MKS_SOLVER";
@@ -25,18 +27,46 @@ pub(crate) struct SolveArgs {
     /// Multibody model JSON. Relative paths inside the model (bushing
     /// characteristics) resolve from the model's directory.
     input: PathBuf,
-    /// Output JSON file. Default: the input with `-solution.json`.
-    #[arg(short, long, value_name = "OUTPUT")]
-    output: Option<PathBuf>,
+    /// Write the solution JSON to PATH: a file, or a directory that receives
+    /// `<model>-solution.json`. Without PATH, the file goes to the current
+    /// directory. Give the model before this flag.
+    #[arg(long, value_name = "PATH", num_args = 0..=1)]
+    json: Option<Option<PathBuf>>,
+    /// Optional solution content for --json, comma separated.
+    #[arg(long, value_enum, value_delimiter = ',', requires = "json")]
+    include: Vec<Include>,
+    /// Show the solved motion in the terminal.
+    #[arg(long)]
+    view: bool,
     /// Design variable JSON applied to the model.
     #[arg(long, value_name = "FILE")]
     design: Option<PathBuf>,
-    /// Replace an existing output file.
-    #[arg(long)]
+    /// Replace an existing --json file.
+    #[arg(long, requires = "json")]
     force: bool,
-    /// Show solver progress.
+    /// Show solver progress on stderr.
     #[arg(long)]
     progress: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, ValueEnum)]
+enum Include {
+    /// Positions and velocities of bodies and their points.
+    Bodies,
+    /// Positions and reactions of joints and bushings.
+    Connectors,
+    /// Wheel, toe, camber, roll and rate characteristics.
+    Suspension,
+}
+
+impl Include {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Bodies => "bodies",
+            Self::Connectors => "connectors",
+            Self::Suspension => "suspension",
+        }
+    }
 }
 
 pub(crate) fn solve(args: SolveArgs) -> Result<()> {
@@ -46,37 +76,58 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .as_deref()
         .map(|path| file_path(path, "design"))
         .transpose()?;
-    let output = absolute(&args.output.unwrap_or_else(|| default_output(&args.input)))?;
-    if output.exists() && !args.force {
-        bail!(
-            "output exists: {} (use --force to replace it)",
-            output.display()
-        );
+    let output = args
+        .json
+        .as_ref()
+        .map(|path| output_path(path.as_deref(), &args.input))
+        .transpose()?;
+    if let Some(output) = &output {
+        if output.exists() && !args.force {
+            bail!(
+                "output exists: {} (use --force to replace it)",
+                output.display()
+            );
+        }
+        if !output.parent().is_some_and(Path::is_dir) {
+            bail!("output directory does not exist: {}", output.display());
+        }
     }
-    let output_dir = output
-        .parent()
-        .filter(|dir| dir.is_dir())
-        .with_context(|| format!("output directory does not exist: {}", output.display()))?;
+
+    let mut include = args.include;
+    if args.view {
+        for needed in [Include::Bodies, Include::Connectors] {
+            if !include.contains(&needed) {
+                include.push(needed);
+            }
+        }
+    }
 
     let solver = find_solver()?;
     let runtime = find_runtime()?;
 
-    // The solver writes into a temp file that replaces the output only on success.
-    let scratch = tempfile::NamedTempFile::new_in(output_dir)
-        .with_context(|| format!("cannot write in {}", output_dir.display()))?;
+    // A file in the output directory can replace the output atomically on success.
+    let scratch = match output.as_ref().and_then(|output| output.parent()) {
+        Some(dir) => tempfile::NamedTempFile::new_in(dir),
+        None => tempfile::NamedTempFile::new(),
+    }
+    .context("cannot create a scratch file")?;
     let mut command = Command::new(&solver);
     command
         .arg(&model)
         .arg(scratch.path())
-        .args(&design)
         .current_dir(model.parent().unwrap_or(Path::new(".")));
+    if let Some(design) = &design {
+        command.arg("--design").arg(design);
+    }
+    if !include.is_empty() {
+        let names: Vec<_> = include.iter().map(|item| item.name()).collect();
+        command.arg("--include").arg(names.join(","));
+    }
     if let Some(var) = library_path(&runtime)? {
         command.env(var.0, var.1);
     }
     if args.progress {
-        command
-            .env("MKS_PROGRESS", "1")
-            .stdout(std::process::Stdio::inherit());
+        command.env("MKS_PROGRESS", "1").stdout(std::io::stderr());
     }
     let result = command
         .output()
@@ -92,16 +143,39 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
     let written = std::fs::File::open(scratch.path())?;
     let solution: Value = serde_json::from_reader(std::io::BufReader::new(written))
         .context("solver wrote invalid JSON")?;
-    let mut text = String::new();
-    format_json(&solution, 0, &mut text);
-    text.push('\n');
-    std::fs::write(scratch.path(), text)
-        .with_context(|| format!("cannot write {}", output.display()))?;
-    scratch
-        .persist(&output)
-        .with_context(|| format!("cannot write {}", output.display()))?;
-    println!("{}", output.display());
+
+    if let Some(output) = &output {
+        let mut text = String::new();
+        format_json(&solution, 0, &mut text);
+        text.push('\n');
+        std::fs::write(scratch.path(), text)
+            .with_context(|| format!("cannot write {}", output.display()))?;
+        scratch
+            .persist(output)
+            .with_context(|| format!("cannot write {}", output.display()))?;
+        println!("{}", output.display());
+    } else if !args.view {
+        print!("{}", solution::render_text(&solution)?);
+    }
+    if args.view {
+        view::run_viewer(view::frames_from_solution(&solution)?)?;
+    }
     Ok(())
+}
+
+/// `--json` without a value writes to the current directory; a directory
+/// (existing, or written with a trailing separator) receives the default name.
+fn output_path(requested: Option<&Path>, input: &Path) -> Result<PathBuf> {
+    let stem = input.file_stem().unwrap_or_default().to_string_lossy();
+    let name = format!("{stem}-solution.json");
+    let path = match requested {
+        None => PathBuf::from(name),
+        Some(path) if path.is_dir() || path.to_string_lossy().ends_with(['/', '\\']) => {
+            path.join(name)
+        }
+        Some(path) => path.to_path_buf(),
+    };
+    absolute(&path)
 }
 
 /// Indents objects and arrays of containers; arrays of scalars stay on one line.
@@ -131,11 +205,6 @@ fn format_json(value: &Value, depth: usize, out: &mut String) {
         }
         scalar_or_flat => out.push_str(&scalar_or_flat.to_string()),
     }
-}
-
-fn default_output(input: &Path) -> PathBuf {
-    let stem = input.file_stem().unwrap_or_default().to_string_lossy();
-    input.with_file_name(format!("{stem}-solution.json"))
 }
 
 fn absolute(path: &Path) -> Result<PathBuf> {

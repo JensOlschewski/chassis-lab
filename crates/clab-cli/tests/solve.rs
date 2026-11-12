@@ -11,6 +11,10 @@ fn clab(solver: &Path, runtime: &Path, args: &[&Path]) -> Output {
         .unwrap()
 }
 
+fn json_args<'a>(model: &'a Path, out: &'a Path) -> [&'a Path; 3] {
+    [model, Path::new("--json"), out]
+}
+
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
@@ -54,13 +58,15 @@ fn reports_missing_runtime() {
 
 #[cfg(unix)]
 #[test]
-fn writes_solver_output_next_to_model() {
+fn writes_json_to_directory_and_runs_in_model_directory() {
     let dir = tempfile::tempdir().unwrap();
     let solver = fake_solver(dir.path(), r#"echo "{\"cwd\":\"$(pwd)\"}" > "$2""#);
     let model = model(dir.path());
-    let output = clab(&solver, dir.path(), &[&model]);
+    let out_dir = dir.path().join("out");
+    std::fs::create_dir(&out_dir).unwrap();
+    let output = clab(&solver, dir.path(), &json_args(&model, &out_dir));
     assert!(output.status.success(), "{}", stderr(&output));
-    let solution = dir.path().join("model-solution.json");
+    let solution = out_dir.join("model-solution.json");
     let text = std::fs::read_to_string(solution).unwrap();
     let canonical = std::fs::canonicalize(dir.path()).unwrap();
     assert!(text.contains(canonical.to_str().unwrap()), "{text}");
@@ -73,10 +79,11 @@ fn refuses_to_replace_output_without_force() {
     let solver = fake_solver(dir.path(), r#"echo '{}' > "$2""#);
     let model = model(dir.path());
     std::fs::write(dir.path().join("model-solution.json"), "old").unwrap();
-    let output = clab(&solver, dir.path(), &[&model]);
+    let target = dir.path().join("model-solution.json");
+    let output = clab(&solver, dir.path(), &json_args(&model, &target));
     assert!(!output.status.success());
     assert!(stderr(&output).contains("--force"));
-    let kept = std::fs::read_to_string(dir.path().join("model-solution.json")).unwrap();
+    let kept = std::fs::read_to_string(&target).unwrap();
     assert_eq!(kept, "old");
 }
 
@@ -85,10 +92,12 @@ fn refuses_to_replace_output_without_force() {
 fn failed_solver_reports_stderr_and_leaves_no_output() {
     let dir = tempfile::tempdir().unwrap();
     let solver = fake_solver(dir.path(), "echo 'bad joint' >&2; exit 1");
-    let output = clab(&solver, dir.path(), &[&model(dir.path())]);
+    let model = model(dir.path());
+    let target = dir.path().join("model-solution.json");
+    let output = clab(&solver, dir.path(), &json_args(&model, &target));
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("bad joint"));
-    assert!(!dir.path().join("model-solution.json").exists());
+    assert!(!target.exists());
     let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
     assert_eq!(leftovers, 2, "only solver and model remain");
 }
@@ -100,7 +109,52 @@ fn rejects_invalid_solver_json() {
     let solver = fake_solver(dir.path(), r#"echo 'not json' > "$2""#);
     let output = clab(&solver, dir.path(), &[&model(dir.path())]);
     assert!(stderr(&output).contains("invalid JSON"));
-    assert!(!dir.path().join("model-solution.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn prints_text_without_json_and_passes_no_include() {
+    let dir = tempfile::tempdir().unwrap();
+    let solver = fake_solver(
+        dir.path(),
+        r#"echo '{"time":[0.0],"v_hat":[[1.0],[0.0],[0.0],[0.0],[0.0],[0.0]]}' > "$2""#,
+    );
+    let output = clab(&solver, dir.path(), &[&model(dir.path())]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.starts_with("time 0.000000000000\nbody 1 velocity [1.000000000000"));
+}
+
+#[cfg(unix)]
+#[test]
+fn passes_include_list_to_solver() {
+    let dir = tempfile::tempdir().unwrap();
+    let solver = fake_solver(dir.path(), r#"printf '{"args":"%s"}' "$*" > "$2""#);
+    let model = model(dir.path());
+    let target = dir.path().join("o.json");
+    let mut args = json_args(&model, &target).to_vec();
+    args.extend([Path::new("--include"), Path::new("bodies,connectors")]);
+    let output = clab(&solver, dir.path(), &args);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(&target).unwrap();
+    assert!(text.contains("--include bodies,connectors"), "{text}");
+}
+
+#[test]
+fn include_needs_json_and_a_known_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = model(dir.path());
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_clab"))
+            .arg("solve")
+            .arg(&model)
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    assert!(!run(&["--include", "bodies"]).status.success());
+    let bad = run(&["--json", "--include", "wheels"]);
+    assert!(stderr(&bad).contains("wheels"));
 }
 
 /// Needs `dist/mks-solver/mks_solver` and a MATLAB Runtime; skipped otherwise.
@@ -128,7 +182,7 @@ fn real_solver_solves_example_model() {
         &model,
         Path::new("--design"),
         &design,
-        Path::new("-o"),
+        Path::new("--json"),
         &out,
     ];
     let output = clab(&solver, runtime, &args);

@@ -13,7 +13,9 @@ mod license;
 mod progress;
 mod report;
 mod signals;
+mod solution;
 mod solve;
+mod view;
 
 #[derive(Debug, Parser)]
 #[command(name = "clab", version, about = "ChassisLab vehicle analysis CLI")]
