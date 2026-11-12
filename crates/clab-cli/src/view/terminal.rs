@@ -11,7 +11,7 @@ use ratatui::text::Line as TextLine;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CanvasLine};
 use ratatui::widgets::{Block, Paragraph};
 
-use super::{ProjectedBounds, Projection, Vec2, Vec3, ViewFrame};
+use super::{ProjectedBounds, Projection, Vec2, Vec3, ViewFrame, is_helper_body};
 
 const BOUNDS_PADDING: f64 = 0.1;
 const DEFAULT_PLAYBACK_FPS: u16 = 10;
@@ -19,14 +19,15 @@ const MIN_PLAYBACK_FPS: u16 = 1;
 const MAX_PLAYBACK_FPS: u16 = 100;
 const PLAYBACK_FPS_STEP: u16 = 10;
 
-pub(crate) fn run_viewer(frames: Vec<ViewFrame>) -> Result<()> {
+/// `selection` names or numbers the bodies to show; empty shows all but helper bodies.
+pub(crate) fn run_viewer(frames: Vec<ViewFrame>, selection: &[String]) -> Result<()> {
     if frames.is_empty() {
         bail!("solution has no time steps to view");
     }
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         bail!("--view needs an interactive terminal");
     }
-    let mut app = ViewerApp::new(frames);
+    let mut app = ViewerApp::new(frames, selection)?;
     let mut terminal = ratatui::try_init()?;
     let result = run_app(&mut terminal, &mut app);
     ratatui::try_restore()?;
@@ -44,6 +45,9 @@ struct ViewerApp {
     loop_mode: LoopMode,
     playback_direction: PlaybackDirection,
     show_labels: bool,
+    show_joints: bool,
+    visible: Vec<bool>,
+    cursor: usize,
     should_quit: bool,
 }
 
@@ -84,14 +88,20 @@ fn viewport_index(projection: Projection) -> usize {
         .expect("PROJECTIONS lists every projection")
 }
 
-fn bounds_for_frames(frames: &[ViewFrame], projection: Projection) -> ProjectedBounds {
-    ProjectedBounds::for_frames(frames, projection).padded(BOUNDS_PADDING)
+fn bounds_for_frames(
+    frames: &[ViewFrame],
+    projection: Projection,
+    visible: &[bool],
+) -> ProjectedBounds {
+    ProjectedBounds::for_frames(frames, projection, visible).padded(BOUNDS_PADDING)
 }
 
 impl ViewerApp {
-    fn new(frames: Vec<ViewFrame>) -> Self {
-        let viewports = PROJECTIONS.map(|projection| bounds_for_frames(&frames, projection));
-        Self {
+    fn new(frames: Vec<ViewFrame>, selection: &[String]) -> Result<Self> {
+        let visible = visible_bodies(&frames[0], selection)?;
+        let viewports =
+            PROJECTIONS.map(|projection| bounds_for_frames(&frames, projection, &visible));
+        Ok(Self {
             playing: frames.len() > 1,
             frames,
             frame_index: 0,
@@ -101,13 +111,16 @@ impl ViewerApp {
             loop_mode: LoopMode::Restart,
             playback_direction: PlaybackDirection::Forward,
             show_labels: false,
+            show_joints: false,
+            visible,
+            cursor: 0,
             should_quit: false,
-        }
+        })
     }
 
     fn render(&self, frame: &mut Frame<'_>) {
         let [canvas_area, status_area] =
-            Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).areas(frame.area());
+            Layout::vertical([Constraint::Min(3), Constraint::Length(4)]).areas(frame.area());
 
         frame.render_widget(self.canvas(canvas_area), canvas_area);
         frame.render_widget(self.status(), status_area);
@@ -118,6 +131,9 @@ impl ViewerApp {
         let bounds = self.bounds(area);
         let projection = self.projection;
         let show_labels = self.show_labels;
+        let show_joints = self.show_joints;
+        let visible = &self.visible;
+        let cursor = self.cursor;
 
         Canvas::default()
             .block(Block::bordered().title(" clab "))
@@ -125,15 +141,18 @@ impl ViewerApp {
             .x_bounds([bounds.min()[0], bounds.max()[0]])
             .y_bounds([bounds.min()[1], bounds.max()[1]])
             .paint(move |context| {
-                for body in &scene.bodies {
+                for (index, body) in scene.bodies.iter().enumerate() {
+                    if !visible[index] {
+                        continue;
+                    }
                     for [start, end] in &body.segments {
                         draw_segment(context, projection, *start, *end);
                     }
-                    if show_labels {
+                    if show_labels || index == cursor {
                         print_label(context, projection.project(body.origin), &body.label);
                     }
                 }
-                for joint in &scene.joints {
+                for joint in scene.joints.iter().filter(|_| show_joints) {
                     draw_segment(context, projection, joint.i, joint.j);
                     if show_labels {
                         let middle =
@@ -155,10 +174,22 @@ impl ViewerApp {
             self.playback_fps,
             self.loop_mode.name(),
         );
+        let body = &self.current_frame().bodies[self.cursor];
+        let body_line = format!(
+            " body {} [{}]  joints {}",
+            body.label,
+            if self.visible[self.cursor] {
+                "shown"
+            } else {
+                "hidden"
+            },
+            if self.show_joints { "shown" } else { "hidden" },
+        );
         Paragraph::new(vec![
             TextLine::from(status),
-            TextLine::from(" Space pause   ←/→ step   +/- speed   l loop   v labels"),
-            TextLine::from(" f/F fit       1–4 view   q quit"),
+            TextLine::from(body_line),
+            TextLine::from(" Space pause   ←/→ step   +/- speed   l loop   v labels   j joints"),
+            TextLine::from(" b/B pick body   t show/hide body   f/F fit   1–4 view   q quit"),
         ])
     }
 
@@ -183,6 +214,15 @@ impl ViewerApp {
             KeyCode::Char('f') => self.fit(false),
             KeyCode::Char('F') => self.fit(true),
             KeyCode::Char('v') => self.show_labels = !self.show_labels,
+            KeyCode::Char('j') => self.show_joints = !self.show_joints,
+            KeyCode::Char('b') => self.cursor = (self.cursor + 1) % self.visible.len(),
+            KeyCode::Char('B') => {
+                self.cursor = self.cursor.checked_sub(1).unwrap_or(self.visible.len() - 1);
+            }
+            KeyCode::Char('t') => {
+                self.visible[self.cursor] = !self.visible[self.cursor];
+                self.refit_all();
+            }
             KeyCode::Char(' ') if self.frames.len() > 1 => {
                 if !self.playing
                     && self.loop_mode == LoopMode::Once
@@ -267,9 +307,43 @@ impl ViewerApp {
         } else {
             std::slice::from_ref(&self.frames[self.frame_index])
         };
-        let bounds = bounds_for_frames(frames, self.projection);
+        let bounds = bounds_for_frames(frames, self.projection, &self.visible);
         self.viewports[viewport_index(self.projection)] = bounds;
     }
+
+    fn refit_all(&mut self) {
+        self.viewports = PROJECTIONS
+            .map(|projection| bounds_for_frames(&self.frames, projection, &self.visible));
+    }
+}
+
+/// Resolves which bodies are shown: the named or numbered ones, or all but helpers.
+fn visible_bodies(frame: &ViewFrame, selection: &[String]) -> Result<Vec<bool>> {
+    if selection.is_empty() {
+        return Ok(frame
+            .bodies
+            .iter()
+            .map(|b| !is_helper_body(&b.label))
+            .collect());
+    }
+    let matches = |body: &super::SceneBody, wanted: &str| {
+        body.label.eq_ignore_ascii_case(wanted) || body.id.to_string() == wanted
+    };
+    if let Some(unknown) = selection
+        .iter()
+        .find(|wanted| !frame.bodies.iter().any(|body| matches(body, wanted)))
+    {
+        let names: Vec<_> = frame.bodies.iter().map(|b| b.label.as_str()).collect();
+        bail!(
+            "no body `{unknown}` to view; available: {}",
+            names.join(", ")
+        );
+    }
+    Ok(frame
+        .bodies
+        .iter()
+        .map(|body| selection.iter().any(|wanted| matches(body, wanted)))
+        .collect())
 }
 
 fn run_app(terminal: &mut ratatui::DefaultTerminal, app: &mut ViewerApp) -> io::Result<()> {
@@ -347,6 +421,7 @@ mod tests {
         ViewFrame {
             time: x,
             bodies: vec![super::super::SceneBody {
+                id: 1,
                 label: "Link".to_owned(),
                 origin: [x, 0.0, 0.0],
                 points: vec![[x, 0.0, 1.0]],
@@ -362,7 +437,7 @@ mod tests {
 
     #[test]
     fn handles_projection_speed_step_and_quit_keys() {
-        let mut app = ViewerApp::new(vec![frame(0.0), frame(1.0)]);
+        let mut app = ViewerApp::new(vec![frame(0.0), frame(1.0)], &[]).unwrap();
         assert_eq!(app.projection, Projection::Xz);
         press(&mut app, KeyCode::Char('4'));
         assert_eq!(app.projection, Projection::Isometric);
@@ -375,8 +450,25 @@ mod tests {
     }
 
     #[test]
+    fn selects_bodies_by_name_or_id_and_toggles_at_runtime() {
+        let frames = vec![frame(0.0)];
+        let by_id = ViewerApp::new(frames.clone(), &["1".to_owned()]).unwrap();
+        assert_eq!(by_id.visible, [true]);
+        let by_name = ViewerApp::new(frames.clone(), &["link".to_owned()]).unwrap();
+        assert_eq!(by_name.visible, [true]);
+        let error = visible_bodies(&frames[0], &["nope".to_owned()]).unwrap_err();
+        assert!(error.to_string().contains("available: Link"));
+
+        let mut app = ViewerApp::new(vec![frame(0.0)], &[]).unwrap();
+        press(&mut app, KeyCode::Char('t'));
+        assert_eq!(app.visible, [false]);
+        press(&mut app, KeyCode::Char('j'));
+        assert!(app.show_joints);
+    }
+
+    #[test]
     fn bounces_at_both_ends() {
-        let mut app = ViewerApp::new(vec![frame(0.0), frame(1.0), frame(2.0)]);
+        let mut app = ViewerApp::new(vec![frame(0.0), frame(1.0), frame(2.0)], &[]).unwrap();
         app.loop_mode = LoopMode::Bounce;
         let indices: Vec<_> = (0..5)
             .map(|_| {
@@ -389,7 +481,7 @@ mod tests {
 
     #[test]
     fn once_mode_stops_and_restarts() {
-        let mut app = ViewerApp::new(vec![frame(0.0), frame(1.0)]);
+        let mut app = ViewerApp::new(vec![frame(0.0), frame(1.0)], &[]).unwrap();
         app.loop_mode = LoopMode::Once;
         app.tick();
         app.tick();
@@ -401,7 +493,7 @@ mod tests {
     #[test]
     fn renders_canvas_and_status() {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        let app = ViewerApp::new(vec![frame(0.0)]);
+        let app = ViewerApp::new(vec![frame(0.0)], &[]).unwrap();
         terminal.draw(|f| app.render(f)).unwrap();
         let rendered: String = terminal
             .backend()
