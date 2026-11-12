@@ -121,8 +121,17 @@ fn real_solver_solves_example_model() {
     };
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("out.json");
-    let model = root.join("matlab/mlta-model-file-pwt-pos.json");
-    let output = clab(&solver, runtime, &[&model, Path::new("-o"), &out]);
+    let examples = root.join("matlab/examples");
+    let model = examples.join("mlta-model-file-pwt-pos-config-design.json");
+    let design = examples.join("design-1e2.json");
+    let args = [
+        &model,
+        Path::new("--design"),
+        &design,
+        Path::new("-o"),
+        &out,
+    ];
+    let output = clab(&solver, runtime, &args);
     assert!(output.status.success(), "{}", stderr(&output));
     let result: serde_json::Value = serde_json::from_slice(&std::fs::read(out).unwrap()).unwrap();
     assert_eq!(result["time"].as_array().unwrap().len(), 101);

@@ -9,7 +9,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
-use serde::de::IgnoredAny;
+use serde_json::Value;
 
 const RUNTIME_RELEASE: &str = "R2024b";
 const SOLVER_ENV: &str = "CLAB_MKS_SOLVER";
@@ -82,13 +82,47 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
     }
 
     let written = std::fs::File::open(scratch.path())?;
-    serde_json::from_reader::<_, IgnoredAny>(std::io::BufReader::new(written))
+    let solution: Value = serde_json::from_reader(std::io::BufReader::new(written))
         .context("solver wrote invalid JSON")?;
+    let mut text = String::new();
+    format_json(&solution, 0, &mut text);
+    text.push('\n');
+    std::fs::write(scratch.path(), text)
+        .with_context(|| format!("cannot write {}", output.display()))?;
     scratch
         .persist(&output)
         .with_context(|| format!("cannot write {}", output.display()))?;
     println!("{}", output.display());
     Ok(())
+}
+
+/// Indents objects and arrays of containers; arrays of scalars stay on one line.
+fn format_json(value: &Value, depth: usize, out: &mut String) {
+    match value {
+        Value::Array(items) if items.iter().any(|v| v.is_array() || v.is_object()) => {
+            out.push_str("[\n");
+            for (index, item) in items.iter().enumerate() {
+                out.push_str(&"  ".repeat(depth + 1));
+                format_json(item, depth + 1, out);
+                out.push_str(if index + 1 < items.len() { ",\n" } else { "\n" });
+            }
+            out.push_str(&"  ".repeat(depth));
+            out.push(']');
+        }
+        Value::Object(map) if !map.is_empty() => {
+            out.push_str("{\n");
+            for (index, (key, item)) in map.iter().enumerate() {
+                out.push_str(&"  ".repeat(depth + 1));
+                out.push_str(&Value::from(key.as_str()).to_string());
+                out.push_str(": ");
+                format_json(item, depth + 1, out);
+                out.push_str(if index + 1 < map.len() { ",\n" } else { "\n" });
+            }
+            out.push_str(&"  ".repeat(depth));
+            out.push('}');
+        }
+        scalar_or_flat => out.push_str(&scalar_or_flat.to_string()),
+    }
 }
 
 fn default_output(input: &Path) -> PathBuf {
