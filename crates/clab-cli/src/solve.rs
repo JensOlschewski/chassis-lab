@@ -118,9 +118,12 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
     let runtime = find_runtime()?;
 
     // A file in the output directory can replace the output atomically on success.
+    let mut scratch = tempfile::Builder::new();
+    #[cfg(unix)]
+    scratch.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o644));
     let scratch = match output.as_ref().and_then(|output| output.parent()) {
-        Some(dir) => tempfile::NamedTempFile::new_in(dir),
-        None => tempfile::NamedTempFile::new(),
+        Some(dir) => scratch.tempfile_in(dir),
+        None => scratch.tempfile(),
     }
     .context("cannot create a scratch file")?;
     let mut command = Command::new(&solver);

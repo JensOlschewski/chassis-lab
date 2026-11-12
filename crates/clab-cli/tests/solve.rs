@@ -67,6 +67,9 @@ fn writes_json_to_directory_and_runs_in_model_directory() {
     let output = clab(&solver, dir.path(), &json_args(&model, &out_dir));
     assert!(output.status.success(), "{}", stderr(&output));
     let solution = out_dir.join("model-solution.json");
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(&solution).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o644);
     let text = std::fs::read_to_string(solution).unwrap();
     let canonical = std::fs::canonicalize(dir.path()).unwrap();
     assert!(text.contains(canonical.to_str().unwrap()), "{text}");
