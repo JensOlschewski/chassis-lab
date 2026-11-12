@@ -13,6 +13,9 @@ mod license;
 mod progress;
 mod report;
 mod signals;
+mod solution;
+mod solve;
+mod view;
 
 #[derive(Debug, Parser)]
 #[command(name = "clab", version, about = "ChassisLab vehicle analysis CLI")]
@@ -31,6 +34,8 @@ enum Command {
     Inspect(inspect::InspectArgs),
     /// Convert a supported input to HDF5.
     Convert(convert::ConvertArgs),
+    /// Solve a multibody model with the MATLAB solver.
+    Solve(solve::SolveArgs),
     /// Manage the license of this installation.
     #[command(subcommand)]
     License(license::LicenseCommand),
@@ -47,7 +52,11 @@ impl Command {
     fn needs_license(&self) -> bool {
         matches!(
             self,
-            Self::Analyze(_) | Self::Compare(_) | Self::Inspect(_) | Self::Convert(_)
+            Self::Analyze(_)
+                | Self::Compare(_)
+                | Self::Inspect(_)
+                | Self::Convert(_)
+                | Self::Solve(_)
         )
     }
 }
@@ -98,6 +107,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Compare(args) => compare::compare(args),
         Command::Inspect(args) => inspect::inspect(args),
         Command::Convert(args) => convert::convert(args),
+        Command::Solve(args) => solve::solve(args),
         Command::License(command) => license::run(command),
         Command::Completion { shell } => {
             generate(shell, &mut Cli::command(), "clab", &mut std::io::stdout());

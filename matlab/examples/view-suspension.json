@@ -1,0 +1,56 @@
+{
+    "bodies": {
+        "B1_Link": {
+            "points": [
+                "l1",
+                "rl1"
+            ],
+            "shape": "line"
+        },
+        "B8_Link": {
+            "points": [
+                "l8",
+                "rl8"
+            ],
+            "shape": "line"
+        },
+        "B2_Wheelcarrier": {
+            "points": [
+                "rl2",
+                "ru2"
+            ],
+            "shape": "line"
+        },
+        "B9_Wheelcarrier": {
+            "points": [
+                "rl9",
+                "ru9"
+            ],
+            "shape": "line"
+        },
+        "B6_TBE": {
+            "points": [
+                "rui6",
+                "ruo6",
+                "ru6",
+                "qt6",
+                "sc6",
+                "qt6",
+                "u6"
+            ],
+            "shape": "chain"
+        },
+        "B13_TBE": {
+            "points": [
+                "rui13",
+                "ruo13",
+                "ru13",
+                "qt13",
+                "sc13",
+                "qt13",
+                "u13"
+            ],
+            "shape": "chain"
+        }
+    }
+}

@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<afc
+ xmlns="http://www.mscsoftware.com/:vfc"
+ xmlns:afc="http://www.mscsoftware.com/:afc"
+>
+     <afc:Bibliography
+     >
+          <File
+           schema="afc"
+           version="2.0.0.0"
+           URI="mdids://Ford_B479/bumpstops.tbl/jounce_bumper_MLTA_1E2_Lommel_parameter.xml"
+           publicationDate="2023-01-25 16:20:55+01:00"
+          />
+          <Revision
+           version="2"
+          />
+          <Corporation
+           author="MSC Software"
+           URI="http://www.mscsoftware.com/"
+          />
+          <Author
+           user="JO"
+           name="-unknown name-"
+          />
+          <Environment
+           hostName="FLB-JO"
+           operatingSystem="MS Windows NT 6.2"
+          />
+          <Application
+           name="MSC/AFC"
+           version="02.00.00"
+          />
+     </afc:Bibliography>
+     <afc:Units
+     >
+          <afc:UnitSetting
+           name="angle"
+           current="deg"
+          />
+          <afc:UnitSetting
+           name="current"
+           current="ampere"
+          />
+          <afc:UnitSetting
+           name="force"
+           current="newton"
+          />
+          <afc:UnitSetting
+           name="length"
+           current="mm"
+          />
+          <afc:UnitSetting
+           name="luminosity"
+           current="candela"
+          />
+          <afc:UnitSetting
+           name="mass"
+           current="kilogram"
+          />
+          <afc:UnitSetting
+           name="quantity"
+           current="mole"
+          />
+          <afc:UnitSetting
+           name="solidAngle"
+           current="steradian"
+          />
+          <afc:UnitSetting
+           name="temperature"
+           current="kelvin"
+          />
+          <afc:UnitSetting
+           name="time"
+           current="second"
+          />
+     </afc:Units>
+     <BumpStopProperties
+      name="l8_B479_132mmm_Prod"
+      active="true"
+      definition="$AFM_AFT/utility/jbumper.py"
+      userDefined="false"
+      diameter="40"
+      height="90"
+      dampingMethod="linear"
+      dampingRate="0"
+      scaleFactor="2.1"
+      linearRate="0"
+      quadraticRate="0.4"
+      cubicRate="0"
+      method="non_linear"
+      metalToMetalRate="1000000"
+     >
+          <BumpStopSpline
+           name="spline_data"
+           id="0"
+           active="true"
+           userDefined="false"
+           interpolation_method="akima"
+          >
+            <![CDATA[
+              0               0
+              1               8
+              2              20
+              3              32
+              4            44.3
+              5            56.6
+              6            68.9
+              7            81.2
+              8            93.5
+              9           105.8
+             10           118.1
+             11           130.4
+             12           142.7
+             13             155
+             14           167.3
+             15           179.6
+             16           191.9
+             17           204.2
+             18           216.5
+             19           228.8
+             20           241.1
+             21           253.2
+             22           265.2
+             23           277.2
+             24           289.3
+             25           301.6
+             26           314.2
+             27           327.2
+             28           340.7
+             29           354.8
+             30           369.6
+             31           385.2
+             32           401.7
+             33           419.2
+             34           437.8
+             35           457.6
+             36           478.7
+             37           501.2
+             38           525.2
+             39           550.8
+             40           578.1
+             41           607.3
+             42           638.6
+             43           672.2
+             44           708.3
+             45           747.1
+             46           789.1
+             47           835.3
+             48           886.7
+             49           945.3
+             50          1013.1
+             51          1092.1
+             52          1184.3
+             53          1299.7
+             54          1458.3
+             55          1680.1
+             56          1985.1
+             57          2403.3
+             58          2964.7
+             59          3699.3
+             60          4777.1
+             61          6383.1
+             62          8717.3
+             63         11994.7
+             64         16445.3
+             65         22314.1
+             66         29861.1
+             67         39361.3
+             68         51104.7
+             69         65396.3
+             70         82556.1
+             71        102919.1
+             72        126835.3
+             73        154669.7
+             74        186802.3
+             75        223628.1
+             76        265557.1
+             77        313014.3
+             78        366439.7
+             79        426288.3
+             80        493030.1
+]]>
+               <Comment
+                userDefined="false"
+               >
+                 <![CDATA[Bumpstop wurde entsprechend der Ford Vorgaben (80 mm 2G) angepasst]]>
+               </Comment>
+          </BumpStopSpline>
+          <BumpStopSpline
+           name="damping_data"
+           id="0"
+           active="true"
+           userDefined="false"
+           interpolation_method="akima"
+          >
+            <![CDATA[
+         -50000               0
+         -20000               0
+              0               0
+          20000               0
+          50000               0
+]]>
+          </BumpStopSpline>
+          <IntParameter
+           name="place_holder"
+           active="true"
+           userDefined="false"
+           value="0"
+          />
+          <Comment
+           userDefined="false"
+          >
+            <![CDATA[]]>
+          </Comment>
+     </BumpStopProperties>
+</afc>
