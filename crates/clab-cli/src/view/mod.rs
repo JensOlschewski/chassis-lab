@@ -30,10 +30,7 @@ impl Projection {
             Self::Xy => [x, y],
             Self::Xz => [x, z],
             Self::Yz => [y, z],
-            Self::Isometric => [
-                (y - x) / 2.0_f64.sqrt(),
-                (-x - y + 2.0 * z) / 6.0_f64.sqrt(),
-            ],
+            Self::Isometric => [(x - y) / 2.0_f64.sqrt(), (x + y + 2.0 * z) / 6.0_f64.sqrt()],
         }
     }
 }
@@ -375,12 +372,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn isometric_looks_from_the_positive_octant() {
-        // x lower left, y lower right, z up: screen right × up = viewer direction.
+    fn isometric_looks_from_minus_x_minus_y_plus_z() {
+        // Camera at (-1, -1, 1): x to the upper right, y to the upper left, z up.
         let [x, y, z] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
             .map(|axis| Projection::Isometric.project(axis));
-        assert!(x[0] < 0.0 && y[0] > 0.0 && z[0].abs() < 1e-12);
-        assert!(x[1] < 0.0 && y[1] < 0.0 && z[1] > 0.0);
+        assert!(x[0] > 0.0 && y[0] < 0.0 && z[0].abs() < 1e-12);
+        assert!(x[1] > 0.0 && y[1] > 0.0 && z[1] > 0.0);
     }
 
     fn solution() -> Value {
