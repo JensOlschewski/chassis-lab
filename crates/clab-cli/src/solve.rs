@@ -38,10 +38,6 @@ pub(crate) struct SolveArgs {
     /// Show the solved motion in the terminal.
     #[arg(long)]
     view: bool,
-    /// Bodies shown by --view, comma separated names or numbers. Default: all
-    /// but helper bodies.
-    #[arg(long, value_delimiter = ',', value_name = "BODIES", requires = "view")]
-    view_bodies: Vec<String>,
     /// Design variable JSON applied to the model.
     #[arg(long, value_name = "FILE")]
     design: Option<PathBuf>,
@@ -162,7 +158,7 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         print!("{}", solution::render_text(&solution)?);
     }
     if args.view {
-        view::run_viewer(view::frames_from_solution(&solution)?, &args.view_bodies)?;
+        view::run_viewer(view::frames_from_solution(&solution)?)?;
     }
     Ok(())
 }

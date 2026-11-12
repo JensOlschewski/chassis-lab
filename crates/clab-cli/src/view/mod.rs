@@ -43,7 +43,6 @@ pub(crate) struct ViewFrame {
 
 #[derive(Clone, Debug, PartialEq)]
 struct SceneBody {
-    id: i64,
     label: String,
     origin: Vec3,
     points: Vec<Vec3>,
@@ -58,32 +57,24 @@ struct SceneJoint {
 }
 
 impl ViewFrame {
-    /// Visits the positions of the visible bodies.
-    fn visit_positions(&self, visible: &[bool], mut visit: impl FnMut(Vec3)) {
-        for (body, _) in self.bodies.iter().zip(visible).filter(|(_, shown)| **shown) {
+    fn visit_positions(&self, mut visit: impl FnMut(Vec3)) {
+        for body in &self.bodies {
             visit(body.origin);
             body.points.iter().for_each(|point| visit(*point));
+        }
+        for joint in &self.joints {
+            visit(joint.i);
+            visit(joint.j);
         }
     }
 }
 
-/// Shape of a body: a dot, a line, or a star from the origin to its points.
-/// The star does not depend on the order the points were declared in.
+/// Segments of a body: one point connects to the origin, several chain in order.
 fn body_segments(origin: Vec3, points: &[Vec3]) -> Vec<[Vec3; 2]> {
     match points {
-        [] => vec![],
-        [point] => vec![[*point, *point]],
-        [a, b] => vec![[*a, *b]],
-        _ => points.iter().map(|point| [origin, *point]).collect(),
+        [point] => vec![[origin, *point]],
+        _ => points.windows(2).map(|pair| [pair[0], pair[1]]).collect(),
     }
-}
-
-/// Bodies that only support the model and are hidden by default.
-fn is_helper_body(label: &str) -> bool {
-    let label = label.to_lowercase();
-    ["table", "tbe", "virt", "wheelpatch"]
-        .iter()
-        .any(|helper| label.contains(helper))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -93,11 +84,11 @@ pub(crate) struct ProjectedBounds {
 }
 
 impl ProjectedBounds {
-    fn for_frames(frames: &[ViewFrame], projection: Projection, visible: &[bool]) -> Self {
+    fn for_frames(frames: &[ViewFrame], projection: Projection) -> Self {
         let mut min = [f64::INFINITY; 2];
         let mut max = [f64::NEG_INFINITY; 2];
         for frame in frames {
-            frame.visit_positions(visible, |position| {
+            frame.visit_positions(|position| {
                 let [x, y] = projection.project(position);
                 min = [min[0].min(x), min[1].min(y)];
                 max = [max[0].max(x), max[1].max(y)];
@@ -196,7 +187,6 @@ impl Track {
 }
 
 struct BodyTracks {
-    id: i64,
     label: String,
     origin: Track,
     points: Vec<Track>,
@@ -233,7 +223,6 @@ pub(crate) fn frames_from_solution(solution: &Value) -> Result<Vec<ViewFrame>> {
                 })
                 .collect::<Result<_>>()?;
             Ok(BodyTracks {
-                id: body["bodyID"].as_i64().unwrap_or(-1),
                 label,
                 origin,
                 points,
@@ -268,7 +257,6 @@ pub(crate) fn frames_from_solution(solution: &Value) -> Result<Vec<ViewFrame>> {
                     let origin = body.origin.at(step);
                     let points: Vec<Vec3> = body.points.iter().map(|p| p.at(step)).collect();
                     SceneBody {
-                        id: body.id,
                         label: body.label.clone(),
                         origin,
                         segments: body_segments(origin, &points),
@@ -326,21 +314,6 @@ mod tests {
     }
 
     #[test]
-    fn shapes_follow_point_count() {
-        let o = [0.0; 3];
-        let (a, b, c) = ([1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]);
-        assert_eq!(body_segments(o, &[a]), [[a, a]]);
-        assert_eq!(body_segments(o, &[a, b]), [[a, b]]);
-        assert_eq!(body_segments(o, &[a, b, c]), [[o, a], [o, b], [o, c]]);
-    }
-
-    #[test]
-    fn hides_helper_bodies() {
-        assert!(is_helper_body("B5_Table") && is_helper_body("B7_VirtBody"));
-        assert!(!is_helper_body("B2_Wheelcarrier"));
-    }
-
-    #[test]
     fn asks_for_body_data() {
         let error = frames_from_solution(&json!({ "time": [0.0] })).unwrap_err();
         assert!(error.to_string().contains("--include bodies,connectors"));
@@ -349,7 +322,7 @@ mod tests {
     #[test]
     fn bounds_cover_all_frames_and_fit_the_viewport() {
         let frames = frames_from_solution(&solution()).unwrap();
-        let bounds = ProjectedBounds::for_frames(&frames, Projection::Xz, &[true]);
+        let bounds = ProjectedBounds::for_frames(&frames, Projection::Xz);
         assert_eq!((bounds.min(), bounds.max()), ([0.0, 0.0], [3.0, 1.0]));
         let wide = bounds.fit_aspect(300, 100);
         assert_eq!(wide, bounds);
