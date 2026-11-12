@@ -171,7 +171,7 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
     plots = [];
     const groups: HTMLOptGroupElement[] = [];
     const missing: string[] = [];
-    for (const domain of domains.filter((domain) => domain.domain === "knc")) {
+    for (const domain of inResultOrder(domains).filter((domain) => domain.domain === "knc")) {
       const stems = domain.test === "longitudinal" ? ["longitudinal-b0", "longitudinal-b1"] : [domain.test!];
       for (const stem of stems) {
         const label = stems.length > 1 ? `${titleOf(domain)} (brakes ${stem.endsWith("b1") ? "on" : "off"})` : titleOf(domain);

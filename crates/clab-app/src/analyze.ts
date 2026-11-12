@@ -237,11 +237,11 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   }
 
   /** Where a KnC section's plots land; analysis plots also open in Inspect. */
-  const kncStatus = (report: string, section: { test?: string | null }, compare: boolean, badge: HTMLElement): ReportStatus => {
+  const kncStatus = (report: string, section: { test?: string | null }, badge: HTMLElement): ReportStatus => {
     const test = String(section.test);
     return {
       badge,
-      plots: compare ? join(report, "plots", "knc", test, "comparison") : join(report, "plots", "knc", test),
+      plots: join(report, "plots", "knc", test),
       open: () => showReport(report, test),
     };
   };
@@ -281,7 +281,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
           if (report) {
             const badge = createBadge("running");
             reportBadges.push({ badge, phases: knc ? [`${section.title} plots`, BUNDLE_PHASE] : [BUNDLE_PHASE] });
-            status = knc ? kncStatus(report, section, compare, badge) : { badge };
+            status = knc ? kncStatus(report, section, badge) : { badge };
           }
           sections.append(compare ? renderComparison(section, series, status) : renderSection(section, status));
         }
