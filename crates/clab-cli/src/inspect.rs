@@ -231,8 +231,7 @@ fn inspect_json(
 }
 
 fn inspect_svc_json(path: &Path, signals: bool, match_text: Option<&str>) -> Result<()> {
-    let file = SvcSimulationFile::open(path)
-        .with_context(|| format!("failed to inspect SVC JSON '{}'", path.display()))?;
+    let file = SvcSimulationFile::open(path)?;
     println!("source file: {}", file.source_file());
     println!("format version: 1");
     println!("samples: {}", file.sample_count());
