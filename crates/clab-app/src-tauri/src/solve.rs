@@ -292,19 +292,25 @@ fn parameters(model: &Value) -> Result<Vec<Section>, String> {
         ("bushings", "Bushings", bushing_columns, false, bushings),
         (
             "forces",
-            "Forces",
+            "Force Elements",
             vec!["Active", "Stiffness", "Free length"],
             false,
             forces,
         ),
         (
+            "drives",
+            "Drives and External Forces",
+            DRIVE_COMPONENTS.to_vec(),
+            false,
+            drives,
+        ),
+        (
             "simulation",
-            "Simulation",
+            "Simulation Parameter",
             step.to_vec(),
             false,
             vec![simulation],
         ),
-        ("drives", "Drives", DRIVE_COMPONENTS.to_vec(), false, drives),
     ];
     Ok(sections
         .into_iter()
@@ -638,7 +644,7 @@ mod tests {
         let ids: Vec<_> = sections.iter().map(|section| section.id).collect();
         assert_eq!(
             ids,
-            ["hardpoints", "bushings", "forces", "simulation", "drives"]
+            ["hardpoints", "bushings", "forces", "drives", "simulation"]
         );
         let names: Vec<_> = sections[0]
             .rows
@@ -711,7 +717,7 @@ mod tests {
         let ids: Vec<_> = sections.iter().map(|section| section.id).collect();
         assert_eq!(
             ids,
-            ["hardpoints", "bushings", "forces", "simulation", "drives"]
+            ["hardpoints", "bushings", "forces", "drives", "simulation"]
         );
         assert!(cells(&sections).all(|cell| model.pointer(&cell.pointer).is_some()));
     }

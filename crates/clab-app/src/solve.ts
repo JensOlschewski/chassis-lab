@@ -47,6 +47,7 @@ export function setupSolve() {
   const form = document.querySelector<HTMLFormElement>("#solve-form")!;
   const designFields = document.querySelector<HTMLElement>("#solve-design")!;
   const designNote = document.querySelector<HTMLElement>("#solve-design-note")!;
+  const adjust = document.querySelector<HTMLInputElement>("#solve-adjust")!;
   const sections = document.querySelector<HTMLElement>("#solve-sections")!;
   const status = document.querySelector<HTMLElement>("#solve-status")!;
   const steps = document.querySelector<HTMLElement>("#solve-steps")!;
@@ -77,9 +78,16 @@ export function setupSolve() {
   const renderSections = (parameters: Section[]) => {
     const kept = keptVariables(sections);
     sections.replaceChildren(...parameters.map((section, index) => createSection(section, kept, index === 0)));
-    designFields.hidden = parameters.length === 0;
+    // A model with design variables cannot be solved without values for them.
+    if (variableNames(sections).size) adjust.checked = true;
+    showDesign();
     designNote.textContent = "";
   };
+
+  const showDesign = () => {
+    designFields.hidden = !adjust.checked || !sections.hasChildNodes();
+  };
+  adjust.addEventListener("change", showDesign);
 
   const loadModel = async () => {
     const model = clean(field("model").value);
@@ -126,8 +134,8 @@ export function setupSolve() {
 
   /** The model, design variable values and changed literals of the form, as the backend expects them. */
   const readCase = () => {
-    const { design, overrides } = readParameters(sections);
-    return { model: clean(field("model").value), design: { ...loaded, ...design }, overrides };
+    const { design, overrides } = adjust.checked ? readParameters(sections) : { design: {}, overrides: {} };
+    return { model: clean(field("model").value), design: adjust.checked ? { ...loaded, ...design } : {}, overrides };
   };
 
   let stopped = false;
@@ -143,7 +151,7 @@ export function setupSolve() {
       show("Choose a solution file", false);
       return;
     }
-    const invalid = firstInvalid(sections);
+    const invalid = adjust.checked ? firstInvalid(sections) : undefined;
     if (invalid) {
       invalid.focus();
       show(invalidMessage(invalid), false);
