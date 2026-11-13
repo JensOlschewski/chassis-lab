@@ -4,7 +4,7 @@ use std::fmt::Write;
 
 use anyhow::{Result, bail};
 use clab_core::solution::{matrix, time};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 const ZERO_THRESHOLD: f64 = 0.5e-12;
 /// `v_hat` holds 6 rows (3 linear, 3 angular velocity) per body.
@@ -32,6 +32,39 @@ pub(crate) fn render_text(solution: &Value) -> Result<String> {
         }
     }
     Ok(out)
+}
+
+/// Body names in `v_hat` order. `v_hat` lists the bodies after ground, so body `n` has bodyID `n`.
+fn body_names(solution: &Value, count: usize) -> Vec<String> {
+    (1..=count)
+        .map(|id| {
+            solution["bodies"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|body| body["bodyID"].as_u64() == Some(id as u64))
+                .and_then(|body| body["name"].as_str())
+                .map_or_else(|| format!("body {id}"), str::to_owned)
+        })
+        .collect()
+}
+
+/// The velocities in the shape the app plots HDF5 signals in: the time axis plus
+/// one signal per body and component. The solver states no units.
+pub(crate) fn velocity_signals(solution: &Value) -> Result<Value> {
+    const COMPONENTS: [&str; DOF_PER_BODY] = ["vx", "vy", "vz", "wx", "wy", "wz"];
+    let (time, v_hat) = velocities(solution)?;
+    let names = body_names(solution, v_hat.len() / DOF_PER_BODY);
+    let signals: Vec<Value> = names
+        .iter()
+        .zip(v_hat.chunks(DOF_PER_BODY))
+        .flat_map(|(name, rows)| {
+            COMPONENTS.iter().zip(rows).map(move |(component, values)| {
+                json!({ "name": format!("{name}.{component}"), "unit": "", "values": values })
+            })
+        })
+        .collect();
+    Ok(json!({ "axis": time, "signals": signals }))
 }
 
 /// What `--include` writes into a solution, and the keys it adds.
@@ -86,17 +119,7 @@ pub(crate) fn render_summary(solution: &Value) -> Result<String> {
         )?;
     }
 
-    // `v_hat` lists the bodies after ground, so body `n` has bodyID `n`.
-    let name = |id: usize| {
-        solution["bodies"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|body| body["bodyID"].as_u64() == Some(id as u64))
-            .and_then(|body| body["name"].as_str())
-            .map_or_else(|| format!("body {id}"), str::to_owned)
-    };
-    let names: Vec<String> = (1..=bodies).map(name).collect();
+    let names = body_names(solution, bodies);
     let width = names
         .iter()
         .map(String::len)
@@ -146,6 +169,26 @@ mod tests {
              body 1 velocity [1.000000000000, 0.000000000000, 0.000000000000, 0.000000000000, 0.000000000000, 0.000000000000]\n\
              time 0.500000000000\n\
              body 1 velocity [2.000000000000, 0.000000000000, 0.000000000000, 0.000000000000, 0.000000000000, 3.000000000000]\n"
+        );
+    }
+
+    #[test]
+    fn velocity_signals_are_named_per_body_and_component() {
+        let mut solution = json!({
+            "time": [0.0, 0.5],
+            "v_hat": [[1.0, 2.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 3.0]],
+            "bodies": [{ "name": "Link", "bodyID": 1 }],
+        });
+        let signals = velocity_signals(&solution).unwrap();
+        assert_eq!(signals["axis"], json!([0.0, 0.5]));
+        assert_eq!(signals["signals"].as_array().unwrap().len(), 6);
+        assert_eq!(signals["signals"][0]["name"], "Link.vx");
+        assert_eq!(signals["signals"][5]["name"], "Link.wz");
+        assert_eq!(signals["signals"][5]["values"], json!([0.0, 3.0]));
+        solution["bodies"] = json!([]);
+        assert_eq!(
+            velocity_signals(&solution).unwrap()["signals"][0]["name"],
+            "body 1.vx"
         );
     }
 

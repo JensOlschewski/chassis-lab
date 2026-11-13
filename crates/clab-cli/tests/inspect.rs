@@ -330,6 +330,7 @@ fn solution_json_carries_frames_for_the_chosen_layout() {
     )
     .unwrap();
     let value = inspect_json(&path, &[]);
+    assert_eq!(value["signals"]["signals"][0]["name"], "Link.vx");
     assert_eq!(value["frames"].as_array().unwrap().len(), 2);
     assert_eq!(value["frames"][1]["bodies"][0]["label"], "Link");
     assert_eq!(value["frames"][1]["bodies"][0]["origin"][0], 1.0);

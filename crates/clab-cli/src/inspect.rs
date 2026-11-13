@@ -115,7 +115,12 @@ fn inspect_solution(solution: &Value, json: bool, view: Option<Option<PathBuf>>)
         let summary = solution::render_summary(solution)?;
         println!(
             "{}",
-            json!({ "kind": "solution", "summary": summary, "frames": frames })
+            json!({
+                "kind": "solution",
+                "summary": summary,
+                "signals": solution::velocity_signals(solution)?,
+                "frames": frames,
+            })
         );
     } else if view.is_some() {
         view_solution(solution, layout.as_ref())?;
