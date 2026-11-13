@@ -4,6 +4,7 @@ use std::fmt::Write;
 
 use anyhow::{Result, bail};
 use clab_core::solution::{matrix, time};
+use serde::Serialize;
 use serde_json::{Value, json};
 
 const ZERO_THRESHOLD: f64 = 0.5e-12;
@@ -49,21 +50,61 @@ fn body_names(solution: &Value, count: usize) -> Vec<String> {
         .collect()
 }
 
-/// The velocities in the shape the app plots HDF5 signals in: the time axis plus
-/// one signal per body and component. The solver states no units.
-pub(crate) fn velocity_signals(solution: &Value) -> Result<Value> {
+fn signal(name: String, values: impl Serialize) -> Value {
+    json!({ "name": name, "unit": "", "values": values })
+}
+
+/// The solution in the shape the app plots HDF5 signals in: the time axis plus one
+/// signal per body velocity component and, if solved `--include suspension`, one
+/// per suspension characteristic (`toecamber.l_toe`, `wheel_points.l_wc.x`, …).
+/// The solver states no units.
+pub(crate) fn plot_signals(solution: &Value) -> Result<Value> {
     const COMPONENTS: [&str; DOF_PER_BODY] = ["vx", "vy", "vz", "wx", "wy", "wz"];
     let (time, v_hat) = velocities(solution)?;
     let names = body_names(solution, v_hat.len() / DOF_PER_BODY);
-    let signals: Vec<Value> = names
+    let mut signals: Vec<Value> = names
         .iter()
         .zip(v_hat.chunks(DOF_PER_BODY))
         .flat_map(|(name, rows)| {
-            COMPONENTS.iter().zip(rows).map(move |(component, values)| {
-                json!({ "name": format!("{name}.{component}"), "unit": "", "values": values })
-            })
+            COMPONENTS
+                .iter()
+                .zip(rows)
+                .map(move |(component, values)| signal(format!("{name}.{component}"), values))
         })
         .collect();
+    for (section, entries) in solution["characteristics"]
+        .as_object()
+        .into_iter()
+        .flatten()
+    {
+        for (key, value) in entries.as_object().into_iter().flatten() {
+            let name = format!("{section}.{key}");
+            // A vector over time, or x/y/z rows; a step the solver could not compute is null.
+            match value.as_array().map(|rows| rows.first()) {
+                Some(Some(Value::Array(_))) => {
+                    let rows = matrix(value, &name)?;
+                    if rows.len() != 3 || rows.iter().any(|row| row.len() != time.len()) {
+                        bail!("`{name}` is not 3 × {}", time.len());
+                    }
+                    signals.extend(
+                        rows.iter()
+                            .zip(["x", "y", "z"])
+                            .map(|(row, axis)| signal(format!("{name}.{axis}"), row)),
+                    );
+                }
+                Some(_) => {
+                    let values = value.as_array().unwrap();
+                    if values.len() != time.len()
+                        || values.iter().any(|n| !n.is_number() && !n.is_null())
+                    {
+                        bail!("`{name}` does not match `time`");
+                    }
+                    signals.push(signal(name, values));
+                }
+                None => {}
+            }
+        }
+    }
     Ok(json!({ "axis": time, "signals": signals }))
 }
 
@@ -173,13 +214,13 @@ mod tests {
     }
 
     #[test]
-    fn velocity_signals_are_named_per_body_and_component() {
+    fn plot_signals_are_named_per_body_and_component() {
         let mut solution = json!({
             "time": [0.0, 0.5],
             "v_hat": [[1.0, 2.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 3.0]],
             "bodies": [{ "name": "Link", "bodyID": 1 }],
         });
-        let signals = velocity_signals(&solution).unwrap();
+        let signals = plot_signals(&solution).unwrap();
         assert_eq!(signals["axis"], json!([0.0, 0.5]));
         assert_eq!(signals["signals"].as_array().unwrap().len(), 6);
         assert_eq!(signals["signals"][0]["name"], "Link.vx");
@@ -187,9 +228,46 @@ mod tests {
         assert_eq!(signals["signals"][5]["values"], json!([0.0, 3.0]));
         solution["bodies"] = json!([]);
         assert_eq!(
-            velocity_signals(&solution).unwrap()["signals"][0]["name"],
+            plot_signals(&solution).unwrap()["signals"][0]["name"],
             "body 1.vx"
         );
+    }
+
+    #[test]
+    fn plot_signals_include_suspension_characteristics() {
+        let solution = json!({
+            "time": [0.0, 0.5],
+            "v_hat": [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
+            "characteristics": {
+                "toecamber": { "l_toe": [0.2, 0.3] },
+                "roll": { "roll_rate": [null, 1.0] },
+                "wheel_points": { "l_wc": [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]] },
+            },
+        });
+        let signals = plot_signals(&solution).unwrap()["signals"].clone();
+        let named = |name: &str| {
+            signals
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == name)
+        };
+        assert_eq!(
+            named("toecamber.l_toe").unwrap()["values"],
+            json!([0.2, 0.3])
+        );
+        assert_eq!(
+            named("roll.roll_rate").unwrap()["values"],
+            json!([null, 1.0])
+        );
+        assert_eq!(
+            named("wheel_points.l_wc.y").unwrap()["values"],
+            json!([3.0, 4.0])
+        );
+
+        let mut short = solution.clone();
+        short["characteristics"]["toecamber"]["l_toe"] = json!([0.2]);
+        assert!(plot_signals(&short).is_err());
     }
 
     #[test]

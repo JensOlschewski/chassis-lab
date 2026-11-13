@@ -118,7 +118,7 @@ fn inspect_solution(solution: &Value, json: bool, view: Option<Option<PathBuf>>)
             json!({
                 "kind": "solution",
                 "summary": summary,
-                "signals": solution::velocity_signals(solution)?,
+                "signals": solution::plot_signals(solution)?,
                 "frames": frames,
             })
         );
