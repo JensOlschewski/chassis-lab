@@ -101,12 +101,14 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .view
         .iter()
         .flatten()
-        .map(|path| view::ViewLayout::load(path))
+        .map(|path| clab_core::view::ViewLayout::load(path))
         .next()
         .transpose()?;
     let mut include = args.include;
     if args.view.is_some() {
-        let joints = layout.as_ref().is_none_or(view::ViewLayout::shows_joints);
+        let joints = layout
+            .as_ref()
+            .is_none_or(clab_core::view::ViewLayout::shows_joints);
         let needed = [Include::Bodies]
             .into_iter()
             .chain(joints.then_some(Include::Connectors));
@@ -176,7 +178,7 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         print!("{}", solution::render_text(&solution)?);
     }
     if args.view.is_some() {
-        let frames = view::frames_from_solution(&solution, layout.as_ref())?;
+        let frames = clab_core::view::frames_from_solution(&solution, layout.as_ref())?;
         view::run_viewer(frames)?;
     }
     Ok(())

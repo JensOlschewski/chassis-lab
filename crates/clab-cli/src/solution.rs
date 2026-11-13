@@ -2,40 +2,13 @@
 
 use std::fmt::Write;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
+use clab_core::solution::{matrix, time};
 use serde_json::Value;
 
 const ZERO_THRESHOLD: f64 = 0.5e-12;
 /// `v_hat` holds 6 rows (3 linear, 3 angular velocity) per body.
 const DOF_PER_BODY: usize = 6;
-
-/// Reads a JSON array of equally long number arrays (a MATLAB matrix).
-pub(crate) fn matrix(value: &Value, what: &str) -> Result<Vec<Vec<f64>>> {
-    let rows = value
-        .as_array()
-        .with_context(|| format!("solution has no `{what}` matrix"))?;
-    rows.iter()
-        .map(|row| {
-            row.as_array()
-                .with_context(|| format!("`{what}` is not a matrix"))?
-                .iter()
-                .map(|n| {
-                    n.as_f64()
-                        .with_context(|| format!("`{what}` is not numeric"))
-                })
-                .collect()
-        })
-        .collect()
-}
-
-pub(crate) fn time(solution: &Value) -> Result<Vec<f64>> {
-    solution["time"]
-        .as_array()
-        .context("solution has no `time` vector")?
-        .iter()
-        .map(|n| n.as_f64().context("`time` is not numeric"))
-        .collect()
-}
 
 /// One block per time step and one line per body, in kinemagic's text style.
 pub(crate) fn render_text(solution: &Value) -> Result<String> {
