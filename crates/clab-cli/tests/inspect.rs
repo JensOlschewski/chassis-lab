@@ -369,7 +369,8 @@ fn solution_json_is_tagged_and_signal_flags_are_refused() {
     let value = inspect_json(&path, &[]);
     assert_eq!(value["kind"], "solution");
     assert!(value["summary"].as_str().unwrap().contains("steps: 1"));
-    for flags in [&["--list"][..], &["--match", "x"], &["--signal", "x"]] {
+    assert_eq!(inspect_json(&path, &["--list"])["kind"], "solution");
+    for flags in [&["--match", "x"][..], &["--signal", "x"]] {
         let output = inspect(&path, flags);
         assert_eq!(output.status.code(), Some(2));
         assert!(String::from_utf8_lossy(&output.stderr).contains("not solver solutions"));

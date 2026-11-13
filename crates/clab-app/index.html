@@ -86,12 +86,12 @@
       </section>
       <section id="inspect" class="pane wide" hidden>
         <h2>Inspect</h2>
-        <p class="hint">Plot raw signals from a converted HDF5 file, or browse the metrics and plots of a report folder.</p>
+        <p class="hint">Plot raw signals from a converted HDF5 file or the velocities of a solver solution, or browse the metrics and plots of a report folder.</p>
         <form id="inspect-form">
           <label>
             Input file or report folder
             <span class="path-row">
-              <input name="file" required placeholder=".h5 or .hdf5 file, or a report folder" />
+              <input name="file" required placeholder=".h5, .hdf5 or solver solution .json, or a report folder" />
               <button type="button" data-browse="file" data-target="file">File…</button>
               <button type="button" data-browse="directory" data-target="file">Folder…</button>
             </span>
@@ -102,6 +102,7 @@
 
         <form id="inspect-signals" hidden>
           <dl id="inspect-info" class="info" hidden></dl>
+          <pre id="inspect-summary" class="info" hidden></pre>
 
           <div id="curves" class="curves"></div>
           <button type="button" id="add-curve" disabled>+ Add curve</button>

@@ -74,8 +74,8 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
     }
     let kind = detect(&file)?;
     if let Kind::Solution(solution) = &kind {
-        if args.list || args.r#match.is_some() || !args.signal.is_empty() {
-            bail!("--list, --match and --signal apply to HDF5 files, not solver solutions");
+        if args.r#match.is_some() || !args.signal.is_empty() {
+            bail!("--match and --signal apply to HDF5 files, not solver solutions");
         }
         return inspect_solution(solution, args.json, args.view);
     }

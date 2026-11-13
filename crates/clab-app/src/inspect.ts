@@ -27,6 +27,16 @@ export interface InspectState {
 }
 
 
+/** `clab inspect --json` of a solver solution; HDF5 listings have no `kind`. */
+interface SolutionResult {
+  kind: "solution";
+  summary: string;
+  /** Body velocities, ready to plot. */
+  signals: Signals;
+}
+
+const isSolution = (result: object): result is SolutionResult => "kind" in result && result.kind === "solution";
+
 async function inspect<T>(file: string, signals: string[]): Promise<T> {
   const outcome = await run("run_inspect", { file, signals });
   if (outcome.exit_code !== 0) {
@@ -51,6 +61,7 @@ export function setupInspect() {
   const plot = document.querySelector<HTMLElement>("#inspect-plot")!;
   const footer = document.querySelector<HTMLElement>("#inspect-footer")!;
   const info = document.querySelector<HTMLElement>("#inspect-info")!;
+  const summaryText = document.querySelector<HTMLElement>("#inspect-summary")!;
   const curvesRoot = document.querySelector<HTMLElement>("#curves")!;
   const addButton = document.querySelector<HTMLButtonElement>("#add-curve")!;
   const file = pathForm.elements.namedItem("file") as HTMLInputElement;
@@ -59,6 +70,8 @@ export function setupInspect() {
   let choices: Choice[] = [];
   let axes: string[] = [];
   let plotted = false;
+  /** A solver solution carries its signals with the listing; HDF5 signals are read per plot. */
+  let solution: Signals | null = null;
 
   const show = (message: string, ok = true) => {
     status.textContent = message;
@@ -197,6 +210,8 @@ export function setupInspect() {
     submit.disabled = true;
     addButton.disabled = true;
     info.hidden = true;
+    summaryText.hidden = true;
+    solution = null;
     curvesRoot.replaceChildren();
   };
 
@@ -206,8 +221,17 @@ export function setupInspect() {
     showBody("signals");
     show("Loading signals…");
     try {
-      const { summary, signals } = await inspect<{ summary: Summary; signals: SignalInfo[] }>(file.value, []);
-      showInfo(summary);
+      const result = await inspect<SolutionResult | { summary: Summary; signals: SignalInfo[] }>(file.value, []);
+      let signals: SignalInfo[];
+      if (isSolution(result)) {
+        solution = result.signals;
+        signals = solution.signals;
+        summaryText.textContent = result.summary;
+        summaryText.hidden = false;
+      } else {
+        signals = result.signals;
+        showInfo(result.summary);
+      }
       const sorted = [...signals]
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((signal) => ({ value: signal.name, text: labelOf(signal) }));
@@ -251,7 +275,7 @@ export function setupInspect() {
     try {
       const names = new Set(curves.flatMap(({ x, y }) => [x, y]));
       names.delete(AXIS);
-      const data = await inspect<Signals>(file.value, [...names]);
+      const data = solution ?? (await inspect<Signals>(file.value, [...names]));
       plot.hidden = false;
       const pressed = document.querySelector<HTMLElement>("#inspect-tools [aria-pressed=true]");
       // Keep the tool the user picked across redraws.
