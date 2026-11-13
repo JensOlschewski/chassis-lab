@@ -175,13 +175,18 @@ fn bushing_row(model: &Value, group: &str, name: &str) -> Row {
         .into_iter()
         .find(|(key, _)| model.pointer(&format!("{orientation}/{key}")).is_some());
         if let Some((key, labels)) = found {
-            cells.extend(cells_at(
+            let angles = cells_at(
                 model,
                 &format!("{orientation}/{key}"),
                 Kind::Number,
                 column,
                 &labels,
-            ));
+            );
+            // Only Euler angles are edited; a two-points orientation follows from the hardpoints.
+            cells.extend(angles.into_iter().map(|cell| Cell {
+                locked: key == "helpvec" && cell.variable.is_none(),
+                ..cell
+            }));
         }
     }
     Row {
