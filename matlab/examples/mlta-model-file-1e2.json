@@ -1,11 +1,11 @@
 {
     "Hardpoints": {
-        "U": [4700.0, -568.02, 555.0],
-        "L": ["HP_L_X", "HP_L_Y", "HP_L_Z"],
-        "RUi": ["HP_RU_X", "HP_RUi_Y", "HP_RU_Z"],
-        "RUo": ["HP_RU_X", "HP_RUo_Y", "HP_RU_Z"],
-        "RU": ["HP_RU_X", "HP_RU_Y", "HP_RU_Z"],
-        "RL": ["HP_RL_X", "HP_RL_Y", "HP_RL_Z"],
+        "U": [4276.4, -598.85, 296.38],
+        "L": [3945.2, -539.68, 436.38],
+        "RU": [4297.39, -644.54, 578.95],
+        "RUi": [4297.39, -606.67, 578.95],
+        "RUo": [4297.39, -682.41, 578.95],
+        "RL": [4276.4, -598.85, 296.38],
         "SL": [4307.1, -488.57, 338.14],
         "SU": [4312.84, -488.64, 524.19],
         "BU": [4243.57, -552.47, 930.07],
@@ -619,24 +619,16 @@
                 "body": 1,
                 "position": "L",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "L",
-                    "p2": "RL",
-                    "axis": "X",
-                    "helpvec": [0, 1, 0],
-                    "axisortho": "Y"
+                    "method": "euler",
+                    "euler_angles": [171.381238, 93.624629, -157.359186]
                 }
             },
             "j": {
                 "body": 0,
                 "position": "L",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "L",
-                    "p2": "RL",
-                    "axis": "X",
-                    "helpvec": [0, 1, 0],
-                    "axisortho": "Y"
+                    "method": "euler",
+                    "euler_angles": [171.381238, 93.624629, -157.359186]
                 }
             }
         },
@@ -672,24 +664,16 @@
                 "body": 2,
                 "position": "RM",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "RM",
-                    "p2": "RN",
-                    "axis": "Z",
-                    "helpvec": [0, 0, 1],
-                    "axisortho": "X"
+                    "method": "euler",
+                    "euler_angles": [-0.229205, 89.358255, 0.0]
                 }
             },
             "j": {
                 "body": 3,
                 "position": "RM",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "RM",
-                    "p2": "RN",
-                    "axis": "Z",
-                    "helpvec": [0, 0, 1],
-                    "axisortho": "X"
+                    "method": "euler",
+                    "euler_angles": [-0.229205, 89.358255, 0.0]
                 }
             }
         },
@@ -703,24 +687,16 @@
                 "body": 3,
                 "position": "RA",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "RA",
-                    "p2": "RM",
-                    "axis": "Z",
-                    "helpvec": [0, 1, 0],
-                    "axisortho": "X"
+                    "method": "euler",
+                    "euler_angles": [180.0, 0.639086, 180.0]
                 }
             },
             "j": {
                 "body": 4,
                 "position": "RA",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "RA",
-                    "p2": "RM",
-                    "axis": "Z",
-                    "helpvec": [0, 1, 0],
-                    "axisortho": "X"
+                    "method": "euler",
+                    "euler_angles": [180.0, 0.639086, 180.0]
                 }
             }
         },
@@ -778,24 +754,16 @@
                 "body": 8,
                 "position": "L",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "L",
-                    "p2": "RL",
-                    "axis": "X",
-                    "helpvec": [0, -1, 0],
-                    "axisortho": "Y"
+                    "method": "euler",
+                    "euler_angles": [-8.618762, 86.375371, -22.640814]
                 }
             },
             "j": {
                 "body": 0,
                 "position": "L",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "L",
-                    "p2": "RL",
-                    "axis": "X",
-                    "helpvec": [0, -1, 0],
-                    "axisortho": "Y"
+                    "method": "euler",
+                    "euler_angles": [-8.618762, 86.375371, -22.640814]
                 }
             }
         },
@@ -831,24 +799,16 @@
                 "body": 9,
                 "position": "RM",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "RM",
-                    "p2": "RN",
-                    "axis": "Z",
-                    "helpvec": [0, 0, 1],
-                    "axisortho": "X"
+                    "method": "euler",
+                    "euler_angles": [-0.229205, 89.358255, 0.0]
                 }
             },
             "j": {
                 "body": 10,
                 "position": "RM",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "RM",
-                    "p2": "RN",
-                    "axis": "Z",
-                    "helpvec": [0, 0, 1],
-                    "axisortho": "X"
+                    "method": "euler",
+                    "euler_angles": [-0.229205, 89.358255, 0.0]
                 }
             }
         },
@@ -862,24 +822,16 @@
                 "body": 10,
                 "position": "RA",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "RA",
-                    "p2": "RM",
-                    "axis": "Z",
-                    "helpvec": [0, 1, 0],
-                    "axisortho": "X"
+                    "method": "euler",
+                    "euler_angles": [180.0, 0.639086, 180.0]
                 }
             },
             "j": {
                 "body": 11,
                 "position": "RA",
                 "orientation": {
-                    "method": "two-points",
-                    "p1": "RA",
-                    "p2": "RM",
-                    "axis": "Z",
-                    "helpvec": [0, 1, 0],
-                    "axisortho": "X"
+                    "method": "euler",
+                    "euler_angles": [180.0, 0.639086, 180.0]
                 }
             }
         },
@@ -1165,14 +1117,14 @@
         },
         "relonomic_drives": {
             "b5": {
-                "signal": ["~", "~", "-1*TIME", "~", "~", "~"],
+                "signal": ["~", "~", "+1*TIME", "~", "~", "~"],
                 "i": 0,
                 "j": 5,
                 "jointTopology": "secondary",
                 "jointID": 2
             },
             "b12": {
-                "signal": ["~", "~", "-1*TIME", "~", "~", "~"],
+                "signal": ["~", "~", "+1*TIME", "~", "~", "~"],
                 "i": 0,
                 "j": 12,
                 "jointTopology": "secondary",
