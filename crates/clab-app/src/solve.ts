@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { pick, setupBrowse } from "./browse";
 import {
   DesignValue,
@@ -137,6 +138,28 @@ export function setupSolve() {
     const { design, overrides } = adjust.checked ? readParameters(sections) : { design: {}, overrides: {} };
     return { model: clean(field("model").value), design: adjust.checked ? { ...loaded, ...design } : {}, overrides };
   };
+
+  /** Saves the form's design values (`design`) or its adjusted model (`model`) to a file the user chooses. */
+  const exportAs = (command: "export_design" | "export_model", suffix: string) => async () => {
+    const model = clean(field("model").value);
+    const invalid = firstInvalid(sections);
+    if (invalid) {
+      invalid.focus();
+      show(invalidMessage(invalid), false);
+      return;
+    }
+    const defaultPath = model.replace(/\.json$/i, "") + suffix;
+    const path = await save({ filters: [{ name: "json", extensions: ["json"] }], defaultPath });
+    if (!path) return;
+    try {
+      await invoke(command, { case: readCase(), path });
+      show(`Saved ${path}`);
+    } catch (error) {
+      show(String(error), false);
+    }
+  };
+  document.querySelector("#solve-save-design")!.addEventListener("click", exportAs("export_design", "-design.json"));
+  document.querySelector("#solve-save-model")!.addEventListener("click", exportAs("export_model", "-adjusted.json"));
 
   let stopped = false;
   stop.addEventListener("click", () => {

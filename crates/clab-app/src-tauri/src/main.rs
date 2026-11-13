@@ -49,6 +49,16 @@ fn model_parameters(path: PathBuf) -> Result<Vec<solve::Section>, String> {
 }
 
 #[tauri::command]
+fn export_design(case: solve::Case, path: PathBuf) -> Result<(), String> {
+    case.export_design(&path)
+}
+
+#[tauri::command]
+fn export_model(case: solve::Case, path: PathBuf) -> Result<(), String> {
+    case.export_model(&path)
+}
+
+#[tauri::command]
 fn read_design(path: PathBuf) -> Result<BTreeMap<String, solve::DesignValue>, String> {
     solve::read_design(&path)
 }
@@ -240,6 +250,8 @@ fn main() {
             run_analyze,
             model_parameters,
             read_design,
+            export_design,
+            export_model,
             run_solve,
             cancel_solve,
             solution_summary,

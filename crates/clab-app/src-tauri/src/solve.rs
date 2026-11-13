@@ -386,11 +386,9 @@ pub struct Prepared {
 }
 
 impl Case {
-    /// Writes the design variable file, and a copy of the model with the overrides applied. The copy
-    /// sits beside the model because the model's relative paths resolve from its directory.
-    pub fn prepare(&self) -> Result<Prepared, String> {
-        let model_path = clean_path(&self.model);
-        let mut model = read_model(&model_path)?;
+    /// The model with the overrides applied, and the design values it needs by variable name.
+    fn resolve(&self) -> Result<(Value, BTreeMap<String, &DesignValue>), String> {
+        let mut model = read_model(&clean_path(&self.model))?;
         let known: BTreeSet<_> = cells(&parameters(&model)?)
             .map(|cell| cell.pointer.clone())
             .collect();
@@ -410,16 +408,24 @@ impl Case {
                 .design
                 .get(name)
                 .ok_or_else(|| format!("Design variable {name} needs a value"))?;
-            values.insert(name, value);
+            values.insert(name.to_string(), value);
         }
         // Names in drive expressions are only a guess, so they count when the design has them.
         for cell in cells(&sections).filter(|cell| cell.kind == Kind::Expression) {
             for name in identifiers(cell.value.as_str().unwrap_or_default()) {
                 if let Some(value) = self.design.get(name) {
-                    values.insert(name, value);
+                    values.insert(name.to_string(), value);
                 }
             }
         }
+        Ok((model, values))
+    }
+
+    /// Writes the design variable file, and a copy of the model with the overrides applied. The copy
+    /// sits beside the model because the model's relative paths resolve from its directory.
+    pub fn prepare(&self) -> Result<Prepared, String> {
+        let model_path = clean_path(&self.model);
+        let (model, values) = self.resolve()?;
 
         let mut files = Vec::new();
         let mut design = None;
@@ -449,6 +455,27 @@ impl Case {
             design,
             _files: files,
         })
+    }
+    /// Saves the design variable values, in the format `read_design` reads.
+    pub fn export_design(&self, path: &Path) -> Result<(), String> {
+        let (_, values) = self.resolve()?;
+        self.write(path, &values)
+    }
+
+    /// Saves the model with the overrides applied; design variables stay variables.
+    pub fn export_model(&self, path: &Path) -> Result<(), String> {
+        let (model, _) = self.resolve()?;
+        self.write(path, &model)
+    }
+
+    fn write(&self, path: &Path, value: &impl Serialize) -> Result<(), String> {
+        let path = clean_path(path);
+        if path == clean_path(&self.model) {
+            return Err("Choose a file other than the model".into());
+        }
+        let file =
+            std::fs::File::create(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        serde_json::to_writer_pretty(BufWriter::new(file), value).map_err(|error| error.to_string())
     }
 }
 
@@ -771,6 +798,28 @@ mod tests {
         let copy_path = prepared.model.clone();
         drop(prepared);
         assert!(!copy_path.exists());
+        assert_eq!(read_model(&case.model).unwrap(), model());
+    }
+
+    #[test]
+    fn exports_read_back_and_never_overwrite_the_model() {
+        let case = case(design(), &[("/Hardpoints/U/0", json!(7.5))]);
+        let directory = tempfile::tempdir().unwrap();
+        let (design_path, model_path) = (
+            directory.path().join("d.json"),
+            directory.path().join("m.json"),
+        );
+        case.export_design(&design_path).unwrap();
+        case.export_model(&model_path).unwrap();
+        assert_eq!(
+            read_design(&design_path).unwrap().get("HP_L_Y"),
+            design().get("HP_L_Y")
+        );
+        let saved = read_model(&model_path).unwrap();
+        assert_eq!(saved["Hardpoints"]["U"][0], json!(7.5));
+        assert_eq!(saved["Hardpoints"]["L"][0], "HP_L_X");
+        let error = case.export_model(&case.model).unwrap_err();
+        assert_eq!(error, "Choose a file other than the model");
         assert_eq!(read_model(&case.model).unwrap(), model());
     }
 
