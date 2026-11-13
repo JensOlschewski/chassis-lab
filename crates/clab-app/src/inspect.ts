@@ -3,6 +3,7 @@ import { setupBrowse } from "./browse";
 import { colorFor } from "./colors";
 import { AXIS, Curve, SignalInfo, Signals, Summary, drawChart, labelOf, setupTools } from "./chart";
 import { setupReport } from "./report";
+import type { Viewer, ViewFrame } from "./viewer";
 import { describe, errorLine, run } from "./worker";
 
 interface Choice {
@@ -33,6 +34,8 @@ interface SolutionResult {
   summary: string;
   /** Body velocities, ready to plot. */
   signals: Signals;
+  /** Null unless solved with `--include bodies`. */
+  frames: ViewFrame[] | null;
 }
 
 const isSolution = (result: object): result is SolutionResult => "kind" in result && result.kind === "solution";
@@ -62,6 +65,7 @@ export function setupInspect() {
   const footer = document.querySelector<HTMLElement>("#inspect-footer")!;
   const info = document.querySelector<HTMLElement>("#inspect-info")!;
   const summaryText = document.querySelector<HTMLElement>("#inspect-summary")!;
+  const viewRoot = document.querySelector<HTMLElement>("#inspect-view")!;
   const curvesRoot = document.querySelector<HTMLElement>("#curves")!;
   const addButton = document.querySelector<HTMLButtonElement>("#add-curve")!;
   const file = pathForm.elements.namedItem("file") as HTMLInputElement;
@@ -72,6 +76,7 @@ export function setupInspect() {
   let plotted = false;
   /** A solver solution carries its signals with the listing; HDF5 signals are read per plot. */
   let solution: Signals | null = null;
+  let viewer: Viewer | null = null;
 
   const show = (message: string, ok = true) => {
     status.textContent = message;
@@ -211,6 +216,9 @@ export function setupInspect() {
     addButton.disabled = true;
     info.hidden = true;
     summaryText.hidden = true;
+    viewer?.destroy();
+    viewer = null;
+    viewRoot.hidden = true;
     solution = null;
     curvesRoot.replaceChildren();
   };
@@ -228,6 +236,11 @@ export function setupInspect() {
         signals = solution.signals;
         summaryText.textContent = result.summary;
         summaryText.hidden = false;
+        if (result.frames) {
+          viewRoot.hidden = false;
+          const { createViewer } = await import("./viewer");
+          viewer = createViewer(viewRoot, result.frames);
+        }
       } else {
         signals = result.signals;
         showInfo(result.summary);
