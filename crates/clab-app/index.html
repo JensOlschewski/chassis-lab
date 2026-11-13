@@ -188,6 +188,22 @@
             </span>
           </label>
 
+          <label>
+            Solution file
+            <span class="path-row">
+              <input name="output" placeholder="default: next to the model" />
+              <button type="button" data-browse="save" data-target="output" data-suggest-from="output" data-extensions="json">Browse…</button>
+            </span>
+          </label>
+          <label class="check"><input type="checkbox" name="force" /> Replace existing solution file</label>
+
+          <div class="inline" role="group" aria-labelledby="solve-include-label">
+            <span id="solve-include-label" class="group-label">Include in solution file</span>
+            <label class="check"><input type="checkbox" name="include" value="bodies" /> Bodies</label>
+            <label class="check"><input type="checkbox" name="include" value="connectors" /> Connectors</label>
+            <label class="check"><input type="checkbox" name="include" value="suspension" checked /> Suspension</label>
+          </div>
+
           <label class="check"><input type="checkbox" id="solve-adjust" /> Adjust model parameters</label>
           <fieldset id="solve-design" hidden>
             <div class="path-row">
@@ -197,22 +213,6 @@
             <div id="solve-sections"></div>
             <small class="optional">Cells with a design variable need a value. Other cells show the model's own value; change one to override it for this run. The model file is not modified.</small>
           </fieldset>
-
-          <div class="inline" role="group" aria-labelledby="solve-include-label">
-            <span id="solve-include-label" class="group-label">Include in solution file</span>
-            <label class="check"><input type="checkbox" name="include" value="bodies" /> Bodies</label>
-            <label class="check"><input type="checkbox" name="include" value="connectors" /> Connectors</label>
-            <label class="check"><input type="checkbox" name="include" value="suspension" checked /> Suspension</label>
-          </div>
-
-          <label>
-            Solution file
-            <span class="path-row">
-              <input name="output" placeholder="default: next to the model" />
-              <button type="button" data-browse="save" data-target="output" data-suggest-from="output" data-extensions="json">Browse…</button>
-            </span>
-          </label>
-          <label class="check"><input type="checkbox" name="force" /> Replace existing solution file</label>
 
           <div class="path-row actions">
             <button type="submit" class="primary">Solve</button>
