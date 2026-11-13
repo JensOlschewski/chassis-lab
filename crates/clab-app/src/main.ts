@@ -2,6 +2,7 @@ import { setupAnalyze } from "./analyze";
 import { setupConvert } from "./convert";
 import { setupInspect } from "./inspect";
 import { setupSession } from "./session";
+import { setupSolve } from "./solve";
 
 const navItems = document.querySelectorAll<HTMLButtonElement>(".nav-item");
 const panes = document.querySelectorAll<HTMLElement>(".pane");
@@ -22,4 +23,5 @@ const analyze = setupAnalyze((directory, test) => {
   showPane("inspect");
   void inspect.show(directory, test);
 });
+setupSolve();
 setupSession(setupConvert(), inspect, analyze);

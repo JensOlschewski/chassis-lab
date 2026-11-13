@@ -28,6 +28,12 @@ end
 function design = readDesign(file)
 s = jsondecode(fileread(file));
 names = string(fieldnames(s));
-values = arrayfun(@(n) double(s.(n)), names);
-design = dictionary(names, values);
+design = configureDictionary("string", "cell");
+for n = names'
+    value = s.(n);
+    if ~ischar(value)
+        value = double(value);
+    end
+    design(n) = {value};
+end
 end

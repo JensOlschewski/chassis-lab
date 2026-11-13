@@ -26,12 +26,11 @@ function [jointPrimStruct,jointSecStruct,bushPrimStruct,bushSecStruct,forceAddSt
     % Decode JSON string into a structure
     jsonStruct = jsondecode(jsonStr);
 
-    % Apply Design Mapping if designDic is provided, else validate JSON structure
+    % Apply Design Mapping if designDic is provided, then validate JSON structure
     if ~isempty(designDic)
         jsonStruct = applydesignDicMapping(jsonStruct, designDic);
-    else
-        validateJsonStruct(jsonStruct);
     end
+    validateJsonStruct(jsonStruct);
 
     % Initialize Bodies defined by the user
     bodiesStruct = fun_initBodyStruct(jsonStruct.Bodies, jsonStruct.Hardpoints);

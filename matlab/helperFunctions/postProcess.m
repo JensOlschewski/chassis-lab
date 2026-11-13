@@ -27,10 +27,7 @@ h = diff(historyStruct.time(1:2));
 % Output for Bodies
 if outputStruct.isBodyOutput ||  outputStruct.isSuspensionParamOutput
     % Process bodies using helper function
-    bodies = processBodies(bodiesStruct, historyStruct, timeArray, h);
-    if outputStruct.isBodyOutput
-        historyStruct.bodies = bodies;
-    end
+    historyStruct.bodies = processBodies(bodiesStruct, historyStruct, timeArray, h);
 end
 
 % Output for connectors
@@ -136,6 +133,11 @@ if outputStruct.isSuspensionParamOutput
 
     % Store characteristics in historyStruct
     historyStruct.characteristics = characteristics;
+end
+
+% The suspension parameters need the bodies; they are only output on request
+if ~outputStruct.isBodyOutput && isfield(historyStruct, 'bodies')
+    historyStruct = rmfield(historyStruct, 'bodies');
 end
 
 end

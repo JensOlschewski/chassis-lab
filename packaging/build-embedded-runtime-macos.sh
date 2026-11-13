@@ -62,6 +62,8 @@ exec "$root/bin/clab-bin" "$@"
 SH
 chmod +x "$output/bin/clab"
 rm "$pyo3_config"
+# `clab solve` finds the solver beside clab. See docs/runtime-packaging.md.
+if [ -n "${MKS_SOLVER_BINARY:-}" ]; then cp "$MKS_SOLVER_BINARY" "$output/bin/mks_solver"; fi
 
 find "$output" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$output" -name direct_url.json -delete

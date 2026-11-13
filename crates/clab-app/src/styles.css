@@ -216,3 +216,34 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .comparison td.missing,
 .comparison td.failed { color: var(--error); }
 .warnings { margin: 8px 0; padding: 0 12px 0 32px; color: var(--muted); font-size: 0.8125rem; }
+
+#solve-design[hidden], #solve-include[hidden] { display: none; }
+.inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
+.inline .group-label { font-size: 0.9rem; font-weight: 500; }
+.grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.grid th { padding: 3px 6px; color: var(--muted); font-weight: 500; text-align: right; }
+.grid th:first-child, .grid td:first-child { text-align: left; }
+.grid th, .grid td { border: 1px solid var(--border, #444); padding: 0 6px; text-align: right; }
+.grid td:first-child { font-weight: 500; white-space: nowrap; }
+.grid td:has(input[type=checkbox]) { text-align: center; }
+.grid td:has(input[type=text]) { padding: 0; }
+.grid input[type=text] { box-sizing: border-box; width: 100%; min-width: 6.5em; border: 0; border-radius: 0; outline-offset: -2px; padding: 4px 8px; text-align: right; font-variant-numeric: tabular-nums; }
+.grid input[data-kind=expression], .grid input[data-kind=text] { text-align: left; font-variant-numeric: normal; }
+.grid input:disabled { color: var(--muted); opacity: 1; background: transparent; }
+.grid-scroll { overflow-x: auto; }
+#solve-sections details { margin-bottom: 8px; }
+#solve-sections summary { cursor: pointer; margin: 6px 0; list-style: none; }
+#solve-sections summary::-webkit-details-marker { display: none; }
+#solve-sections summary::before { content: "▸"; display: inline-block; margin-right: 8px; color: var(--muted); transition: transform 0.1s; }
+#solve-sections details[open] > summary::before { transform: rotate(90deg); }
+.actions { align-items: center; }
+.steps { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
+.steps li { display: flex; align-items: center; gap: 8px; }
+.steps small { color: var(--muted); font-variant-numeric: tabular-nums; }
+#solve-summary { margin-top: 12px; }
+.grid input.invalid { outline: 2px solid #d33; outline-offset: -2px; }
+.grid tbody.selecting { user-select: none; }
+.grid td.selected { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.grid td.selected input { background: transparent; }
+.grid input[type=checkbox] { box-sizing: content-box; margin: 0; accent-color: var(--accent); }
+.grid input[type=checkbox]:focus-visible { outline: none; }

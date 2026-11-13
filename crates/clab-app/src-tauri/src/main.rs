@@ -5,11 +5,12 @@ mod convert;
 mod inspect;
 mod report;
 mod session;
+mod solve;
 mod worker;
 
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
-use tauri::{AppHandle, Manager, ipc::Channel};
+use tauri::{AppHandle, Manager, State, ipc::Channel};
 
 #[tauri::command]
 async fn run_convert(
@@ -33,10 +34,65 @@ async fn run_analyze(
     request: analyze::AnalyzeRequest,
     on_line: Channel<String>,
 ) -> Result<worker::Outcome, String> {
-    worker::run_streaming(&app, request.args()?, move |line| {
-        let _ = on_line.send(line);
+    worker::run_streaming(&app, request.args()?, None, move |line| {
+        if let worker::Line::Out(line) = line {
+            let _ = on_line.send(line);
+        }
     })
     .await
+}
+
+/// The editable values of a model file, grouped in tables.
+#[tauri::command]
+fn model_parameters(path: PathBuf) -> Result<Vec<solve::Section>, String> {
+    solve::read_parameters(&path)
+}
+
+/// Saves the adjusted model and its design file; returns the design file, if there is one.
+#[tauri::command]
+fn export_case(
+    case: solve::Case,
+    path: PathBuf,
+    parametrize: bool,
+) -> Result<Option<PathBuf>, String> {
+    case.export(&path, parametrize)
+}
+
+#[tauri::command]
+fn read_design(path: PathBuf) -> Result<BTreeMap<String, solve::DesignValue>, String> {
+    solve::read_design(&path)
+}
+
+/// Solves a model; `on_progress` gets the percent done as the solver reports it.
+#[tauri::command]
+async fn run_solve(
+    app: AppHandle,
+    request: solve::SolveRequest,
+    cancel: State<'_, worker::Cancel>,
+    on_progress: Channel<f64>,
+) -> Result<worker::Outcome, String> {
+    let prepared = request.case().prepare()?;
+    let args = request.args(&prepared);
+    let outcome = worker::run_streaming(&app, args, Some(cancel.inner().clone()), move |line| {
+        if let worker::Line::Err(line) = line
+            && let Some(percent) = solve::progress(&line)
+        {
+            let _ = on_progress.send(percent);
+        }
+    })
+    .await;
+    drop(prepared);
+    outcome
+}
+
+#[tauri::command]
+fn cancel_solve(cancel: State<'_, worker::Cancel>) {
+    cancel.kill();
+}
+
+#[tauri::command]
+fn solution_summary(path: PathBuf) -> Result<solve::Summary, String> {
+    solve::summarize(&path)
 }
 
 /// Writes an exported chart image to the path the user chose in the save dialog.
@@ -182,6 +238,7 @@ fn load_session(app: AppHandle, path: PathBuf) -> Result<LoadedSession, String> 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(worker::Cancel::default())
         .setup(|app| {
             // Extracted inputs of earlier runs are unreachable now; a failure only wastes disk.
             let _ = session::clear_cache(&sessions_cache(app.handle())?);
@@ -191,6 +248,12 @@ fn main() {
             run_convert,
             run_inspect,
             run_analyze,
+            model_parameters,
+            read_design,
+            export_case,
+            run_solve,
+            cancel_solve,
+            solution_summary,
             save_image,
             path_kind,
             read_report_file,

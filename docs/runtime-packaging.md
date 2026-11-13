@@ -8,6 +8,7 @@ produce equivalent paths and metadata.
 clab-vVERSION-PLATFORM/
 ├── bin/
 │   ├── clab                 # clab.exe on Windows
+│   ├── mks_solver           # optional, mks_solver.exe on Windows; see below
 │   └── python3.12           # platform-specific Python launcher when exposed
 ├── lib/python3.12/          # embedded Python and native libraries
 ├── licenses/                # dependency license inventory
@@ -32,6 +33,15 @@ The release job also publishes an archive-level SHA-256 file beside the
 archive. Archive names use `clab-vVERSION-TARGET`, where `TARGET` is the Rust
 target triple: `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, or
 `x86_64-apple-darwin`.
+
+## Solver
+
+`clab solve` runs `mks_solver`, a MATLAB Compiler executable built per OS by
+`packaging/build-mks-solver.sh` or `.ps1`. Set `MKS_SOLVER_BINARY` to that file
+when running a `build-embedded-runtime` script and it is copied to `bin/` next
+to `clab`, where `clab solve` and the desktop app find it. Without it the
+archive has no solver. The free MATLAB Runtime R2024b must be installed on the
+machine that solves; the app and `clab solve` report when it is missing.
 
 ## Locked Inputs
 

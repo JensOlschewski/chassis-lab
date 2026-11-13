@@ -72,6 +72,8 @@ foreach ($dll in @("python3.dll", "python312.dll", "vcruntime140.dll", "vcruntim
     if (Test-Path $source) { Copy-Item $source $bin -Force }
 }
 Remove-Item $pyo3Config -Force
+# `clab solve` finds the solver beside clab. See docs/runtime-packaging.md.
+if ($env:MKS_SOLVER_BINARY) { Copy-Item $env:MKS_SOLVER_BINARY (Join-Path $bin "mks_solver.exe") }
 
 Get-ChildItem $output -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
 Get-ChildItem $output -Recurse -File -Filter direct_url.json | Remove-Item -Force
