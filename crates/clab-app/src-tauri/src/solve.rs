@@ -47,6 +47,8 @@ struct Cell {
     label: String,
     variable: Option<String>,
     value: Value,
+    /// Shown but not editable.
+    locked: bool,
 }
 
 impl Cell {
@@ -70,6 +72,7 @@ impl Cell {
             label: String::new(),
             variable,
             value,
+            locked: false,
         })
     }
 }
@@ -182,7 +185,7 @@ fn bushing_row(model: &Value, group: &str, name: &str) -> Row {
         }
     }
     Row {
-        name: format!("{} · {name}", group.trim_end_matches("_bushings")),
+        name: name.to_string(),
         cells,
     }
 }
@@ -649,14 +652,18 @@ mod tests {
                 (2, 1, "5.0".into())
             ]
         );
-        let bushing = layout(row(&sections, "bushings", "primary · B1"));
+        let bushing = layout(row(&sections, "bushings", "B1"));
         assert_eq!(bushing.len(), 13);
         assert_eq!(bushing[0], (0, 1, "B_ON".into()));
         assert_eq!(bushing[1], (1, 1, "KX".into()));
         assert_eq!(bushing[7], (7, 1, "0".into()));
         assert_eq!(bushing[11], (11, 1, "HY".into()));
+        let cells = &row(&sections, "bushings", "B1").cells;
+        assert!(!cells[7].locked, "euler angles are editable");
+        assert!(cells[10].locked, "a literal helper vector is not");
+        assert!(!cells[11].locked, "a variable still needs its value");
         assert_eq!(
-            layout(row(&sections, "bushings", "secondary · B2")),
+            layout(row(&sections, "bushings", "B2")),
             [(0, 1, "false".into()), (1, 6, "K_FILE".into())]
         );
     }

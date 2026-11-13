@@ -14,6 +14,7 @@ interface Cell {
   label: string;
   variable: string | null;
   value: unknown;
+  locked: boolean;
 }
 
 /** A table of related model values, as the backend lists them. */
@@ -61,6 +62,7 @@ function createInput(cell: Cell, kept: Map<string, string>) {
   } else {
     input.dataset.default = literal(cell);
     write(input, literal(cell));
+    input.disabled = cell.locked;
   }
   return input;
 }
@@ -120,10 +122,10 @@ export function createSection(section: Section, kept: Map<string, string>, open:
   table.createTHead().append(head);
   table.append(body);
 
-  const details = element("details");
-  details.id = `solve-${section.id}`;
+  const details = element("details", "", "section");
   details.open = open;
-  details.append(element("summary", section.title), table);
+  details.append(element("summary", section.title), element("div", "", "grid-scroll"));
+  details.lastElementChild!.append(table);
   return details;
 }
 
