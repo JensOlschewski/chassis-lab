@@ -77,9 +77,7 @@ export function setupSolve() {
 
   const renderSections = (parameters: Section[]) => {
     const kept = keptVariables(sections);
-    sections.replaceChildren(...parameters.map((section, index) => createSection(section, kept, index === 0)));
-    // A model with design variables cannot be solved without values for them.
-    if (variableNames(sections).size) adjust.checked = true;
+    sections.replaceChildren(...parameters.map((section) => createSection(section, kept, false)));
     showDesign();
     designNote.textContent = "";
   };
