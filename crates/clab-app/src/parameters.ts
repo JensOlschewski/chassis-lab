@@ -122,7 +122,7 @@ export function createSection(section: Section, kept: Map<string, string>, open:
   table.createTHead().append(head);
   table.append(body);
 
-  const details = element("details", "", "section");
+  const details = element("details");
   details.open = open;
   details.append(element("summary", section.title), element("div", "", "grid-scroll"));
   details.lastElementChild!.append(table);

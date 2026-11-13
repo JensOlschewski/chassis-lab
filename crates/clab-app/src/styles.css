@@ -230,7 +230,12 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .grid input[type=text] { box-sizing: border-box; width: 100%; min-width: 6.5em; border: 0; border-radius: 0; outline-offset: -2px; padding: 4px 8px; text-align: right; font-variant-numeric: tabular-nums; }
 .grid input[data-kind=expression], .grid input[data-kind=text] { text-align: left; font-variant-numeric: normal; }
 .grid input:disabled { color: var(--muted); opacity: 1; background: transparent; }
-.grid-scroll { overflow-x: auto; padding: 0 12px 12px; }
+.grid-scroll { overflow-x: auto; }
+#solve-sections details { margin-bottom: 8px; }
+#solve-sections summary { cursor: pointer; margin: 6px 0; list-style: none; }
+#solve-sections summary::-webkit-details-marker { display: none; }
+#solve-sections summary::before { content: "▸"; display: inline-block; margin-right: 8px; color: var(--muted); transition: transform 0.1s; }
+#solve-sections details[open] > summary::before { transform: rotate(90deg); }
 .actions { align-items: center; }
 .steps { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
 .steps li { display: flex; align-items: center; gap: 8px; }
