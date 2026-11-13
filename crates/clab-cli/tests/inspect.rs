@@ -314,3 +314,27 @@ fn summarizes_a_solver_solution() {
     assert!(text.contains("--include bodies"), "{text}");
     assert!(text.contains("5.0000"), "{text}");
 }
+
+#[test]
+fn solution_json_is_tagged_and_signal_flags_are_refused() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("solution.json");
+    fs::write(
+        &path,
+        r#"{"time": [0.0], "v_hat": [[0.0],[0.0],[0.0],[0.0],[0.0],[0.0]]}"#,
+    )
+    .unwrap();
+    let value = inspect_json(&path, &[]);
+    assert_eq!(value["kind"], "solution");
+    assert!(value["summary"].as_str().unwrap().contains("steps: 1"));
+    for flags in [&["--list"][..], &["--match", "x"], &["--signal", "x"]] {
+        let output = inspect(&path, flags);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("not solver solutions"));
+    }
+    let output = inspect(&path, &["--view"]);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--include bodies"),
+        "{output:?}"
+    );
+}

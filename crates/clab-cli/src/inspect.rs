@@ -39,6 +39,10 @@ pub(crate) struct InspectArgs {
     /// Emit JSON for --list/--match or --signal (HDF5 only).
     #[arg(long)]
     json: bool,
+    /// Show a solver solution in the terminal. An optional view file (JSON)
+    /// picks the bodies and points to draw.
+    #[arg(long, value_name = "FILE", num_args = 0..=1)]
+    view: Option<Option<PathBuf>>,
 }
 
 pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
@@ -68,6 +72,15 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
         bail!("input file does not exist: {}", file.display());
     }
     let kind = detect(&file)?;
+    if let Kind::Solution(solution) = &kind {
+        if args.list || args.r#match.is_some() || !args.signal.is_empty() {
+            bail!("--list, --match and --signal apply to HDF5 files, not solver solutions");
+        }
+        return inspect_solution(solution, args.json, args.view);
+    }
+    if args.view.is_some() {
+        bail!("--view applies to solver solutions only");
+    }
     if args.json {
         return inspect_json(
             &file,
@@ -84,11 +97,28 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
     match kind {
         Kind::SvcJson => inspect_svc_json(&file, signals, args.r#match.as_deref()),
         Kind::Hdf5 => inspect_hdf5(&file, signals, args.r#match.as_deref()),
-        Kind::Solution(solution) => {
-            print!("{}", solution::render_summary(&solution)?);
-            Ok(())
-        }
+        Kind::Solution(_) => unreachable!("handled above"),
     }
+}
+
+fn inspect_solution(solution: &Value, json: bool, view: Option<Option<PathBuf>>) -> Result<()> {
+    if json && view.is_some() {
+        bail!("--json and --view cannot be combined");
+    }
+    if let Some(layout) = view {
+        let layout = layout
+            .map(|path| clab_core::view::ViewLayout::load(&path))
+            .transpose()?;
+        let frames = clab_core::view::frames_from_solution(solution, layout.as_ref())?;
+        return crate::view::run_viewer(frames);
+    }
+    let summary = solution::render_summary(solution)?;
+    if json {
+        println!("{}", json!({ "kind": "solution", "summary": summary }));
+    } else {
+        print!("{summary}");
+    }
+    Ok(())
 }
 
 /// What a file given to `inspect` holds.
