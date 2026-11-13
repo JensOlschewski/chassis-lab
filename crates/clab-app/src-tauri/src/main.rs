@@ -50,8 +50,12 @@ fn model_parameters(path: PathBuf) -> Result<Vec<solve::Section>, String> {
 
 /// Saves the adjusted model and its design file; returns the design file, if there is one.
 #[tauri::command]
-fn export_case(case: solve::Case, path: PathBuf) -> Result<Option<PathBuf>, String> {
-    case.export(&path)
+fn export_case(
+    case: solve::Case,
+    path: PathBuf,
+    parametrize: bool,
+) -> Result<Option<PathBuf>, String> {
+    case.export(&path, parametrize)
 }
 
 #[tauri::command]

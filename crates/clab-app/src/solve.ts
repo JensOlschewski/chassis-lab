@@ -151,7 +151,11 @@ export function setupSolve() {
     const path = await save({ filters: [{ name: "json", extensions: ["json"] }], defaultPath });
     if (!path) return;
     try {
-      const design = await invoke<string | null>("export_case", { case: readCase(), path });
+      const design = await invoke<string | null>("export_case", {
+        case: readCase(),
+        path,
+        parametrize: document.querySelector<HTMLInputElement>("#solve-parametrize")!.checked,
+      });
       show(design ? `Saved ${path} and ${design}` : `Saved ${path}`);
     } catch (error) {
       show(String(error), false);
