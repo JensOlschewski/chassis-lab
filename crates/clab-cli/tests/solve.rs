@@ -92,6 +92,20 @@ fn refuses_to_replace_output_without_force() {
 
 #[cfg(unix)]
 #[test]
+fn refuses_to_replace_the_model_even_with_force() {
+    let dir = tempfile::tempdir().unwrap();
+    let solver = fake_solver(dir.path(), r#"echo '{}' > "$2""#);
+    let model = model(dir.path());
+    let mut args = json_args(&model, &model).to_vec();
+    args.push(Path::new("--force"));
+    let output = clab(&solver, dir.path(), &args);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("output is the model file"));
+    assert_eq!(std::fs::read_to_string(&model).unwrap(), "{}");
+}
+
+#[cfg(unix)]
+#[test]
 fn failed_solver_reports_stderr_and_leaves_no_output() {
     let dir = tempfile::tempdir().unwrap();
     let solver = fake_solver(dir.path(), "echo 'bad joint' >&2; exit 1");
@@ -180,7 +194,7 @@ fn real_solver_solves_example_model() {
     let out = dir.path().join("out.json");
     let examples = root.join("matlab/examples");
     let model = examples.join("mlta-model-file-pwt-pos-config-design.json");
-    let design = examples.join("design-1e2.json");
+    let design = examples.join("mlta-design-file-1e2.json");
     let args = [
         &model,
         Path::new("--design"),
@@ -193,4 +207,44 @@ fn real_solver_solves_example_model() {
     let result: serde_json::Value = serde_json::from_slice(&std::fs::read(out).unwrap()).unwrap();
     assert_eq!(result["time"].as_array().unwrap().len(), 101);
     assert_eq!(result["v_hat"].as_array().unwrap().len(), 84);
+
+    // Bushing, force and time settings take design variables too. The copy sits beside the
+    // model so that its relative characteristic paths keep working.
+    let mut changed: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&model).unwrap()).unwrap();
+    let bushing = changed["primary_bushings"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+        .next()
+        .unwrap();
+    bushing["active"] = "BUSH_ON".into();
+    bushing["stiffness"][0] = "BUSH_KX".into();
+    changed["sim_param"]["step_parameters"]["t_end"] = "T_END".into();
+    changed["drives"]["relonomic_drives"]["b5"]["signal"][2] = "STEER*TIME".into();
+    let copy = tempfile::Builder::new()
+        .suffix(".json")
+        .tempfile_in(&examples)
+        .unwrap();
+    std::fs::write(copy.path(), changed.to_string()).unwrap();
+    let mut variables: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&design).unwrap()).unwrap();
+    variables["BUSH_ON"] = 1.into();
+    variables["BUSH_KX"] = 500.into();
+    variables["T_END"] = 10.into();
+    variables["STEER"] = (-1).into();
+    let variables_file = dir.path().join("design.json");
+    std::fs::write(&variables_file, variables.to_string()).unwrap();
+    let out = dir.path().join("changed.json");
+    let args = [
+        copy.path(),
+        Path::new("--design"),
+        &variables_file,
+        Path::new("--json"),
+        &out,
+    ];
+    let output = clab(&solver, runtime, &args);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let result: serde_json::Value = serde_json::from_slice(&std::fs::read(out).unwrap()).unwrap();
+    assert_eq!(result["time"].as_array().unwrap().len(), 11);
 }

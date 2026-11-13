@@ -216,3 +216,35 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .comparison td.missing,
 .comparison td.failed { color: var(--error); }
 .warnings { margin: 8px 0; padding: 0 12px 0 32px; color: var(--muted); font-size: 0.8125rem; }
+
+#solve-design[hidden] { display: none; }
+.inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
+.inline .group-label { font-size: 0.9rem; font-weight: 500; }
+.hardpoints { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.hardpoints th { padding: 3px 6px; color: var(--muted); font-weight: 500; text-align: right; }
+.hardpoints th:first-child, .hardpoints td:first-child { text-align: left; }
+.hardpoints td { padding: 2px 6px; text-align: right; }
+.hardpoints td:first-child { font-weight: 500; }
+.hardpoints td:last-child, .hardpoints th:last-child { text-align: center; }
+.hardpoints input[type=text] { width: 100%; min-width: 6.5em; padding: 4px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+.hardpoints th, .hardpoints td { border: 1px solid var(--border, #444); }
+#solve-design summary { cursor: pointer; margin: 6px 0; }
+#solve-design summary::before { content: "▸"; display: inline-block; margin-right: 8px; color: var(--muted); transition: transform 0.1s; }
+#solve-design details[open] > summary::before { transform: rotate(90deg); }
+#solve-design summary { list-style: none; }
+#solve-design summary::-webkit-details-marker { display: none; }
+.hardpoints td { padding: 0 6px; }
+.hardpoints td:has(input[type=text]) { padding: 0; }
+.hardpoints input[type=text] { box-sizing: border-box; border: 0; border-radius: 0; outline-offset: -2px; padding: 4px 8px; }
+.hardpoints input:disabled { color: var(--muted); opacity: 1; background: transparent; }
+.actions { align-items: center; }
+.steps { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
+.steps li { display: flex; align-items: center; gap: 8px; }
+.steps small { color: var(--muted); font-variant-numeric: tabular-nums; }
+#solve-summary { margin-top: 12px; }
+.hardpoints input.invalid { outline: 2px solid #d33; outline-offset: -2px; }
+.hardpoints.selecting { user-select: none; }
+.hardpoints td.selected { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.hardpoints td.selected input { background: transparent; }
+.hardpoints input[type=checkbox] { box-sizing: content-box; margin: 0; accent-color: var(--accent); }
+.hardpoints input[type=checkbox]:focus-visible { outline: none; }

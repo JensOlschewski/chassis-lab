@@ -13,6 +13,7 @@
       <button class="nav-item" data-pane="convert" aria-current="page">Convert</button>
       <button class="nav-item" data-pane="inspect">Inspect</button>
       <button class="nav-item" data-pane="analyze">Analyze and Compare</button>
+      <button class="nav-item" data-pane="solve">Solve</button>
 
       <section class="session" aria-label="Session">
         <p id="session-name" class="session-name">Untitled</p>
@@ -174,6 +175,61 @@
         <button type="button" id="analyze-show-report" hidden>Show report</button>
         <button type="button" id="analyze-open-plots" hidden>Open plots folder</button>
         <div id="analyze-sections"></div>
+      </section>
+      <section id="solve" class="pane wide" hidden>
+        <h2>Solve</h2>
+        <p class="hint">Solve a multibody model with the MATLAB solver</p>
+        <form id="solve-form">
+          <label>
+            Model file
+            <span class="path-row">
+              <input name="model" required placeholder="model.json" />
+              <button type="button" data-browse="file" data-target="model" data-extensions="json">Browse…</button>
+            </span>
+          </label>
+
+          <fieldset id="solve-design" hidden>
+            <legend>Hardpoints</legend>
+            <div class="path-row">
+              <button type="button" id="solve-load-design">Load design file…</button>
+              <small id="solve-design-note" class="optional"></small>
+            </div>
+            <details open>
+              <summary>Hardpoint table</summary>
+              <table class="hardpoints">
+                <thead><tr><th>Point</th><th>X</th><th>Y</th><th>Z</th><th>Adjust</th></tr></thead>
+                <tbody id="solve-points"></tbody>
+              </table>
+            </details>
+            <small class="optional">Design variables are always editable. Tick Adjust to change a fixed point; the model file is not modified.</small>
+          </fieldset>
+
+          <div class="inline" role="group" aria-labelledby="solve-include-label">
+            <span id="solve-include-label" class="group-label">Include in solution file</span>
+            <label class="check"><input type="checkbox" name="include" value="bodies" /> Bodies</label>
+            <label class="check"><input type="checkbox" name="include" value="connectors" /> Connectors</label>
+            <label class="check"><input type="checkbox" name="include" value="suspension" checked /> Suspension</label>
+          </div>
+
+          <label>
+            Solution file
+            <span class="path-row">
+              <input name="output" placeholder="default: next to the model" />
+              <button type="button" data-browse="save" data-target="output" data-suggest-from="output" data-extensions="json">Browse…</button>
+            </span>
+          </label>
+          <label class="check"><input type="checkbox" name="force" /> Replace existing solution file</label>
+
+          <div class="path-row actions">
+            <button type="submit" class="primary">Solve</button>
+            <button type="button" id="solve-stop" hidden>Stop</button>
+          </div>
+        </form>
+
+        <p id="solve-status" class="status" role="status"></p>
+        <ul id="solve-steps" class="steps"></ul>
+        <dl id="solve-summary" class="info" hidden></dl>
+
       </section>
     </main>
 

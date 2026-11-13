@@ -83,6 +83,9 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .map(|path| output_path(path.as_deref(), &args.input))
         .transpose()?;
     if let Some(output) = &output {
+        if *output == model {
+            bail!("output is the model file: {}", output.display());
+        }
         if output.exists() && !args.force {
             bail!(
                 "output exists: {} (use --force to replace it)",
