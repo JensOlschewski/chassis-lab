@@ -369,6 +369,12 @@ pub fn read_design(path: &Path) -> Result<BTreeMap<String, DesignValue>, String>
     })
 }
 
+fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
+    let file =
+        std::fs::File::create(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    serde_json::to_writer_pretty(BufWriter::new(file), value).map_err(|error| error.to_string())
+}
+
 /// The model to solve: its design variable values, and new literal values by JSON pointer.
 #[derive(Deserialize)]
 pub struct Case {
@@ -456,26 +462,28 @@ impl Case {
             _files: files,
         })
     }
-    /// Saves the design variable values, in the format `read_design` reads.
-    pub fn export_design(&self, path: &Path) -> Result<(), String> {
-        let (_, values) = self.resolve()?;
-        self.write(path, &values)
-    }
-
-    /// Saves the model with the overrides applied; design variables stay variables.
-    pub fn export_model(&self, path: &Path) -> Result<(), String> {
-        let (model, _) = self.resolve()?;
-        self.write(path, &model)
-    }
-
-    fn write(&self, path: &Path, value: &impl Serialize) -> Result<(), String> {
+    /// Saves the model with the overrides applied (design variables stay variables) and, when it has
+    /// any, its design variable values beside it as `<name>-design.json`. Returns the design file.
+    pub fn export(&self, path: &Path) -> Result<Option<PathBuf>, String> {
         let path = clean_path(path);
-        if path == clean_path(&self.model) {
-            return Err("Choose a file other than the model".into());
+        let (model, values) = self.resolve()?;
+        let design = (!values.is_empty()).then(|| {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            path.with_file_name(format!("{stem}-design.json"))
+        });
+        for target in std::iter::once(&path).chain(&design) {
+            if *target == clean_path(&self.model) {
+                return Err("Choose a file other than the model".into());
+            }
         }
-        let file =
-            std::fs::File::create(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-        serde_json::to_writer_pretty(BufWriter::new(file), value).map_err(|error| error.to_string())
+        if let Some(design) = design.as_ref().filter(|design| design.exists()) {
+            return Err(format!("{} already exists", design.display()));
+        }
+        write_json(&path, &model)?;
+        if let Some(design) = &design {
+            write_json(design, &values)?;
+        }
+        Ok(design)
     }
 }
 
@@ -802,23 +810,22 @@ mod tests {
     }
 
     #[test]
-    fn exports_read_back_and_never_overwrite_the_model() {
+    fn export_saves_model_and_design_together_and_spares_the_model() {
         let case = case(design(), &[("/Hardpoints/U/0", json!(7.5))]);
         let directory = tempfile::tempdir().unwrap();
-        let (design_path, model_path) = (
-            directory.path().join("d.json"),
-            directory.path().join("m.json"),
-        );
-        case.export_design(&design_path).unwrap();
-        case.export_model(&model_path).unwrap();
+        let path = directory.path().join("m.json");
+        let design_path = case.export(&path).unwrap().unwrap();
+        assert_eq!(design_path, directory.path().join("m-design.json"));
         assert_eq!(
             read_design(&design_path).unwrap().get("HP_L_Y"),
             design().get("HP_L_Y")
         );
-        let saved = read_model(&model_path).unwrap();
+        let saved = read_model(&path).unwrap();
         assert_eq!(saved["Hardpoints"]["U"][0], json!(7.5));
         assert_eq!(saved["Hardpoints"]["L"][0], "HP_L_X");
-        let error = case.export_model(&case.model).unwrap_err();
+        let error = case.export(&path).unwrap_err();
+        assert!(error.ends_with("m-design.json already exists"));
+        let error = case.export(&case.model).unwrap_err();
         assert_eq!(error, "Choose a file other than the model");
         assert_eq!(read_model(&case.model).unwrap(), model());
     }

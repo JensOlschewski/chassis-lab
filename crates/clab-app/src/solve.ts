@@ -139,27 +139,24 @@ export function setupSolve() {
     return { model: clean(field("model").value), design: adjust.checked ? { ...loaded, ...design } : {}, overrides };
   };
 
-  /** Saves the form's design values (`design`) or its adjusted model (`model`) to a file the user chooses. */
-  const exportAs = (command: "export_design" | "export_model", suffix: string) => async () => {
-    const model = clean(field("model").value);
+  /** Saves the adjusted model and, beside it, the design file that goes with it. */
+  document.querySelector("#solve-save")!.addEventListener("click", async () => {
     const invalid = firstInvalid(sections);
     if (invalid) {
       invalid.focus();
       show(invalidMessage(invalid), false);
       return;
     }
-    const defaultPath = model.replace(/\.json$/i, "") + suffix;
+    const defaultPath = clean(field("model").value).replace(/\.json$/i, "") + "-adjusted.json";
     const path = await save({ filters: [{ name: "json", extensions: ["json"] }], defaultPath });
     if (!path) return;
     try {
-      await invoke(command, { case: readCase(), path });
-      show(`Saved ${path}`);
+      const design = await invoke<string | null>("export_case", { case: readCase(), path });
+      show(design ? `Saved ${path} and ${design}` : `Saved ${path}`);
     } catch (error) {
       show(String(error), false);
     }
-  };
-  document.querySelector("#solve-save-design")!.addEventListener("click", exportAs("export_design", "-design.json"));
-  document.querySelector("#solve-save-model")!.addEventListener("click", exportAs("export_model", "-adjusted.json"));
+  });
 
   let stopped = false;
   stop.addEventListener("click", () => {
