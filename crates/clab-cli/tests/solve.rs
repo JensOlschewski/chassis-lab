@@ -193,7 +193,7 @@ fn real_solver_solves_example_model() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("out.json");
     let examples = root.join("matlab/examples");
-    let model = examples.join("mlta-model-file-pwt-pos-config-design.json");
+    let model = examples.join("mlta-model-file-1e2.json");
     let design = examples.join("mlta-design-file-1e2.json");
     let args = [
         &model,

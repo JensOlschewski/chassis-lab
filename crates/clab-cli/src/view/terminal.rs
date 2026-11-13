@@ -11,7 +11,9 @@ use ratatui::text::Line as TextLine;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CanvasLine};
 use ratatui::widgets::{Block, Paragraph};
 
-use super::{ProjectedBounds, Projection, Vec2, Vec3, ViewFrame};
+use clab_core::view::{Projection, Vec2, Vec3, ViewFrame};
+
+use super::ProjectedBounds;
 
 const BOUNDS_PADDING: f64 = 0.1;
 const DEFAULT_PLAYBACK_FPS: u16 = 10;
@@ -346,7 +348,7 @@ mod tests {
     fn frame(x: f64) -> ViewFrame {
         ViewFrame {
             time: x,
-            bodies: vec![super::super::SceneBody {
+            bodies: vec![clab_core::view::SceneBody {
                 label: "Link".to_owned(),
                 origin: [x, 0.0, 0.0],
                 segments: vec![[[x, 0.0, 0.0], [x, 0.0, 1.0]]],

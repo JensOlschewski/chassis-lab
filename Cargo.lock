@@ -569,6 +569,7 @@ dependencies = [
 name = "clab-core"
 version = "0.9.0"
 dependencies = [
+ "anyhow",
  "hdf5-metno",
  "serde",
  "serde_json",
