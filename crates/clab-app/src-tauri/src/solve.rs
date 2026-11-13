@@ -96,8 +96,6 @@ pub struct Section {
     id: &'static str,
     title: &'static str,
     columns: Vec<&'static str>,
-    /// Whether a row's literal values are only editable after the user asks for it.
-    lockable: bool,
     rows: Vec<Row>,
 }
 
@@ -282,50 +280,38 @@ fn parameters(model: &Value) -> Result<Vec<Section>, String> {
     bushing_columns.extend(STIFFNESS);
     bushing_columns.extend(["i 1", "i 2", "i 3", "j 1", "j 2", "j 3"]);
     let sections = [
-        (
-            "hardpoints",
-            "Hardpoints",
-            vec!["X", "Y", "Z"],
-            true,
-            hardpoints,
-        ),
-        ("bushings", "Bushings", bushing_columns, false, bushings),
+        ("hardpoints", "Hardpoints", vec!["X", "Y", "Z"], hardpoints),
+        ("bushings", "Bushings", bushing_columns, bushings),
         (
             "forces",
             "Force Elements",
             vec!["Active", "Stiffness", "Free length"],
-            false,
             forces,
         ),
         (
             "drives",
             "Drives and External Forces",
             DRIVE_COMPONENTS.to_vec(),
-            false,
             drives,
         ),
         (
             "simulation",
             "Simulation Parameter",
             step.to_vec(),
-            false,
             vec![simulation],
         ),
     ];
     Ok(sections
         .into_iter()
-        .map(
-            |(id, title, columns, lockable, rows): (_, _, _, _, Vec<Row>)| Section {
-                id,
-                title,
-                columns,
-                lockable,
-                rows: rows
-                    .into_iter()
-                    .filter(|row| !row.cells.is_empty())
-                    .collect(),
-            },
-        )
+        .map(|(id, title, columns, rows): (_, _, _, Vec<Row>)| Section {
+            id,
+            title,
+            columns,
+            rows: rows
+                .into_iter()
+                .filter(|row| !row.cells.is_empty())
+                .collect(),
+        })
         .filter(|section| !section.rows.is_empty())
         .collect())
 }
@@ -652,7 +638,6 @@ mod tests {
             .map(|row| row.name.as_str())
             .collect();
         assert_eq!(names, ["U", "L", "R"]);
-        assert!(sections[0].lockable);
         assert!(parameters(&json!({})).is_err());
 
         assert_eq!(

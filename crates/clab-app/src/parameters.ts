@@ -22,7 +22,6 @@ export interface Section {
   id: string;
   title: string;
   columns: string[];
-  lockable: boolean;
   rows: { name: string; cells: Cell[] }[];
 }
 
@@ -67,31 +66,9 @@ function createInput(cell: Cell, kept: Map<string, string>) {
   return input;
 }
 
-/**
- * Lets the user unlock a row of numbers. A row can only be locked while it is complete; an incomplete row
- * stays editable with its box greyed out. Locking resets the numbers to the model's.
- */
-function createLock(row: HTMLTableRowElement, numbers: HTMLInputElement[]) {
-  const box = Object.assign(document.createElement("input"), { type: "checkbox", title: "Adjust this row" });
-  const sync = () => {
-    box.disabled = numbers.some(isEmpty);
-    const editable = box.checked || box.disabled;
-    numbers.forEach((input) => {
-      input.disabled = !editable;
-      if (!editable && input.dataset.default !== undefined) input.value = input.dataset.default;
-    });
-  };
-  box.checked = numbers.some((input) => input.dataset.variable);
-  box.addEventListener("change", sync);
-  sync();
-  row.insertCell().append(box);
-  return sync;
-}
-
 /** A foldable table of one section. Variable inputs take their text from `kept`, by variable name. */
 export function createSection(section: Section, kept: Map<string, string>, open: boolean) {
   const body = document.createElement("tbody");
-  const syncs = new WeakMap<HTMLTableRowElement, () => void>();
 
   section.rows.forEach(({ name, cells }) => {
     const row = body.insertRow();
@@ -105,19 +82,14 @@ export function createSection(section: Section, kept: Map<string, string>, open:
       next = cell.column + cell.span;
     });
     for (; next < section.columns.length; next++) row.insertCell();
-    if (section.lockable) {
-      const numbers = [...row.querySelectorAll<HTMLInputElement>("input[data-kind=number]")];
-      syncs.set(row, createLock(row, numbers));
-    }
   });
 
   setupGrid(body, (input) => {
     input.classList.toggle("invalid", !isEmpty(input) && isBad(input));
-    syncs.get(input.closest("tr")!)?.();
   });
 
   const head = element("tr");
-  ["", ...section.columns, ...(section.lockable ? ["Adjust"] : [])].forEach((title) => head.append(element("th", title)));
+  ["", ...section.columns].forEach((title) => head.append(element("th", title)));
   const table = element("table", "", "grid");
   table.createTHead().append(head);
   table.append(body);
