@@ -316,6 +316,47 @@ fn summarizes_a_solver_solution() {
 }
 
 #[test]
+fn solution_json_carries_frames_for_the_chosen_layout() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("solution.json");
+    let row = "[[0.0, 1.0], [0.0, 0.0], [0.0, 0.0]]";
+    let v_hat = ["[0.0, 0.0]"; 6].join(",");
+    fs::write(
+        &path,
+        format!(
+            r#"{{"time": [0.0, 1.0], "v_hat": [{v_hat}], "bodies": [{{"name": "Link", "bodyID": 1, "cm": {{"position": {row}}},
+            "points": {{"A": {{"position": {row}}}, "B": {{"position": {row}}}}}}}]}}"#
+        ),
+    )
+    .unwrap();
+    let value = inspect_json(&path, &[]);
+    assert_eq!(value["frames"].as_array().unwrap().len(), 2);
+    assert_eq!(value["frames"][1]["bodies"][0]["label"], "Link");
+    assert_eq!(value["frames"][1]["bodies"][0]["origin"][0], 1.0);
+
+    let layout = directory.path().join("layout.json");
+    fs::write(&layout, r#"{"bodies": {"Link": {"points": ["A"]}}}"#).unwrap();
+    let layout = layout.to_str().unwrap();
+    let value = inspect_json(&path, &["--view", layout]);
+    assert_eq!(
+        value["frames"][0]["bodies"][0]["segments"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    fs::write(
+        directory.path().join("bad.json"),
+        r#"{"bodies": {"Nope": {"points": []}}}"#,
+    )
+    .unwrap();
+    let bad = directory.path().join("bad.json");
+    let output = inspect(&path, &["--json", "--view", bad.to_str().unwrap()]);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no body `Nope`"));
+}
+
+#[test]
 fn solution_json_is_tagged_and_signal_flags_are_refused() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("solution.json");
