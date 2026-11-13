@@ -189,19 +189,13 @@
           </label>
 
           <fieldset id="solve-design" hidden>
-            <legend>Hardpoints</legend>
+            <legend>Design</legend>
             <div class="path-row">
               <button type="button" id="solve-load-design">Load design file…</button>
               <small id="solve-design-note" class="optional"></small>
             </div>
-            <details open>
-              <summary>Hardpoint table</summary>
-              <table class="hardpoints">
-                <thead><tr><th>Point</th><th>X</th><th>Y</th><th>Z</th><th>Adjust</th></tr></thead>
-                <tbody id="solve-points"></tbody>
-              </table>
-            </details>
-            <small class="optional">Design variables are always editable. Tick Adjust to change a fixed point; the model file is not modified.</small>
+            <div id="solve-sections"></div>
+            <small class="optional">Cells with a design variable need a value. Other cells show the model's own value; change one to override it for this run. The model file is not modified.</small>
           </fieldset>
 
           <div class="inline" role="group" aria-labelledby="solve-include-label">

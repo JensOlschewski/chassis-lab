@@ -14,55 +14,330 @@ use crate::worker::clean_path;
 /// `v_hat` holds 6 rows (3 linear, 3 angular velocity) per body.
 const DOF_PER_BODY: usize = 6;
 
-/// One hardpoint coordinate: a number, or the name of a design variable.
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-#[serde(untagged)]
-enum Coordinate {
-    Value(f64),
-    Variable(String),
+const BUSHING_GROUPS: [&str; 3] = [
+    "primary_bushings",
+    "secondary_bushings",
+    "additional_bushings",
+];
+const DRIVE_GROUPS: [&str; 2] = ["force_torque_drives", "relonomic_drives"];
+const STIFFNESS: [&str; 6] = ["k1", "k2", "k3", "k4", "k5", "k6"];
+const DRIVE_COMPONENTS: [&str; 6] = ["x", "y", "z", "rx", "ry", "rz"];
+/// Names in a drive expression that are not design variables.
+const RESERVED: [&str; 3] = ["TIME", "time", "pi"];
+
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+enum Kind {
+    Number,
+    Switch,
+    /// A text such as a characteristic file path.
+    Text,
+    /// A drive signal, evaluated by the solver over `TIME`.
+    Expression,
 }
 
+/// One editable value of the model. It holds a literal `value`, or the name of a design `variable`.
 #[derive(Serialize, PartialEq, Debug)]
-struct Point {
-    name: String,
-    coordinates: Vec<Coordinate>,
+struct Cell {
+    /// JSON pointer to the value in the model file.
+    pointer: String,
+    column: usize,
+    span: usize,
+    kind: Kind,
+    label: String,
+    variable: Option<String>,
+    value: Value,
 }
 
-/// The hardpoints of a model, in file order.
-#[derive(Serialize, PartialEq, Debug)]
-pub struct Hardpoints {
-    points: Vec<Point>,
-}
-
-impl Hardpoints {
-    fn from_model(model: &Value) -> Result<Self, String> {
-        let points = model["Hardpoints"]
-            .as_object()
-            .ok_or("the model has no Hardpoints")?
-            .iter()
-            .map(|(name, coordinates)| {
-                let coordinates = Vec::deserialize(coordinates).map_err(|_| {
-                    format!("hardpoint {name} is not a list of numbers and variable names")
-                })?;
-                Ok(Point {
-                    name: name.clone(),
-                    coordinates,
-                })
-            })
-            .collect::<Result<_, String>>()?;
-        Ok(Self { points })
+impl Cell {
+    fn new(pointer: String, kind: Kind, value: &Value) -> Option<Self> {
+        let (variable, value) = match (kind, value) {
+            (Kind::Number, Value::Number(_))
+            | (Kind::Switch, Value::Bool(_))
+            | (Kind::Expression, Value::String(_)) => (None, value.clone()),
+            (Kind::Switch, Value::Number(number)) => {
+                (None, Value::Bool(number.as_f64() != Some(0.0)))
+            }
+            (Kind::Text, Value::String(text)) if is_json_path(text) => (None, value.clone()),
+            (_, Value::String(name)) => (Some(name.clone()), Value::Null),
+            _ => return None,
+        };
+        Some(Self {
+            pointer,
+            column: 0,
+            span: 1,
+            kind,
+            label: String::new(),
+            variable,
+            value,
+        })
     }
+}
 
-    fn variables(&self) -> BTreeSet<&str> {
-        self.points
+/// The solver reads a text ending in `.json` as a file path, any other text as a variable name.
+fn is_json_path(text: &str) -> bool {
+    Path::new(text)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+}
+
+#[derive(Serialize, PartialEq, Debug)]
+struct Row {
+    name: String,
+    cells: Vec<Cell>,
+}
+
+/// A table of related values, such as all bushings.
+#[derive(Serialize, PartialEq, Debug)]
+pub struct Section {
+    id: &'static str,
+    title: &'static str,
+    columns: Vec<&'static str>,
+    /// Whether a row's literal values are only editable after the user asks for it.
+    lockable: bool,
+    rows: Vec<Row>,
+}
+
+fn escape(name: &str) -> String {
+    name.replace('~', "~0").replace('/', "~1")
+}
+
+/// The members of the object at `pointer`, in file order.
+fn members<'a>(model: &'a Value, pointer: &str) -> impl Iterator<Item = &'a String> + use<'a> {
+    model
+        .pointer(pointer)
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|object| object.keys())
+}
+
+/// The cells of the value at `pointer`: one per array element, or one for a scalar.
+/// `labels` name the cells; they start at `column`.
+fn cells_at(model: &Value, pointer: &str, kind: Kind, column: usize, labels: &[&str]) -> Vec<Cell> {
+    let Some(value) = model.pointer(pointer) else {
+        return Vec::new();
+    };
+    let items: Vec<_> = match value {
+        Value::Array(items) => items
             .iter()
-            .flat_map(|point| &point.coordinates)
-            .filter_map(|coordinate| match coordinate {
-                Coordinate::Variable(name) => Some(name.as_str()),
-                Coordinate::Value(_) => None,
+            .enumerate()
+            .map(|(index, item)| (format!("{pointer}/{index}"), item))
+            .collect(),
+        scalar => vec![(pointer.to_string(), scalar)],
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, (pointer, item))| {
+            let mut cell = Cell::new(pointer, kind, item)?;
+            cell.column = column + index;
+            cell.label = labels.get(index).unwrap_or(&"").to_string();
+            Some(cell)
+        })
+        .collect()
+}
+
+/// Stiffness is a list of numbers, or a characteristic file (or a variable standing for one) over as many columns.
+fn stiffness_cells(model: &Value, owner: &str, labels: &[&str]) -> Vec<Cell> {
+    let pointer = format!("{owner}/stiffness");
+    if model.pointer(&pointer).is_some_and(Value::is_string) {
+        cells_at(model, &pointer, Kind::Text, 1, &["stiffness file"])
+            .into_iter()
+            .map(|cell| Cell {
+                span: labels.len(),
+                ..cell
             })
             .collect()
+    } else {
+        cells_at(model, &pointer, Kind::Number, 1, labels)
     }
+}
+
+fn bushing_row(model: &Value, group: &str, name: &str) -> Row {
+    let owner = format!("/{group}/{}", escape(name));
+    let mut cells = cells_at(
+        model,
+        &format!("{owner}/active"),
+        Kind::Switch,
+        0,
+        &["active"],
+    );
+    cells.extend(stiffness_cells(model, &owner, &STIFFNESS));
+    for (side, column) in [("i", 7), ("j", 10)] {
+        let orientation = format!("{owner}/{side}/orientation");
+        let found = [
+            ("euler_angles", ["euler φ", "euler θ", "euler ψ"]),
+            ("helpvec", ["help x", "help y", "help z"]),
+        ]
+        .into_iter()
+        .find(|(key, _)| model.pointer(&format!("{orientation}/{key}")).is_some());
+        if let Some((key, labels)) = found {
+            cells.extend(cells_at(
+                model,
+                &format!("{orientation}/{key}"),
+                Kind::Number,
+                column,
+                &labels,
+            ));
+        }
+    }
+    Row {
+        name: format!("{} · {name}", group.trim_end_matches("_bushings")),
+        cells,
+    }
+}
+
+fn force_row(model: &Value, name: &str) -> Row {
+    let owner = format!("/additional_forces/{}", escape(name));
+    let mut cells = cells_at(
+        model,
+        &format!("{owner}/active"),
+        Kind::Switch,
+        0,
+        &["active"],
+    );
+    cells.extend(stiffness_cells(model, &owner, &["stiffness"]));
+    cells.extend(cells_at(
+        model,
+        &format!("{owner}/free_length"),
+        Kind::Number,
+        2,
+        &["free length"],
+    ));
+    Row {
+        name: name.to_string(),
+        cells,
+    }
+}
+
+/// Every value of the model that may be edited or replaced by a design variable. This is the list of
+/// places `applydesignDicMapping.m` substitutes in; keep the two in step.
+fn parameters(model: &Value) -> Result<Vec<Section>, String> {
+    if !model["Hardpoints"].is_object() {
+        return Err("the model has no Hardpoints".into());
+    }
+    let hardpoints = members(model, "/Hardpoints")
+        .map(|name| Row {
+            name: name.clone(),
+            cells: cells_at(
+                model,
+                &format!("/Hardpoints/{}", escape(name)),
+                Kind::Number,
+                0,
+                &["x", "y", "z"],
+            ),
+        })
+        .collect();
+    let bushings = BUSHING_GROUPS
+        .iter()
+        .flat_map(|group| {
+            members(model, &format!("/{group}")).map(move |name| bushing_row(model, group, name))
+        })
+        .collect();
+    let forces = members(model, "/additional_forces")
+        .map(|name| force_row(model, name))
+        .collect();
+    let step = ["t_start", "t_end", "h"];
+    let simulation = Row {
+        name: "step".into(),
+        cells: step
+            .iter()
+            .enumerate()
+            .flat_map(|(column, key)| {
+                cells_at(
+                    model,
+                    &format!("/sim_param/step_parameters/{key}"),
+                    Kind::Number,
+                    column,
+                    &[key],
+                )
+            })
+            .collect(),
+    };
+    let drives = DRIVE_GROUPS
+        .iter()
+        .flat_map(|group| {
+            members(model, &format!("/drives/{group}")).map(move |name| Row {
+                name: name.clone(),
+                cells: cells_at(
+                    model,
+                    &format!("/drives/{group}/{}/signal", escape(name)),
+                    Kind::Expression,
+                    0,
+                    &DRIVE_COMPONENTS,
+                ),
+            })
+        })
+        .collect();
+
+    let mut bushing_columns = vec!["Active"];
+    bushing_columns.extend(STIFFNESS);
+    bushing_columns.extend(["i 1", "i 2", "i 3", "j 1", "j 2", "j 3"]);
+    let sections = [
+        (
+            "hardpoints",
+            "Hardpoints",
+            vec!["X", "Y", "Z"],
+            true,
+            hardpoints,
+        ),
+        ("bushings", "Bushings", bushing_columns, false, bushings),
+        (
+            "forces",
+            "Forces",
+            vec!["Active", "Stiffness", "Free length"],
+            false,
+            forces,
+        ),
+        (
+            "simulation",
+            "Simulation",
+            step.to_vec(),
+            false,
+            vec![simulation],
+        ),
+        ("drives", "Drives", DRIVE_COMPONENTS.to_vec(), false, drives),
+    ];
+    Ok(sections
+        .into_iter()
+        .map(
+            |(id, title, columns, lockable, rows): (_, _, _, _, Vec<Row>)| Section {
+                id,
+                title,
+                columns,
+                lockable,
+                rows: rows
+                    .into_iter()
+                    .filter(|row| !row.cells.is_empty())
+                    .collect(),
+            },
+        )
+        .filter(|section| !section.rows.is_empty())
+        .collect())
+}
+
+fn cells(sections: &[Section]) -> impl Iterator<Item = &Cell> {
+    sections
+        .iter()
+        .flat_map(|section| &section.rows)
+        .flat_map(|row| &row.cells)
+}
+
+/// Names in a drive expression that may be design variables: no numbers, function calls, `TIME` or `pi`.
+fn identifiers(expression: &str) -> Vec<&str> {
+    let word_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '.';
+    let mut names = Vec::new();
+    let mut rest = expression;
+    while let Some(start) = rest.find(word_char) {
+        rest = &rest[start..];
+        let (word, tail) = rest.split_at(rest.find(|c| !word_char(c)).unwrap_or(rest.len()));
+        rest = tail;
+        let is_name = word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_');
+        if is_name && !tail.trim_start().starts_with('(') && !RESERVED.contains(&word) {
+            names.push(word);
+        }
+    }
+    names
 }
 
 fn read_model(path: &Path) -> Result<Value, String> {
@@ -71,26 +346,36 @@ fn read_model(path: &Path) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|error| format!("not a valid model JSON: {error}"))
 }
 
-pub fn read_hardpoints(path: &Path) -> Result<Hardpoints, String> {
-    Hardpoints::from_model(&read_model(&clean_path(path))?)
+pub fn read_parameters(path: &Path) -> Result<Vec<Section>, String> {
+    parameters(&read_model(&clean_path(path))?)
 }
 
-/// Reads a design variable file: a flat JSON object of numbers.
-pub fn read_design(path: &Path) -> Result<BTreeMap<String, f64>, String> {
+/// The value of a design variable, as the design file holds it.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(untagged)]
+pub enum DesignValue {
+    Number(f64),
+    Flag(bool),
+    Text(String),
+}
+
+/// Reads a design variable file: a flat JSON object of numbers, switches and texts.
+pub fn read_design(path: &Path) -> Result<BTreeMap<String, DesignValue>, String> {
     let path = clean_path(path);
     let text =
         std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-    serde_json::from_str(&text)
-        .map_err(|error| format!("not a design file (an object of numbers): {error}"))
+    serde_json::from_str(&text).map_err(|error| {
+        format!("not a design file (an object of numbers, switches and texts): {error}")
+    })
 }
 
-/// The model to solve: its design variable values, and new positions for hardpoints that are fixed numbers.
+/// The model to solve: its design variable values, and new literal values by JSON pointer.
 #[derive(Deserialize)]
 pub struct Case {
     model: PathBuf,
-    design: BTreeMap<String, f64>,
+    design: BTreeMap<String, DesignValue>,
     #[serde(default)]
-    points: BTreeMap<String, Vec<f64>>,
+    overrides: BTreeMap<String, Value>,
 }
 
 /// The files `clab solve` is given for a `Case`. Temporary files are deleted on drop.
@@ -100,27 +385,43 @@ pub struct Prepared {
     _files: Vec<NamedTempFile>,
 }
 
-fn finite(value: f64, what: &str) -> Result<f64, String> {
-    value
-        .is_finite()
-        .then_some(value)
-        .ok_or_else(|| format!("{what} needs a number"))
-}
-
 impl Case {
-    /// Writes the design variable file, and a copy of the model with the adjusted points. The copy
+    /// Writes the design variable file, and a copy of the model with the overrides applied. The copy
     /// sits beside the model because the model's relative paths resolve from its directory.
     pub fn prepare(&self) -> Result<Prepared, String> {
         let model_path = clean_path(&self.model);
         let mut model = read_model(&model_path)?;
-        let hardpoints = Hardpoints::from_model(&model)?;
-        let mut files = Vec::new();
-
-        let mut values = BTreeMap::new();
-        for name in hardpoints.variables() {
-            let value = self.design.get(name).copied().unwrap_or(f64::NAN);
-            values.insert(name, finite(value, &format!("Design variable {name}"))?);
+        let known: BTreeSet<_> = cells(&parameters(&model)?)
+            .map(|cell| cell.pointer.clone())
+            .collect();
+        for (pointer, value) in &self.overrides {
+            let editable = known.contains(pointer) && (value.is_number() || value.is_string());
+            match model.pointer_mut(pointer) {
+                Some(slot) if editable => *slot = value.clone(),
+                _ => return Err(format!("{pointer} does not match the model")),
+            }
         }
+
+        // Variables the overrides replaced are no longer needed.
+        let sections = parameters(&model)?;
+        let mut values = BTreeMap::new();
+        for name in cells(&sections).filter_map(|cell| cell.variable.as_deref()) {
+            let value = self
+                .design
+                .get(name)
+                .ok_or_else(|| format!("Design variable {name} needs a value"))?;
+            values.insert(name, value);
+        }
+        // Names in drive expressions are only a guess, so they count when the design has them.
+        for cell in cells(&sections).filter(|cell| cell.kind == Kind::Expression) {
+            for name in identifiers(cell.value.as_str().unwrap_or_default()) {
+                if let Some(value) = self.design.get(name) {
+                    values.insert(name, value);
+                }
+            }
+        }
+
+        let mut files = Vec::new();
         let mut design = None;
         if !values.is_empty() {
             let file = NamedTempFile::new().map_err(|error| error.to_string())?;
@@ -131,18 +432,7 @@ impl Case {
         }
 
         let mut solved = model_path;
-        if !self.points.is_empty() {
-            for (name, position) in &self.points {
-                let current = hardpoints.points.iter().find(|point| point.name == *name);
-                if current.is_none_or(|point| point.coordinates.len() != position.len()) {
-                    return Err(format!("Hardpoint {name} does not match the model"));
-                }
-                let position = position
-                    .iter()
-                    .map(|value| finite(*value, &format!("Hardpoint {name}")))
-                    .collect::<Result<Vec<_>, _>>()?;
-                model["Hardpoints"][name] = position.into();
-            }
+        if !self.overrides.is_empty() {
             let directory = solved.parent().unwrap_or(Path::new("."));
             let file = tempfile::Builder::new()
                 .prefix(".clab-")
@@ -257,112 +547,256 @@ pub fn summarize(solution: &Path) -> Result<Summary, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    const MODEL: &str = r#"{"Hardpoints": {
-        "U": [1.0, 2.0, 3.0],
-        "L": ["HP_L_X", "HP_L_Y", 5.0],
-        "R": ["HP_L_X", "HP_R_Y", "HP_R_Z"]
-    }}"#;
+    fn model() -> Value {
+        json!({
+            "Hardpoints": {
+                "U": [1.0, 2.0, 3.0],
+                "L": ["HP_L_X", "HP_L_Y", 5.0],
+                "R": ["HP_L_X", "HP_R_Y", "HP_R_Z"]
+            },
+            "primary_bushings": {"B1": {
+                "active": "B_ON",
+                "stiffness": ["KX", 2, 3, 4, 5, 6],
+                "i": {"orientation": {"method": "euler", "euler_angles": [0, 0, 0]}},
+                "j": {"orientation": {"method": "two-points", "helpvec": [0, "HY", 0]}}
+            }},
+            "secondary_bushings": {"B2": {"active": 0, "stiffness": "K_FILE"}},
+            "additional_forces": {
+                "S1": {"active": 1, "stiffness": [30], "free_length": []},
+                "S2": {"active": 0, "stiffness": "k/x.json", "free_length": [502.4]}
+            },
+            "sim_param": {"step_parameters": {"t_start": [0], "t_end": "T_END", "h": [1]}},
+            "drives": {
+                "force_torque_drives": {"f3": {"signal": ["AMP*sin(2*pi*TIME/30)+1e3", "~", "~", "~", "~", "~"]}},
+                "relonomic_drives": {"b5": {"signal": ["~", "~", "STEER*TIME", "~", "~", "~"]}}
+            }
+        })
+    }
 
-    fn case(design: &[(&str, f64)], points: &[(&str, [f64; 3])]) -> Case {
-        let model = tempfile::tempdir().unwrap().keep().join("m.json");
-        std::fs::write(&model, MODEL).unwrap();
+    fn design() -> BTreeMap<String, DesignValue> {
+        let mut design = BTreeMap::from(
+            [
+                ("HP_L_X", 1.0),
+                ("HP_L_Y", 2.0),
+                ("HP_R_Y", 3.0),
+                ("HP_R_Z", 4.0),
+                ("KX", 5.0),
+                ("HY", 1.0),
+                ("T_END", 10.0),
+                ("AMP", 800.0),
+                ("OTHER", 9.0),
+            ]
+            .map(|(name, value)| (name.to_string(), DesignValue::Number(value))),
+        );
+        design.insert("B_ON".into(), DesignValue::Flag(true));
+        design.insert("K_FILE".into(), DesignValue::Text("k.json".into()));
+        design
+    }
+
+    fn case(design: BTreeMap<String, DesignValue>, overrides: &[(&str, Value)]) -> Case {
+        let model_path = tempfile::tempdir().unwrap().keep().join("m.json");
+        std::fs::write(&model_path, model().to_string()).unwrap();
         Case {
-            model,
-            design: design
+            model: model_path,
+            design,
+            overrides: overrides
                 .iter()
-                .map(|(name, value)| (name.to_string(), *value))
-                .collect(),
-            points: points
-                .iter()
-                .map(|(name, position)| (name.to_string(), position.to_vec()))
+                .map(|(pointer, value)| (pointer.to_string(), value.clone()))
                 .collect(),
         }
     }
 
-    const ALL: [(&str, f64); 5] = [
-        ("HP_L_X", 1.0),
-        ("HP_L_Y", 2.0),
-        ("HP_R_Y", 3.0),
-        ("HP_R_Z", 4.0),
-        ("OTHER", 9.0),
-    ];
+    fn row<'a>(sections: &'a [Section], id: &str, name: &str) -> &'a Row {
+        let section = sections.iter().find(|section| section.id == id).unwrap();
+        section.rows.iter().find(|row| row.name == name).unwrap()
+    }
 
-    #[test]
-    fn hardpoints_keep_file_order_and_mark_variables() {
-        let hardpoints = Hardpoints::from_model(&serde_json::from_str(MODEL).unwrap()).unwrap();
-        let names: Vec<_> = hardpoints
-            .points
+    /// (column, span, variable or value) of each cell.
+    fn layout(row: &Row) -> Vec<(usize, usize, String)> {
+        row.cells
             .iter()
-            .map(|point| point.name.as_str())
-            .collect();
-        assert_eq!(names, ["U", "L", "R"]);
-        assert_eq!(
-            hardpoints.points[1].coordinates,
-            [
-                Coordinate::Variable("HP_L_X".into()),
-                Coordinate::Variable("HP_L_Y".into()),
-                Coordinate::Value(5.0)
-            ]
-        );
-        assert_eq!(
-            hardpoints.variables().into_iter().collect::<Vec<_>>(),
-            ["HP_L_X", "HP_L_Y", "HP_R_Y", "HP_R_Z"]
-        );
-        assert!(Hardpoints::from_model(&serde_json::json!({})).is_err());
+            .map(|cell| {
+                let content = cell.variable.clone().unwrap_or(cell.value.to_string());
+                (cell.column, cell.span, content)
+            })
+            .collect()
     }
 
     #[test]
-    fn design_file_holds_the_model_variables_only() {
-        let prepared = case(&ALL, &[]).prepare().unwrap();
-        let design = prepared.design.as_ref().unwrap();
-        let written: BTreeMap<String, f64> =
-            serde_json::from_str(&std::fs::read_to_string(design).unwrap()).unwrap();
-        assert_eq!(written.len(), 4);
-        assert!(!written.contains_key("OTHER"));
+    fn sections_follow_the_model() {
+        let sections = parameters(&model()).unwrap();
+        let ids: Vec<_> = sections.iter().map(|section| section.id).collect();
+        assert_eq!(
+            ids,
+            ["hardpoints", "bushings", "forces", "simulation", "drives"]
+        );
+        let names: Vec<_> = sections[0]
+            .rows
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(names, ["U", "L", "R"]);
+        assert!(sections[0].lockable);
+        assert!(parameters(&json!({})).is_err());
+
+        assert_eq!(
+            layout(row(&sections, "hardpoints", "L")),
+            [
+                (0, 1, "HP_L_X".into()),
+                (1, 1, "HP_L_Y".into()),
+                (2, 1, "5.0".into())
+            ]
+        );
+        let bushing = layout(row(&sections, "bushings", "primary · B1"));
+        assert_eq!(bushing.len(), 13);
+        assert_eq!(bushing[0], (0, 1, "B_ON".into()));
+        assert_eq!(bushing[1], (1, 1, "KX".into()));
+        assert_eq!(bushing[7], (7, 1, "0".into()));
+        assert_eq!(bushing[11], (11, 1, "HY".into()));
+        assert_eq!(
+            layout(row(&sections, "bushings", "secondary · B2")),
+            [(0, 1, "false".into()), (1, 6, "K_FILE".into())]
+        );
+    }
+
+    #[test]
+    fn forces_simulation_and_drives_have_cells() {
+        let sections = parameters(&model()).unwrap();
+        assert_eq!(
+            layout(row(&sections, "forces", "S1")),
+            [(0, 1, "true".into()), (1, 1, "30".into())]
+        );
+        assert_eq!(
+            layout(row(&sections, "forces", "S2")),
+            [
+                (0, 1, "false".into()),
+                (1, 1, "\"k/x.json\"".into()),
+                (2, 1, "502.4".into())
+            ]
+        );
+        assert_eq!(
+            layout(row(&sections, "simulation", "step")),
+            [
+                (0, 1, "0".into()),
+                (1, 1, "T_END".into()),
+                (2, 1, "1".into())
+            ]
+        );
+        let drive = row(&sections, "drives", "f3");
+        assert_eq!(drive.cells.len(), 6);
+        assert_eq!(drive.cells[0].kind, Kind::Expression);
+        assert_eq!(drive.cells[0].value, "AMP*sin(2*pi*TIME/30)+1e3");
+    }
+
+    #[test]
+    fn example_model_lists_every_table() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../matlab/examples/mlta-model-file-pwt-neg-config-design.json");
+        let model = read_model(&path).unwrap();
+        let sections = parameters(&model).unwrap();
+        let ids: Vec<_> = sections.iter().map(|section| section.id).collect();
+        assert_eq!(
+            ids,
+            ["hardpoints", "bushings", "forces", "simulation", "drives"]
+        );
+        assert!(cells(&sections).all(|cell| model.pointer(&cell.pointer).is_some()));
+    }
+
+    #[test]
+    fn expression_names_skip_numbers_calls_and_reserved_words() {
+        assert_eq!(
+            identifiers("AMP*sin(2*pi*TIME/30)+1e3 + K_2"),
+            ["AMP", "K_2"]
+        );
+        assert_eq!(identifiers("~"), Vec::<&str>::new());
+        assert_eq!(identifiers("-STEER*TIME"), ["STEER"]);
+    }
+
+    #[test]
+    fn design_file_holds_what_the_model_uses() {
+        let prepared = case(design(), &[]).prepare().unwrap();
+        let written: BTreeMap<String, DesignValue> = serde_json::from_str(
+            &std::fs::read_to_string(prepared.design.as_ref().unwrap()).unwrap(),
+        )
+        .unwrap();
+        let names: Vec<_> = written.keys().map(String::as_str).collect();
+        // OTHER is not in the model; STEER is a guess the design cannot back.
+        assert_eq!(
+            names,
+            [
+                "AMP", "B_ON", "HP_L_X", "HP_L_Y", "HP_R_Y", "HP_R_Z", "HY", "KX", "K_FILE",
+                "T_END"
+            ]
+        );
+        assert_eq!(written["B_ON"], DesignValue::Flag(true));
+        assert_eq!(written["K_FILE"], DesignValue::Text("k.json".into()));
     }
 
     #[test]
     fn design_file_needs_every_variable() {
-        let error = case(&[("HP_L_X", 1.0)], &[]).prepare().err().unwrap();
-        assert_eq!(error, "Design variable HP_L_Y needs a number");
-        let error = case(&[("HP_L_X", f64::NAN)], &[]).prepare().err().unwrap();
-        assert_eq!(error, "Design variable HP_L_X needs a number");
+        let mut incomplete = design();
+        incomplete.remove("HP_L_Y");
+        let error = case(incomplete, &[]).prepare().err().unwrap();
+        assert_eq!(error, "Design variable HP_L_Y needs a value");
     }
 
     #[test]
-    fn adjusted_points_go_into_a_copy_of_the_model_beside_it() {
-        let case = case(&ALL, &[("U", [7.0, 8.0, 9.0])]);
+    fn overrides_go_into_a_copy_of_the_model_beside_it() {
+        let case = case(
+            design(),
+            &[
+                ("/Hardpoints/U/0", json!(7.5)),
+                ("/additional_forces/S2/stiffness", json!("k/y.json")),
+                ("/primary_bushings/B1/stiffness/0", json!(99)),
+            ],
+        );
         let prepared = case.prepare().unwrap();
         assert_ne!(prepared.model, case.model);
         assert_eq!(prepared.model.parent(), case.model.parent());
         let copy: Value =
             serde_json::from_str(&std::fs::read_to_string(&prepared.model).unwrap()).unwrap();
-        assert_eq!(copy["Hardpoints"]["U"], serde_json::json!([7.0, 8.0, 9.0]));
+        assert_eq!(copy["Hardpoints"]["U"], json!([7.5, 2.0, 3.0]));
+        assert_eq!(copy["additional_forces"]["S2"]["stiffness"], "k/y.json");
         assert_eq!(copy["Hardpoints"]["L"][0], "HP_L_X");
+        let written = std::fs::read_to_string(prepared.design.as_ref().unwrap()).unwrap();
+        assert!(
+            !written.contains("\"KX\""),
+            "an overridden variable is not needed"
+        );
         let copy_path = prepared.model.clone();
         drop(prepared);
         assert!(!copy_path.exists());
-        assert!(
-            std::fs::read_to_string(&case.model)
-                .unwrap()
-                .contains("1.0, 2.0, 3.0")
-        );
+        assert_eq!(read_model(&case.model).unwrap(), model());
     }
 
     #[test]
-    fn adjusted_points_must_match_the_model() {
-        let error = case(&ALL, &[("NOPE", [1.0, 2.0, 3.0])])
-            .prepare()
-            .err()
-            .unwrap();
-        assert_eq!(error, "Hardpoint NOPE does not match the model");
+    fn overrides_must_match_the_model() {
+        for (pointer, value) in [
+            ("/Hardpoints/NOPE/0", json!(1.0)),
+            ("/Bodies", json!(1.0)),
+            ("/Hardpoints/U/0", json!([1.0])),
+        ] {
+            let error = case(design(), &[(pointer, value)]).prepare().err().unwrap();
+            assert_eq!(error, format!("{pointer} does not match the model"));
+        }
+    }
+
+    #[test]
+    fn design_files_may_hold_switches_and_texts() {
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), r#"{"A": 1.5, "B": true, "C": "k.json"}"#).unwrap();
+        let design = read_design(file.path()).unwrap();
+        assert_eq!(design["A"], DesignValue::Number(1.5));
+        assert_eq!(design["B"], DesignValue::Flag(true));
+        assert_eq!(design["C"], DesignValue::Text("k.json".into()));
     }
 
     #[test]
     fn solve_arguments_put_the_model_before_json() {
         let request = SolveRequest {
-            case: case(&ALL, &[]),
+            case: case(design(), &[]),
             output: PathBuf::from("/data/out.json"),
             include: vec![Include::Bodies, Include::Suspension],
             force: true,

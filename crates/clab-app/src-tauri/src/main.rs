@@ -42,14 +42,14 @@ async fn run_analyze(
     .await
 }
 
-/// The hardpoints of a model file, in file order.
+/// The editable values of a model file, grouped in tables.
 #[tauri::command]
-fn model_hardpoints(path: PathBuf) -> Result<solve::Hardpoints, String> {
-    solve::read_hardpoints(&path)
+fn model_parameters(path: PathBuf) -> Result<Vec<solve::Section>, String> {
+    solve::read_parameters(&path)
 }
 
 #[tauri::command]
-fn read_design(path: PathBuf) -> Result<BTreeMap<String, f64>, String> {
+fn read_design(path: PathBuf) -> Result<BTreeMap<String, solve::DesignValue>, String> {
     solve::read_design(&path)
 }
 
@@ -238,7 +238,7 @@ fn main() {
             run_convert,
             run_inspect,
             run_analyze,
-            model_hardpoints,
+            model_parameters,
             read_design,
             run_solve,
             cancel_solve,
