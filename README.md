@@ -203,7 +203,7 @@ Solve a multibody kinematic or compliant model defined in JSON.
 - `--force` to replace an existing solution file (needs `--json`).
 
 ```bash
-clab solve matlab/examples/mlta-model-file-pwt-pos-config-design.json \
+clab solve matlab/examples/mlta-model-file-1e2.json \
     --design matlab/examples/mlta-design-file-1e2.json \
     --json reports/solution.json \
     --include bodies,connectors
