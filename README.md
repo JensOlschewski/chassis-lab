@@ -133,6 +133,20 @@ clab inspect --mapping knc --test vertical --template
 - `--mapping svc|knc` displays mapping requirements without opening an input
   file.
 - `--test TEST` restricts the KnC mapping output to one test.
+
+A solver solution (from `clab solve --json`) prints a summary with the steps,
+time range, body and joint counts and the peak velocity per body:
+
+```bash
+clab inspect reports/solution.json
+clab inspect reports/solution.json --view [VIEW_FILE]
+```
+
+- `--view [FILE]` steps through the motion in the terminal viewer, same as
+  `clab solve --view`. It needs a solution made with `--include bodies`
+  (`connectors` too if joints are drawn).
+- `--json` prints `{"kind": "solution", "summary": …}`.
+- `--list`, `--match` and `--signal` are for HDF5 only.
 - `--signal NAME` to read one signal by its listed name. Repeatable, needs
   `--json`.
 - `--json` to emit JSON for `--list`, `--match` or `--signal` (HDF5 only).

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
 use clab_core::svc::SvcSimulationFile;
+use clab_core::view::ViewLayout;
 use clap::{Args, ValueEnum};
 use serde_json::{Value, json};
 
@@ -106,11 +107,8 @@ fn inspect_solution(solution: &Value, json: bool, view: Option<Option<PathBuf>>)
         bail!("--json and --view cannot be combined");
     }
     if let Some(layout) = view {
-        let layout = layout
-            .map(|path| clab_core::view::ViewLayout::load(&path))
-            .transpose()?;
-        let frames = clab_core::view::frames_from_solution(solution, layout.as_ref())?;
-        return crate::view::run_viewer(frames);
+        let layout = layout.map(|path| ViewLayout::load(&path)).transpose()?;
+        return view_solution(solution, layout.as_ref());
     }
     let summary = solution::render_summary(solution)?;
     if json {
@@ -119,6 +117,12 @@ fn inspect_solution(solution: &Value, json: bool, view: Option<Option<PathBuf>>)
         print!("{summary}");
     }
     Ok(())
+}
+
+/// Opens the terminal viewer; shared by `inspect --view` and `solve --view`.
+pub(crate) fn view_solution(solution: &Value, layout: Option<&ViewLayout>) -> Result<()> {
+    let frames = clab_core::view::frames_from_solution(solution, layout)?;
+    crate::view::run_viewer(frames)
 }
 
 /// What a file given to `inspect` holds.

@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, ValueEnum};
 use serde_json::Value;
 
-use crate::{solution, view};
+use crate::{inspect, solution};
 
 const RUNTIME_RELEASE: &str = "R2024b";
 const SOLVER_ENV: &str = "CLAB_MKS_SOLVER";
@@ -178,8 +178,7 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         print!("{}", solution::render_text(&solution)?);
     }
     if args.view.is_some() {
-        let frames = clab_core::view::frames_from_solution(&solution, layout.as_ref())?;
-        view::run_viewer(frames)?;
+        inspect::view_solution(&solution, layout.as_ref())?;
     }
     Ok(())
 }
