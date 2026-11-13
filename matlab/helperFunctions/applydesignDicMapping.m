@@ -58,8 +58,9 @@ function jsonStruct = applydesignDicMapping(jsonStruct, designDic)
         end
     end
 
-    for name = setdiff(keys(designDic), usedKeys, 'stable')'
-        warning('Design variable %s was not used in the JSON structure.', name);
+    unused = setdiff(keys(designDic), usedKeys, 'stable');
+    for k = 1:numel(unused)
+        warning('Design variable %s was not used in the JSON structure.', unused(k));
     end
 
     function value = resolve(value, allowText)
