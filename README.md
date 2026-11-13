@@ -20,7 +20,8 @@ curves. \
 ⚖️ **Compare** baseline with compatible candidates. Tolerances enable acceptance
 checks. \
 🧮 **Solve** multibody kinematic models defined in JSON and write the solution
-as JSON, or view it in a terminal viewer. Standalone, not part of the flow above.
+as JSON, or view it in a terminal viewer. Standalone, not part of the flow
+above.
 
 ## 👀 Preview
 
@@ -107,8 +108,8 @@ clab convert lat.res -d knc -t lateral --setup b1e0f1r1 --phase in --offset 30
   (`vertical`|`roll`|`static`|`longitudinal`|`lateral`)
 - `--setup bXeXfXrX` is required for `knc` (brakes, steering engine, front ARB,
   rear ARB; each 0 or 1)
-- `--phase in|anti` is required for `lateral`. It sets the lateral force phase of
-  the left and right wheels.
+- `--phase in|anti` is required for `lateral`. It sets the lateral force phase
+  of the left and right wheels.
 - `--offset MM` is required for `lateral`. It sets the pneumatic trail offset in
   mm.
 - `--yes` (`-y`) to proceed without prompting when motion data disagrees with
@@ -142,9 +143,9 @@ clab inspect reports/solution.json
 clab inspect reports/solution.json --view [VIEW_FILE]
 ```
 
-- `--view [FILE]` steps through the motion in the terminal viewer, same as
-  `clab solve --view`. It needs a solution made with `--include bodies`
-  (`connectors` too if joints are drawn).
+- `--view [FILE]` show a tui solution viewer, matlab soltion file needed and
+  needs a solution made with `--include bodies` (`connectors` too if joints are
+  drawn).
 - `--json` prints `{"kind": "solution", "summary": …}`.
 - `--list`, `--match` and `--signal` are for HDF5 only.
 - `--signal NAME` to read one signal by its listed name. Repeatable, needs
@@ -168,7 +169,8 @@ clab analyze examples/config.toml examples/input/run-simulation.toml
 - `--verbose` (`-v`) to print default-value warnings, also when output is
   redirected.
 - `--force` to replace an existing report bundle.
-- `--json` to print one JSON line per analysis section instead of console text. to print one JSON line per analysis section instead of console text
+- `--json` to print one JSON line per analysis section instead of console text.
+  to print one JSON line per analysis section instead of console text
 
 Create report and label.
 
@@ -190,7 +192,8 @@ inputs).
 - `--debug` to include KnC rate-filter diagnostic plots in the report (needs
   `--report`).
 - `--force` to replace an existing report bundle.
-- `--json` to print one JSON line per comparison section instead of console text.
+- `--json` to print one JSON line per comparison section instead of console
+  text.
 
 ```bash
 clab compare examples/config.toml \
