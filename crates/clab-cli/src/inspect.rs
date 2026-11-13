@@ -6,7 +6,7 @@ use clab_core::svc::SvcSimulationFile;
 use clap::{Args, ValueEnum};
 use serde_json::{Value, json};
 
-use crate::signals;
+use crate::{signals, solution};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Mapping {
@@ -84,7 +84,10 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
     match kind {
         Kind::SvcJson => inspect_svc_json(&file, signals, args.r#match.as_deref()),
         Kind::Hdf5 => inspect_hdf5(&file, signals, args.r#match.as_deref()),
-        Kind::Solution(_) => bail!("inspecting solver solutions is not supported yet"),
+        Kind::Solution(solution) => {
+            print!("{}", solution::render_summary(&solution)?);
+            Ok(())
+        }
     }
 }
 

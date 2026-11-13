@@ -294,3 +294,23 @@ fn json_rejects_unknown_signal_bad_flags_and_non_hdf5() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains(".h5 or .hdf5"));
 }
+
+#[test]
+fn summarizes_a_solver_solution() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("solution.json");
+    fs::write(
+        &path,
+        r#"{"time": [0.0, 1.0], "v_hat": [[3.0, 0.0], [4.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]}"#,
+    )
+    .unwrap();
+    let output = inspect(&path, &[]);
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("steps: 2\ntime: 0.0000 to 1.0000\nbodies: 1\n"),
+        "{text}"
+    );
+    assert!(text.contains("--include bodies"), "{text}");
+    assert!(text.contains("5.0000"), "{text}");
+}
