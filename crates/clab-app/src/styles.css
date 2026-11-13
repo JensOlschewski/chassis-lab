@@ -217,7 +217,7 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .comparison td.failed { color: var(--error); }
 .warnings { margin: 8px 0; padding: 0 12px 0 32px; color: var(--muted); font-size: 0.8125rem; }
 
-#solve-design[hidden] { display: none; }
+#solve-design[hidden], #solve-include[hidden] { display: none; }
 .inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
 .inline .group-label { font-size: 0.9rem; font-weight: 500; }
 .grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; }

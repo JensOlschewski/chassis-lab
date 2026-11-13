@@ -197,14 +197,14 @@
           </label>
           <label class="check"><input type="checkbox" name="force" /> Replace existing solution file</label>
 
-          <div class="inline" role="group" aria-labelledby="solve-include-label">
+          <label class="check"><input type="checkbox" id="solve-adjust" /> Adjust model parameters</label>
+          <div id="solve-include" class="inline" role="group" hidden aria-labelledby="solve-include-label">
             <span id="solve-include-label" class="group-label">Include in solution file</span>
-            <label class="check"><input type="checkbox" name="include" value="bodies" /> Bodies</label>
-            <label class="check"><input type="checkbox" name="include" value="connectors" /> Connectors</label>
+            <label class="check"><input type="checkbox" name="include" value="bodies" checked /> Bodies</label>
+            <label class="check"><input type="checkbox" name="include" value="connectors" checked /> Connectors</label>
             <label class="check"><input type="checkbox" name="include" value="suspension" checked /> Suspension</label>
           </div>
 
-          <label class="check"><input type="checkbox" id="solve-adjust" /> Adjust model parameters</label>
           <fieldset id="solve-design" hidden>
             <div class="path-row">
               <button type="button" id="solve-load-design">Load design file…</button>

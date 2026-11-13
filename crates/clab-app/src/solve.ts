@@ -84,7 +84,9 @@ export function setupSolve() {
     designNote.textContent = "";
   };
 
+  const include = document.querySelector<HTMLElement>("#solve-include")!;
   const showDesign = () => {
+    include.hidden = !adjust.checked;
     designFields.hidden = !adjust.checked || !sections.hasChildNodes();
   };
   adjust.addEventListener("change", showDesign);
