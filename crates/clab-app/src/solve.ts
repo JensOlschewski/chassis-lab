@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { ask, save } from "@tauri-apps/plugin-dialog";
 import { pick, setupBrowse } from "./browse";
 import {
   DesignValue,
@@ -56,6 +56,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
   const stop = document.querySelector<HTMLButtonElement>("#solve-stop")!;
   const open = document.querySelector<HTMLButtonElement>("#solve-open")!;
+  const installRuntime = document.querySelector<HTMLButtonElement>("#solve-install-runtime")!;
 
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement;
 
@@ -66,7 +67,38 @@ export function setupSolve(openInInspect: (path: string) => void) {
 
   const setBusy = (busy: boolean) => {
     submit.disabled = busy;
+    installRuntime.disabled = busy;
   };
+
+  /** A failed run; a missing MATLAB Runtime also offers to install it. */
+  const fail = (message: string) => {
+    show(message, false);
+    installRuntime.hidden = !message.startsWith("MATLAB Runtime");
+  };
+
+  installRuntime.addEventListener("click", async () => {
+    const proceed = await ask(
+      "The solver needs the MATLAB Runtime. It downloads about 1.5 GB and installs for your user only. This can take several minutes.\n\nBy installing you accept the MathWorks MATLAB Runtime license.",
+      { title: "Install MATLAB Runtime", okLabel: "Install", cancelLabel: "Cancel" },
+    );
+    if (!proceed) return;
+    setBusy(true);
+    steps.replaceChildren();
+    show("Installing the MATLAB Runtime…");
+    try {
+      const outcome = await invoke<Outcome>("install_runtime");
+      if (outcome.exit_code === 0) {
+        installRuntime.hidden = true;
+        show("MATLAB Runtime installed. Solve again.");
+      } else {
+        show(errorLine(outcome.stderr) ?? `clab exited with ${outcome.exit_code}`, false);
+      }
+    } catch (error) {
+      show(String(error), false);
+    } finally {
+      setBusy(false);
+    }
+  });
 
   /** Values of a loaded design file; names without a cell (such as inside drive expressions) still reach the solver. */
   let loaded: Record<string, DesignValue> = {};
@@ -193,6 +225,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
     stop.hidden = false;
     summary.hidden = true;
     open.hidden = true;
+    installRuntime.hidden = true;
     show("");
     const solve = createStep("Solve motion");
     const write = createStep("Write solution");
@@ -214,11 +247,11 @@ export function setupSolve(openInInspect: (path: string) => void) {
         await showSummary(output);
       } else {
         (write.node.isConnected ? write : solve).finish("error");
-        show(stopped ? "Stopped" : (errorLine(outcome.stderr) ?? `clab exited with ${outcome.exit_code}`), false);
+        fail(stopped ? "Stopped" : (errorLine(outcome.stderr) ?? `clab exited with ${outcome.exit_code}`));
       }
     } catch (error) {
       (write.node.isConnected ? write : solve).finish("error");
-      show(String(error), false);
+      fail(String(error));
     } finally {
       stop.hidden = true;
       setBusy(false);

@@ -85,6 +85,12 @@ async fn run_solve(
     outcome
 }
 
+/// Installs the MATLAB Runtime the solver needs; this can take minutes while it downloads.
+#[tauri::command]
+async fn install_runtime(app: AppHandle) -> Result<worker::Outcome, String> {
+    worker::run(&app, ["runtime", "install"].map(Into::into).to_vec()).await
+}
+
 #[tauri::command]
 fn cancel_solve(cancel: State<'_, worker::Cancel>) {
     cancel.kill();
@@ -252,6 +258,7 @@ fn main() {
             read_design,
             export_case,
             run_solve,
+            install_runtime,
             cancel_solve,
             solution_summary,
             save_image,
