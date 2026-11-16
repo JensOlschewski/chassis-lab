@@ -203,8 +203,7 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .viewer-readout { display: inline-flex; flex: none; align-items: center; gap: 4px; margin-right: 16px; }
 .viewer-bar > button:first-child { width: 2.25em; height: 2.25em; padding: 0; display: inline-grid; place-items: center; }
 .viewer-bar button { white-space: nowrap; }
-.viewer-loop { min-width: 9.5em; }
-.viewer-status { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+.viewer-status { white-space: pre; font-variant-numeric: tabular-nums; color: var(--muted); }
 .viewer-hint { display: block; margin-top: 6px; color: var(--muted); }
 .viewer:focus-visible .viewer-stage { border-color: var(--accent); }
 pre.info { display: block; font-family: var(--mono, ui-monospace, monospace); white-space: pre; overflow-x: auto; }
