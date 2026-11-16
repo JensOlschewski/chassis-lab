@@ -154,7 +154,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   viewBar.append(fpsText, speedSlider, modeText, views, bodyText);
   const help = element("div", "", "viewer-help");
   help.hidden = true;
-  help.append(...HELP.map(([key, what]) => element("div", `${key}\u2003${what}`)));
+  const keyWidth = Math.max(...HELP.map(([key]) => key.length));
+  help.textContent = HELP.map(([key, what]) => `${key.padEnd(keyWidth)}  ${what}`).join("\n");
   stage.append(help);
   root.append(stage, playbackBar, viewBar, element("small", HINT, "viewer-hint"));
   parent.replaceChildren(root);
@@ -440,16 +441,19 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     ...Object.fromEntries(VIEWS.map(({ key }, view) => [key, () => look(view)])),
   };
 
-  root.addEventListener("keydown", (event) => {
-    // The slider keeps its arrow keys and a focused button its Space.
-    const own = event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement;
-    if (own || event.ctrlKey || event.metaKey || event.altKey) return;
+  // Keys act on the page, not just on a focused viewer, while it is on screen.
+  document.addEventListener("keydown", onKey);
+  function onKey(event: KeyboardEvent) {
+    if (!root.isConnected) return document.removeEventListener("keydown", onKey);
+    // Fields, sliders and buttons keep their own keys; a hidden viewer takes none.
+    const own = event.target instanceof Element && event.target.closest("input, textarea, select, button, [contenteditable]");
+    if (own || root.offsetParent === null || event.ctrlKey || event.metaKey || event.altKey) return;
     const action = KEYS[event.key];
     if (!action) return;
     event.preventDefault();
     action();
     flush();
-  });
+  }
   // Keys work after a click anywhere in the viewer, buttons included.
   root.addEventListener("click", (event) => {
     root.focus();
