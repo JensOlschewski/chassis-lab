@@ -17,8 +17,11 @@ export interface Viewer {
 }
 
 /** The terminal viewer's playback rules, so both viewers feel the same. */
-const FPS_STEPS = [1, 2, 5, 10, 20, 50, 100];
-const DEFAULT_FPS = 10;
+/** Playback speeds as multiples of real time (frame `time` is in seconds); 1× is in the middle. */
+const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 5, 10];
+const REAL_TIME = 3;
+/** A stalled frame (hidden window, slow render) never jumps the playhead further than this. */
+const MAX_ADVANCE = 0.1;
 const ICONS = {
   play: '<svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor"><path d="M2 1l9 5-9 5z"/></svg>',
   pause: '<svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor"><path d="M2 1h3v10H2zM7 1h3v10H7z"/></svg>',
@@ -86,9 +89,13 @@ function write({ geometry }: THREE.Object3D & { geometry: THREE.BufferGeometry }
 /** Draws `frames` into `parent` with playback controls and mouse orbit, pan and zoom. */
 export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   const last = frames.length - 1;
+  /** One frame, or frame times that do not increase, leave nothing to play. */
+  const canPlay = last > 0 && frames[last].time > frames[0].time;
   let index = 0;
-  let playing = last > 0;
-  let fps = DEFAULT_FPS;
+  let playing = canPlay;
+  let speedIndex = REAL_TIME;
+  /** The playhead in frame time; `index` is the last frame at or before it. */
+  let clock = frames[0].time;
   let loop = 0;
   let direction = 1;
   let showLabels = false;
@@ -106,9 +113,9 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   const speedSlider = document.createElement("input");
   speedSlider.type = "range";
   speedSlider.className = "viewer-speed";
-  speedSlider.max = String(FPS_STEPS.length - 1);
-  speedSlider.ariaLabel = "Frames per second";
-  speedSlider.title = "Playback speed (+/- keys)";
+  speedSlider.max = String(SPEEDS.length - 1);
+  speedSlider.ariaLabel = "Playback speed";
+  speedSlider.title = "Playback speed, × real time (+/- keys)";
   const readout = element("span", "", "viewer-readout");
   readout.append(status, speedSlider);
   const playButton = button("", "Play/pause (Space)", () => togglePlay());
@@ -229,10 +236,9 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   function sync() {
     timeline.value = String(index);
     timeline.style.setProperty("--p", String(last ? index / last : 0));
-    status.textContent = `${index + 1}/${frames.length}  t=${frames[index].time.toFixed(3)} fps=${fps}`;
-    const rung = FPS_STEPS.indexOf(fps);
-    speedSlider.value = String(rung);
-    speedSlider.style.setProperty("--p", String(rung / (FPS_STEPS.length - 1)));
+    status.textContent = `${index + 1}/${frames.length}  t=${frames[index].time.toFixed(3)} ×${SPEEDS[speedIndex]}`;
+    speedSlider.value = String(speedIndex);
+    speedSlider.style.setProperty("--p", String(speedIndex / (SPEEDS.length - 1)));
     playButton.innerHTML = playing ? ICONS.pause : ICONS.play;
     loopButton.textContent = `loop: ${LOOPS[loop]}`;
     labelsButton.ariaPressed = String(showLabels);
@@ -272,38 +278,49 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     draw();
   }
 
-  /** Same rules as the terminal viewer. */
-  function tick() {
-    if (direction > 0 && index < last) index++;
-    else if (direction > 0) {
-      if (LOOPS[loop] === "restart") index = 0;
-      else if (LOOPS[loop] === "bounce" && last > 0) [direction, index] = [-1, index - 1];
-      else playing = false;
-    } else if (index > 0) index--;
-    else {
-      direction = 1;
-      if (last > 0) index = 1;
+  function seek(frame: number) {
+    index = frame;
+    clock = frames[frame].time;
+  }
+
+  /** Moves the playhead by `seconds` of frame time with the terminal viewer's loop rules. */
+  function advance(seconds: number) {
+    const [start, end] = [frames[0].time, frames[last].time];
+    clock += direction * seconds;
+    if (clock >= end && direction > 0) {
+      if (LOOPS[loop] === "restart") clock = start + ((clock - start) % (end - start));
+      else if (LOOPS[loop] === "bounce") [direction, clock] = [-1, end];
+      else [playing, clock] = [false, end];
+    } else if (clock <= start && direction < 0) [direction, clock] = [1, start];
+    let [low, high] = [0, last];
+    while (low < high) {
+      const middle = (low + high + 1) >> 1;
+      if (frames[middle].time <= clock) low = middle;
+      else high = middle - 1;
     }
+    index = low;
     sync();
   }
 
   function togglePlay() {
-    if (last === 0) return;
-    if (!playing && LOOPS[loop] === "once" && index === last) [index, direction] = [0, 1];
+    if (!canPlay) return;
+    if (!playing && LOOPS[loop] === "once" && index === last) {
+      direction = 1;
+      seek(0);
+    }
     playing = !playing;
     sync();
   }
 
   function step(by: -1 | 1) {
     playing = false;
-    if (by < 0) index = index > 0 ? index - 1 : last;
-    else [index, direction] = [Math.min(index + 1, last), 1];
+    direction = 1;
+    seek(by < 0 ? (index > 0 ? index - 1 : last) : Math.min(index + 1, last));
     sync();
   }
 
   function speed(by: number) {
-    const at = FPS_STEPS.indexOf(fps) + by;
-    fps = FPS_STEPS[Math.min(Math.max(at, 0), FPS_STEPS.length - 1)];
+    speedIndex = Math.min(Math.max(speedIndex + by, 0), SPEEDS.length - 1);
     sync();
   }
 
@@ -349,13 +366,13 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     flush();
   });
   speedSlider.addEventListener("input", () => {
-    fps = FPS_STEPS[Number(speedSlider.value)];
+    speedIndex = Number(speedSlider.value);
     sync();
     flush();
   });
   timeline.addEventListener("input", () => {
     playing = false;
-    index = Number(timeline.value);
+    seek(Number(timeline.value));
     sync();
     flush();
   });
@@ -364,7 +381,6 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   observer.observe(stage);
 
   let before = performance.now();
-  let owed = 0;
   let frameId = 0;
   const run = (now: number) => {
     frameId = requestAnimationFrame(run);
@@ -372,15 +388,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     before = now;
     // Nothing is drawn or played while the pane is hidden.
     if (!root.offsetParent) return;
-    if (playing) {
-      // One step per drawn frame at most, so a slow renderer plays slower instead of skipping steps.
-      const interval = 1000 / fps;
-      owed = Math.min(owed + elapsed, 2 * interval);
-      if (owed >= interval) {
-        owed -= interval;
-        tick();
-      }
-    }
+    if (playing) advance(Math.min(elapsed / 1000, MAX_ADVANCE) * SPEEDS[speedIndex]);
     flush();
   };
 
