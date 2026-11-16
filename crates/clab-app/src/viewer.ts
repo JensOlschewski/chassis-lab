@@ -26,6 +26,8 @@ const ICONS = {
 };
 const LOOPS = ["restart", "bounce", "once"] as const;
 const PADDING = 1.1;
+/** A click selects the body drawn within this many pixels. */
+const PICK_PX = 8;
 /** The camera sits this many scene radii from its target; the scene always fits in front of it. */
 const REACH = 4;
 
@@ -85,7 +87,7 @@ function write({ geometry }: THREE.Object3D & { geometry: THREE.BufferGeometry }
 }
 
 /** Draws `frames` into `parent` with playback controls and mouse orbit, pan and zoom. */
-export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
+export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?: (body: number | null) => void): Viewer {
   const last = frames.length - 1;
   /** The fastest playback shows the whole run in a second, but never less than 100 fps. */
   const maxFps = Math.max(FPS.floor, frames.length);
@@ -148,6 +150,19 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   const bodyLines = segmentLines(
     frames[0].bodies.flatMap(({ segments }, body) => segments.map(() => new THREE.Color(colorFor(body + 1)))),
   );
+  // Body `b` owns segments `first[b]` up to `first[b + 1]` of `bodyLines`.
+  const first = frames[0].bodies.reduce((starts, { segments }) => [...starts, starts[starts.length - 1] + segments.length], [0]);
+  let selected = -1;
+  function paintBodies() {
+    const colors = bodyLines.geometry.getAttribute("color") as THREE.BufferAttribute;
+    const mark = new THREE.Color(getComputedStyle(root).color);
+    frames[0].bodies.forEach((_, body) => {
+      const color = body === selected ? mark : new THREE.Color(colorFor(body + 1));
+      for (let vertex = 2 * first[body]; vertex < 2 * first[body + 1]; vertex++) colors.setXYZ(vertex, color.r, color.g, color.b);
+    });
+    colors.needsUpdate = true;
+    dirty = true;
+  }
   const jointLines = segmentLines(frames[0].joints.map(() => new THREE.Color()));
   const origins = new THREE.Points(
     new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(frames[0].bodies.length * 3), 3)),
@@ -162,7 +177,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     const colors = jointLines.geometry.getAttribute("color") as THREE.BufferAttribute;
     for (let i = 0; i < colors.count; i++) colors.setXYZ(i, rgb[0], rgb[1], rgb[2]);
     colors.needsUpdate = true;
-    dirty = true;
+    paintBodies();
   }
   dark.addEventListener("change", applyTheme);
   applyTheme();
@@ -234,7 +249,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     timeline.style.setProperty("--p", String(last ? index / last : 0));
     status.textContent = `${pad(index + 1, digits)}/${frames.length}  t=${pad(frames[index].time.toFixed(3), timeWidth)}`;
     fpsText.textContent = `fps=${pad(fps, fpsDigits)}`;
-    modeText.textContent = `loop=${LOOPS[loop].padEnd(7, "\u2007")}  labels=${showLabels ? "on\u2007" : "off"}`;
+    modeText.textContent = `loop=${LOOPS[loop].padEnd(7, "\u2007")}  labels=${showLabels ? "on\u2007" : "off"}  body=${selected < 0 ? "none" : frames[0].bodies[selected].label}`;
     const position = positionOf(fps);
     speedSlider.value = String(position);
     speedSlider.style.setProperty("--p", String(position / 100));
@@ -351,6 +366,38 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   root.addEventListener("click", (event) => {
     root.focus();
     flush();
+  });
+  /** Selects the body whose segment or origin is within `PICK_PX` of the click, or none. */
+  function pick(x: number, y: number) {
+    const { left, top, width, height } = renderer.domElement.getBoundingClientRect();
+    const screen = (p: Vec3) => {
+      const v = new THREE.Vector3(...p).project(camera);
+      return [((v.x + 1) / 2) * width, ((1 - v.y) / 2) * height];
+    };
+    let [best, nearest] = [-1, PICK_PX];
+    frames[index].bodies.forEach(({ origin, segments }, body) => {
+      for (const [a, b] of segments.length ? segments : [[origin, origin] as [Vec3, Vec3]]) {
+        const [ax, ay] = screen(a);
+        const [bx, by] = screen(b);
+        const [dx, dy] = [bx - ax, by - ay];
+        const along = dx || dy ? Math.min(Math.max(((x - left - ax) * dx + (y - top - ay) * dy) / (dx * dx + dy * dy), 0), 1) : 0;
+        const distance = Math.hypot(x - left - ax - along * dx, y - top - ay - along * dy);
+        if (distance < nearest) [best, nearest] = [body, distance];
+      }
+    });
+    selected = best === selected ? -1 : best;
+    paintBodies();
+    onSelect?.(selected < 0 ? null : selected);
+    sync();
+  }
+  let down: [number, number] | null = null;
+  renderer.domElement.addEventListener("pointerdown", ({ clientX, clientY }) => (down = [clientX, clientY]));
+  renderer.domElement.addEventListener("pointerup", ({ clientX, clientY }) => {
+    if (down && Math.hypot(clientX - down[0], clientY - down[1]) < 4) {
+      pick(clientX, clientY);
+      flush();
+    }
+    down = null;
   });
   speedSlider.addEventListener("input", () => {
     fps = fpsAt(Number(speedSlider.value));
