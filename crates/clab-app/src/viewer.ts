@@ -176,8 +176,10 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   highlight.renderOrder = 1;
   highlight.visible = false;
   // A segment seen end-on has no length to draw, so the ends are marked with dots.
+  // The buffer fits the largest body; only the selected body's ends are in the draw range.
+  const mostEnds = 2 * Math.max(...frames[0].bodies.map(({ segments }) => segments.length));
   const highlightEnds = new THREE.Points(
-    new THREE.BufferGeometry(),
+    new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(mostEnds * 3), 3)),
     new THREE.PointsMaterial({ color: HIGHLIGHT, size: 8, sizeAttenuation: false, depthTest: false }),
   );
   highlightEnds.frustumCulled = false;
@@ -290,7 +292,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     if (selected >= 0) {
       const ends = frame.bodies[selected].segments.flat();
       highlight.geometry.setPositions(ends.flat());
-      highlightEnds.geometry.setFromPoints(ends.map((end) => new THREE.Vector3(...end)));
+      write(highlightEnds, ends);
+      highlightEnds.geometry.setDrawRange(0, ends.length);
     }
     renderer.setViewport(0, 0, stage.clientWidth, stage.clientHeight);
     renderer.clear();
