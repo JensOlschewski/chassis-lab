@@ -17,10 +17,9 @@ export interface Viewer {
 }
 
 /** The terminal viewer's playback rules, so both viewers feel the same. */
-const FPS = { min: 1, max: 100, initial: 10 };
-/** The speed slider is logarithmic, so the middle is 10 fps and slow speeds keep fine control. */
-const fpsAt = (position: number) => Math.round(FPS.min * (FPS.max / FPS.min) ** (position / 100));
-const positionOf = (fps: number) => (100 * Math.log(fps / FPS.min)) / Math.log(FPS.max / FPS.min);
+const FPS = { min: 1, initial: 10, floor: 100 };
+/** The speed slider is logarithmic, so slow speeds keep fine control. */
+
 const ICONS = {
   play: '<svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor"><path d="M2 1l9 5-9 5z"/></svg>',
   pause: '<svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor"><path d="M2 1h3v10H2zM7 1h3v10H7z"/></svg>',
@@ -88,6 +87,10 @@ function write({ geometry }: THREE.Object3D & { geometry: THREE.BufferGeometry }
 /** Draws `frames` into `parent` with playback controls and mouse orbit, pan and zoom. */
 export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   const last = frames.length - 1;
+  /** The fastest playback shows the whole run in a second, but never less than 100 fps. */
+  const maxFps = Math.max(FPS.floor, frames.length);
+  const fpsAt = (position: number) => Math.round(FPS.min * (maxFps / FPS.min) ** (position / 100));
+  const positionOf = (value: number) => (100 * Math.log(value / FPS.min)) / Math.log(maxFps / FPS.min);
   let index = 0;
   let playing = last > 0;
   let fps = FPS.initial;
