@@ -247,11 +247,20 @@ fn find_solver() -> Result<PathBuf> {
     }
     std::env::current_exe()
         .ok()
-        .and_then(|exe| Some(exe.parent()?.join(SOLVER_NAME)))
-        .filter(|path| path.is_file())
+        .and_then(|exe| solver_in(exe.parent()?))
         .with_context(|| {
             format!("solver not found: install {SOLVER_NAME} next to clab or set {SOLVER_ENV}")
         })
+}
+
+/// MATLAB Compiler builds an app bundle on macOS, so look inside it too.
+fn solver_in(dir: &Path) -> Option<PathBuf> {
+    [
+        dir.join(SOLVER_NAME),
+        dir.join("mks_solver.app/Contents/MacOS/mks_solver"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
 }
 
 fn find_runtime() -> Result<PathBuf> {
@@ -304,4 +313,19 @@ fn library_path(runtime: &Path) -> Result<Option<(&'static str, OsString)>> {
     let mut paths: Vec<PathBuf> = dirs.iter().map(|dir| runtime.join(dir)).collect();
     paths.extend(std::env::var_os(var).iter().flat_map(std::env::split_paths));
     Ok(Some((var, std::env::join_paths(paths)?)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_solver_in_macos_app_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(solver_in(dir.path()), None);
+        let inner = dir.path().join("mks_solver.app/Contents/MacOS");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(inner.join("mks_solver"), "").unwrap();
+        assert_eq!(solver_in(dir.path()), Some(inner.join("mks_solver")));
+    }
 }
