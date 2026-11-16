@@ -107,7 +107,7 @@ function write({ geometry }: THREE.Object3D & { geometry: THREE.BufferGeometry }
 }
 
 /** Draws `frames` into `parent` with playback controls and mouse orbit, pan and zoom. */
-export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?: (body: number | null) => void, onStep?: (index: number) => void): Viewer {
+export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?: (body: number | null) => void): Viewer {
   const last = frames.length - 1;
   /** The fastest playback shows the whole run in a second, but never less than 100 fps. */
   const maxFps = Math.max(FPS.floor, frames.length);
@@ -293,7 +293,6 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   function sync() {
     timeline.value = String(index);
     timeline.style.setProperty("--p", String(last ? index / last : 0));
-    onStep?.(index);
     status.textContent = `${pad(index + 1, digits)}/${frames.length}  t=${pad(frames[index].time.toFixed(3), timeWidth)}`;
     fpsText.textContent = `fps=${pad(fps, fpsDigits)}`;
     modeText.textContent = `loop=${LOOPS[loop].padEnd(7, "\u2007")}  labels=${showLabels ? "on\u2007" : "off"}  hidden=${hidden.size}`;
