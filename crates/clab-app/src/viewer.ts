@@ -291,6 +291,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     highlightEnds.visible = selected >= 0;
     if (selected >= 0) {
       const ends = frame.bodies[selected].segments.flat();
+      // setPositions makes new buffers; disposing first drops the old GPU ones, which otherwise draw stale data.
+      highlight.geometry.dispose();
       highlight.geometry.setPositions(ends.flat());
       write(highlightEnds, ends);
       highlightEnds.geometry.setDrawRange(0, ends.length);
