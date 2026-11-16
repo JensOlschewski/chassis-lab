@@ -169,7 +169,6 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.addEventListener("change", () => {
     dirty = true;
-    flush();
   });
 
   const scene = new THREE.Scene();
@@ -269,11 +268,6 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   function look(view: number) {
     target(controls.target.clone(), new THREE.Vector3(...VIEWS[view].direction));
     viewButtons.forEach((node, i) => node.setAttribute("aria-pressed", String(i === view)));
-    // A draw inside the click may not be shown while paused; draw again on the next frame.
-    requestAnimationFrame(() => {
-      dirty = true;
-      flush();
-    });
   }
 
   function fit(everything: boolean) {
@@ -352,7 +346,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     }
   }
 
-  /** Draws at once if anything changed; user input calls it so it never waits for the next frame. */
+  /** Draws if anything changed. Only the animation frame calls it: a draw made inside an input handler is not always shown. */
   function flush() {
     if (!dirty || !root.offsetParent) return;
     dirty = false;
@@ -461,12 +455,10 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     if (!action) return;
     event.preventDefault();
     action();
-    flush();
   }
   // Keys work after a click anywhere in the viewer, buttons included.
   root.addEventListener("click", (event) => {
     root.focus();
-    flush();
   });
   /** Selects the body whose segment or origin is within `PICK_PX` of the click, or none. */
   function pick(x: number, y: number) {
@@ -497,20 +489,17 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   renderer.domElement.addEventListener("pointerup", ({ clientX, clientY }) => {
     if (down && Math.hypot(clientX - down[0], clientY - down[1]) < 4) {
       pick(clientX, clientY);
-      flush();
     }
     down = null;
   });
   speedSlider.addEventListener("input", () => {
     fps = fpsAt(Number(speedSlider.value));
     sync();
-    flush();
   });
   timeline.addEventListener("input", () => {
     playing = false;
     index = Number(timeline.value);
     sync();
-    flush();
   });
 
   const observer = new ResizeObserver(resize);
