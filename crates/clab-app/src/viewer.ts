@@ -17,7 +17,7 @@ export interface Viewer {
 }
 
 /** The terminal viewer's playback rules, so both viewers feel the same. */
-const FPS_STEPS = [1, 2, 5, 10, 15, 20, 30, 60, 100];
+const FPS_STEPS = [1, 2, 5, 10, 20, 50, 100];
 const DEFAULT_FPS = 10;
 const ICONS = {
   play: '<svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor"><path d="M2 1l9 5-9 5z"/></svg>',
@@ -103,13 +103,14 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   timeline.max = String(last);
   timeline.ariaLabel = "Time step";
   const status = element("span", "", "viewer-status");
-  const speedButtons = element("span", "", "viewer-speed");
-  speedButtons.append(
-    button("−", "Slower (-)", () => speed(-1)),
-    button("+", "Faster (+)", () => speed(1)),
-  );
+  const speedSlider = document.createElement("input");
+  speedSlider.type = "range";
+  speedSlider.className = "viewer-speed";
+  speedSlider.max = String(FPS_STEPS.length - 1);
+  speedSlider.ariaLabel = "Frames per second";
+  speedSlider.title = "Playback speed (+/- keys)";
   const readout = element("span", "", "viewer-readout");
-  readout.append(status, speedButtons);
+  readout.append(status, speedSlider);
   const playButton = button("", "Play/pause (Space)", () => togglePlay());
   const loopButton = button("", "Loop mode (l)", () => cycleLoop());
   const labelsButton = button("Labels", "Show labels (v)", () => toggleLabels());
@@ -229,6 +230,9 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     timeline.value = String(index);
     timeline.style.setProperty("--p", String(last ? index / last : 0));
     status.textContent = `${index + 1}/${frames.length}  t=${frames[index].time.toFixed(3)} fps=${fps}`;
+    const rung = FPS_STEPS.indexOf(fps);
+    speedSlider.value = String(rung);
+    speedSlider.style.setProperty("--p", String(rung / (FPS_STEPS.length - 1)));
     playButton.innerHTML = playing ? ICONS.pause : ICONS.play;
     loopButton.textContent = `loop: ${LOOPS[loop]}`;
     labelsButton.ariaPressed = String(showLabels);
@@ -342,6 +346,11 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   // Keys work after a click anywhere in the viewer, buttons included.
   root.addEventListener("click", (event) => {
     root.focus();
+    flush();
+  });
+  speedSlider.addEventListener("input", () => {
+    fps = FPS_STEPS[Number(speedSlider.value)];
+    sync();
     flush();
   });
   timeline.addEventListener("input", () => {
