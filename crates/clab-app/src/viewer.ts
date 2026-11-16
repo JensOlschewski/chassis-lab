@@ -261,6 +261,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     camera.position.copy(at).addScaledVector(direction.normalize(), REACH * all.radius);
     camera.near = 0.001;
     camera.far = 2 * REACH * all.radius;
+    camera.updateProjectionMatrix();
     controls.update();
     dirty = true;
   };
@@ -441,13 +442,16 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     ...Object.fromEntries(VIEWS.map(({ key }, view) => [key, () => look(view)])),
   };
 
-  // Keys act on the page, not just on a focused viewer, while it is on screen.
+  // Keys act while the pointer is over the viewer or it has focus, even if a field outside has not been left.
+  let hovered = false;
+  root.addEventListener("pointerenter", () => (hovered = true));
+  root.addEventListener("pointerleave", () => (hovered = false));
   document.addEventListener("keydown", onKey);
   function onKey(event: KeyboardEvent) {
     if (!root.isConnected) return document.removeEventListener("keydown", onKey);
     // Fields, sliders and buttons keep their own keys; a hidden viewer takes none.
     const own = event.target instanceof Element && event.target.closest("input, textarea, select, button, [contenteditable]");
-    if (own || root.offsetParent === null || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (own || root.offsetParent === null || !(hovered || root.contains(document.activeElement)) || event.ctrlKey || event.metaKey || event.altKey) return;
     const action = KEYS[event.key];
     if (!action) return;
     event.preventDefault();
