@@ -105,7 +105,12 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   speedInput.ariaLabel = "Frames per second";
   speedInput.title = "Frames per second (+/- changes it)";
   const speedLabel = element("label", "", "viewer-speed");
-  speedLabel.append(speedInput, "fps");
+  speedLabel.append(
+    "fps=",
+    speedInput,
+    button("−", "Slower (-)", () => speed(-FPS.step)),
+    button("+", "Faster (+)", () => speed(FPS.step)),
+  );
   const playButton = button("", "Play/pause (Space)", () => togglePlay());
   const loopButton = button("", "Loop mode (l)", () => cycleLoop());
   const labelsButton = button("Labels", "Show labels (v)", () => toggleLabels());
@@ -115,11 +120,11 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     playButton,
     timeline,
     status,
+    speedLabel,
     ...viewButtons,
     button("Fit", "Fit this step (f)", () => fit(false)),
     button("Fit all", "Fit all steps (F)", () => fit(true)),
     labelsButton,
-    speedLabel,
     loopButton,
   );
   root.append(stage, bar, element("small", HINT, "viewer-hint"));
