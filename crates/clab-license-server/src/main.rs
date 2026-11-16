@@ -29,7 +29,7 @@ enum Command {
         #[arg(long, default_value = "127.0.0.1:8080")]
         listen: String,
         /// How long a token stays valid without a new online check.
-        #[arg(long, default_value_t = 7)]
+        #[arg(long, default_value_t = 1)]
         grace_days: u64,
         /// Pass `false` to stop new installations from registering; existing ones keep working.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
@@ -54,6 +54,30 @@ enum Command {
     Delete { id: i64 },
     /// Show all licenses.
     List,
+}
+
+/// Unix seconds as `YYYY-MM-DD HH:MM` in UTC (Hinnant's civil-from-days).
+fn utc(seconds: i64) -> String {
+    let (days, rest) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}",
+        rest / 3_600,
+        rest % 3_600 / 60
+    )
 }
 
 fn key_path(data: &Path) -> PathBuf {
@@ -176,26 +200,47 @@ async fn main() -> Result<()> {
             println!("deleted license {id} ({person})");
         }
         Command::List => {
-            let now = http::now() as i64;
-            let ago = |at: Option<i64>| {
-                at.map_or("-".to_owned(), |at| {
-                    format!("{}d ago", (now - at).max(0) / 86_400)
+            let rows: Vec<[String; 8]> = open(&data, 0)?
+                .list()?
+                .into_iter()
+                .map(|license| {
+                    let or_dash = |text: Option<String>| text.unwrap_or_else(|| "-".to_owned());
+                    [
+                        license.id.to_string(),
+                        license.person,
+                        if license.revoked { "revoked" } else { "active" }.to_owned(),
+                        if license.auto { "auto" } else { "manual" }.to_owned(),
+                        or_dash(license.hostname),
+                        or_dash(license.last_ip),
+                        or_dash(license.last_seen.map(utc)),
+                        or_dash(license.version),
+                    ]
                 })
-            };
-            for license in open(&data, 0)?.list()? {
-                println!(
-                    "{:>4}  {:<24} {:<8} {:<6} {:<20} {:<15} {:<8} {}",
-                    license.id,
-                    license.person,
-                    if license.revoked { "revoked" } else { "active" },
-                    if license.auto { "auto" } else { "manual" },
-                    license.hostname.as_deref().unwrap_or("-"),
-                    license.last_ip.as_deref().unwrap_or("-"),
-                    ago(license.last_seen),
-                    license.version.as_deref().unwrap_or("-"),
-                );
+                .collect();
+            let widths: [usize; 8] = std::array::from_fn(|column| {
+                rows.iter().map(|row| row[column].len()).max().unwrap_or(0)
+            });
+            for row in &rows {
+                let cells: Vec<String> = row
+                    .iter()
+                    .zip(widths)
+                    .map(|(cell, width)| format!("{cell:<width$}"))
+                    .collect();
+                println!("{}", cells.join("  ").trim_end());
             }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utc;
+
+    #[test]
+    fn formats_unix_seconds_as_utc() {
+        assert_eq!(utc(0), "1970-01-01 00:00");
+        assert_eq!(utc(1_709_209_140), "2024-02-29 12:19");
+        assert_eq!(utc(1_794_830_400), "2026-11-16 12:00");
+    }
 }

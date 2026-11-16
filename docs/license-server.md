@@ -14,7 +14,7 @@ Two ways in:
 - **Manual:** admin runs `create --person`. User binds key with `activate`.
 
 - Server answers with signed token. `valid_until` = now + grace (`--grace-days`,
-  default 7). Client asks server on every run. Server unreachable: client runs
+  default 1). Client asks server on every run. Server unreachable: client runs
   until `valid_until`, then fails. Each online run resets the clock.
 
 - `revoke` bites at the client's next online check. Offline client notices only
@@ -37,7 +37,7 @@ registration accepted or closed, version. No licenses, names or counts.
 
 These commands are gated with license check.
 
-`clab convert|analyze|compare|inspect`
+`clab convert|analyze|compare|inspect|solve`
 (`crates/clab-cli/src/license.rs`). `--help`, `--version`, `clab license ...`
 need none.
 
@@ -58,7 +58,7 @@ Run on server:
 ```sh
 alias licenses='docker exec clab-license clab-license-server --data /data'
 licenses create --person "Ada Lovelace"   # manual license; prints key once
-licenses list                             # person, state, auto/manual, host, IP, last seen, version
+licenses list                             # person, state, auto/manual, host, IP, last seen (UTC date and time), version
 licenses name 3 "Ada Lovelace"            # name an automatic license
 licenses revoke 3                         # stop it, block its machine
 licenses unrevoke 3                       # undo revoke: license works, machine unblocked
