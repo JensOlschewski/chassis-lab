@@ -113,24 +113,23 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   timeline.max = String(last);
   timeline.ariaLabel = "Time step";
   const status = element("span", "", "viewer-status");
+  const fpsText = element("span", "", "viewer-status");
+  const modeText = element("span", "", "viewer-status");
   const speedSlider = document.createElement("input");
   speedSlider.type = "range";
   speedSlider.className = "viewer-speed";
   speedSlider.max = "100";
   speedSlider.ariaLabel = "Frames per second";
   speedSlider.title = "Frames per second (+/- keys)";
-  const readout = element("span", "", "viewer-readout");
-  readout.append(status, speedSlider);
   const playButton = button("", "Play/pause (Space)", () => togglePlay());
   const viewButtons = VIEWS.map(({ name, key }, view) => button(name, `${name} view (${key})`, () => look(view)));
-  const bar = element("div", "", "viewer-bar");
-  bar.append(
-    playButton,
-    timeline,
-    readout,
-    ...viewButtons,
-  );
-  root.append(stage, bar, element("small", HINT, "viewer-hint"));
+  const playbackBar = element("div", "", "viewer-bar");
+  playbackBar.append(playButton, timeline, status);
+  const viewBar = element("div", "", "viewer-bar");
+  const views = element("span", "", "viewer-views");
+  views.append(...viewButtons);
+  viewBar.append(fpsText, speedSlider, modeText, views);
+  root.append(stage, playbackBar, viewBar, element("small", HINT, "viewer-hint"));
   parent.replaceChildren(root);
 
   // No multisampling: it is what makes software-rendered WebGL (WSL) slow, and thin lines gain little.
@@ -233,13 +232,9 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   function sync() {
     timeline.value = String(index);
     timeline.style.setProperty("--p", String(last ? index / last : 0));
-    status.textContent = [
-      `${pad(index + 1, digits)}/${frames.length}`,
-      `t=${pad(frames[index].time.toFixed(3), timeWidth)}`,
-      `fps=${pad(fps, fpsDigits)}`,
-      `loop=${LOOPS[loop].padEnd(7, "\u2007")}`,
-      `labels=${showLabels ? "on\u2007" : "off"}`,
-    ].join("  ");
+    status.textContent = `${pad(index + 1, digits)}/${frames.length}  t=${pad(frames[index].time.toFixed(3), timeWidth)}`;
+    fpsText.textContent = `fps=${pad(fps, fpsDigits)}`;
+    modeText.textContent = `loop=${LOOPS[loop].padEnd(7, "\u2007")}  labels=${showLabels ? "on\u2007" : "off"}`;
     const position = positionOf(fps);
     speedSlider.value = String(position);
     speedSlider.style.setProperty("--p", String(position / 100));
