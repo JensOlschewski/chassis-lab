@@ -139,8 +139,14 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     new THREE.PointsMaterial({ size: 6, sizeAttenuation: false, color: style.color }),
   );
   origins.frustumCulled = false;
-  const triad = new THREE.AxesHelper(1);
-  scene.add(bodyLines, jointLines, origins, triad);
+  scene.add(bodyLines, jointLines, origins);
+
+  // The axes live in their own scene, drawn in a corner with the main camera's orientation.
+  const TRIAD_SIZE = 90;
+  const triadScene = new THREE.Scene().add(new THREE.AxesHelper(1));
+  const triadCamera = new THREE.OrthographicCamera(-1.3, 1.3, 1.3, -1.3, 0.1, 10);
+  triadCamera.up.copy(camera.up);
+  renderer.autoClear = false;
 
   const labelLayer = element("div", "", "viewer-labels");
   stage.append(labelLayer);
@@ -187,6 +193,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
 
   function sync() {
     timeline.value = String(index);
+    timeline.style.setProperty("--p", String(last ? index / last : 0));
     status.textContent = `${index + 1}/${frames.length}  t=${frames[index].time.toFixed(3)}`;
     playButton.textContent = playing ? "⏸" : "▶";
     speedText.textContent = `${fps} fps`;
@@ -200,9 +207,14 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     write(bodyLines, frame.bodies.flatMap(({ segments }) => segments.flat()));
     write(jointLines, frame.joints.flatMap(({ i, j }) => [i, j]));
     write(origins, frame.bodies.map(({ origin }) => origin));
-    triad.scale.setScalar(all.radius / 4);
-    triad.position.copy(all.center).addScaledVector(new THREE.Vector3(1, 1, 1), -all.radius);
+    renderer.setViewport(0, 0, stage.clientWidth, stage.clientHeight);
+    renderer.clear();
     renderer.render(scene, camera);
+    triadCamera.position.copy(camera.position).sub(controls.target).setLength(5);
+    triadCamera.lookAt(0, 0, 0);
+    renderer.clearDepth();
+    renderer.setViewport(4, 4, TRIAD_SIZE, TRIAD_SIZE);
+    renderer.render(triadScene, triadCamera);
     labelLayer.hidden = !showLabels;
     if (!showLabels) return;
     const { clientWidth: width, clientHeight: height } = stage;
