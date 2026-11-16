@@ -305,7 +305,8 @@ fn user_runtime_dir() -> Option<PathBuf> {
     let base = if cfg!(windows) {
         env("LOCALAPPDATA")
     } else if cfg!(target_os = "macos") {
-        env("HOME").map(|home| home.join("Library/Application Support"))
+        // Not "Application Support": the macOS installer silently installs nothing into a path with a space.
+        env("HOME").map(|home| home.join("Library"))
     } else {
         env("XDG_DATA_HOME").or_else(|| env("HOME").map(|home| home.join(".local/share")))
     };
@@ -325,6 +326,10 @@ fn install_runtime() -> Result<()> {
         "installing MATLAB Runtime {RUNTIME_RELEASE} into {} (downloads about 1.5 GB)",
         dir.display()
     );
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("cannot create {}", parent.display()))?;
+    }
     let status = Command::new(&installer)
         .args([
             "-mode",
@@ -339,7 +344,13 @@ fn install_runtime() -> Result<()> {
     if !status.success() {
         bail!("MATLAB Runtime installer failed: {status}");
     }
-    find_runtime().map(|_| ())
+    if !dir.join(RUNTIME_RELEASE).is_dir() {
+        bail!(
+            "installer finished but installed nothing: {} is missing",
+            dir.join(RUNTIME_RELEASE).display()
+        );
+    }
+    Ok(())
 }
 
 fn find_installer() -> Result<PathBuf> {
