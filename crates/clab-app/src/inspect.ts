@@ -82,10 +82,6 @@ export function setupInspect() {
   let solution: Signals | null = null;
   let viewer: Viewer | null = null;
   let scene: ViewFrame[] | null = null;
-  const bodyRoot = document.querySelector<HTMLElement>("#inspect-body-plot")!;
-  let bodyToken = 0;
-  let bodyReady = false;
-  let cursorIndex = 0;
 
   const show = (message: string, ok = true) => {
     status.textContent = message;
@@ -238,41 +234,11 @@ export function setupInspect() {
   async function drawScene(frames: ViewFrame[] | null): Promise<void> {
     viewer?.destroy();
     viewer = null;
-    plotBody(null);
     scene = frames;
     viewRoot.hidden = !frames || !viewShown();
     if (viewRoot.hidden) return;
     const { createViewer } = await import("./viewer");
-    viewer = createViewer(viewRoot, frames!, plotBody, moveCursor);
-  }
-
-  /** Velocities of the selected body, with a cursor that follows the viewer's time step. */
-  async function plotBody(body: number | null): Promise<void> {
-    const token = ++bodyToken;
-    bodyReady = false;
-    bodyRoot.hidden = true;
-    const label = body === null ? null : scene?.[0].bodies[body].label;
-    if (!label || !solution) return;
-    const has = (name: string) => solution!.signals.some((signal) => signal.name === name);
-    const curves: Curve[] = (["vx", "vy", "vz", "wx", "wy", "wz"] as const)
-      .map((component, index) => ({ x: AXIS, y: `${label}.${component}`, panel: index < 3 ? 1 : 2, color: colorFor(index) }))
-      .filter((curve) => has(curve.y));
-    if (!curves.length) return;
-    bodyRoot.hidden = false;
-    await drawChart(bodyRoot, solution, curves, undefined);
-    if (token !== bodyToken) return;
-    bodyReady = true;
-    moveCursor(cursorIndex);
-  }
-
-  async function moveCursor(index: number): Promise<void> {
-    cursorIndex = index;
-    if (!bodyReady || !solution) return;
-    const x = solution.axis[index];
-    const { default: Plotly } = await import("plotly.js-basic-dist-min");
-    if (!bodyReady) return;
-    const line = { color: getComputedStyle(document.body).color, width: 1, dash: "dot" };
-    await Plotly.relayout(bodyRoot, { shapes: [{ type: "line", xref: "x", yref: "paper", x0: x, x1: x, y0: 0, y1: 1, line }] });
+    viewer = createViewer(viewRoot, frames!);
   }
 
   viewOn.addEventListener("click", () => {
