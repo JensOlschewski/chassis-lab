@@ -34,7 +34,7 @@ const VIEWS = [
   { key: "4", name: "Iso", direction: [-1, -1, 1] },
 ] as const;
 
-const HINT = "Space play · ←/→ step · +/- or type speed · l loop · v labels · f/F fit · 1–4 view · drag orbit · right-drag pan · wheel zoom";
+const HINT = "Space play · ←/→ step · +/- speed · l loop · v labels · f/F fit · 1–4 view · drag orbit · right-drag pan · wheel zoom";
 
 /** Every position a frame draws. */
 function* positions({ bodies, joints }: ViewFrame): Generator<Vec3> {
@@ -98,16 +98,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   timeline.max = String(last);
   timeline.ariaLabel = "Time step";
   const status = element("span", "", "viewer-status");
-  const speedInput = document.createElement("input");
-  speedInput.type = "number";
-  speedInput.min = String(FPS.min);
-  speedInput.max = String(FPS.max);
-  speedInput.ariaLabel = "Frames per second";
-  speedInput.title = "Frames per second (+/- changes it)";
-  const speedLabel = element("label", "", "viewer-speed");
-  speedLabel.append(
-    "fps=",
-    speedInput,
+  const speedButtons = element("span", "", "viewer-speed");
+  speedButtons.append(
     button("−", "Slower (-)", () => speed(-FPS.step)),
     button("+", "Faster (+)", () => speed(FPS.step)),
   );
@@ -120,7 +112,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     playButton,
     timeline,
     status,
-    speedLabel,
+    speedButtons,
     ...viewButtons,
     button("Fit", "Fit this step (f)", () => fit(false)),
     button("Fit all", "Fit all steps (F)", () => fit(true)),
@@ -230,9 +222,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   function sync() {
     timeline.value = String(index);
     timeline.style.setProperty("--p", String(last ? index / last : 0));
-    status.textContent = `${index + 1}/${frames.length}  t=${frames[index].time.toFixed(3)}`;
+    status.textContent = `${index + 1}/${frames.length}  t=${frames[index].time.toFixed(3)} fps=${fps}`;
     playButton.textContent = playing ? "⏸" : "▶";
-    if (document.activeElement !== speedInput) speedInput.value = String(fps);
     loopButton.textContent = `loop: ${LOOPS[loop]}`;
     labelsButton.ariaPressed = String(showLabels);
     dirty = true;
@@ -300,11 +291,10 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     sync();
   }
 
-  function setSpeed(value: number) {
-    if (Number.isFinite(value)) fps = Math.min(Math.max(Math.round(value), FPS.min), FPS.max);
+  function speed(by: number) {
+    fps = Math.min(Math.max(fps + by, FPS.min), FPS.max);
     sync();
   }
-  const speed = (by: number) => setSpeed(fps + by);
 
   function cycleLoop() {
     [loop, direction] = [(loop + 1) % LOOPS.length, 1];
@@ -344,7 +334,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   });
   // Keys work after a click anywhere in the viewer, buttons included.
   root.addEventListener("click", (event) => {
-    if (event.target !== speedInput) root.focus();
+    root.focus();
     flush();
   });
   timeline.addEventListener("input", () => {
@@ -353,11 +343,6 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     sync();
     flush();
   });
-  speedInput.addEventListener("change", () => setSpeed(speedInput.valueAsNumber));
-  speedInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === "Escape") root.focus();
-  });
-  speedInput.addEventListener("blur", sync);
 
   const observer = new ResizeObserver(resize);
   observer.observe(stage);
