@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::solution;
@@ -31,21 +31,21 @@ impl Projection {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ViewFrame {
     pub time: f64,
     pub bodies: Vec<SceneBody>,
     pub joints: Vec<SceneJoint>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SceneBody {
     pub label: String,
     pub origin: Vec3,
     pub segments: Vec<[Vec3; 2]>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SceneJoint {
     pub label: String,
     pub i: Vec3,

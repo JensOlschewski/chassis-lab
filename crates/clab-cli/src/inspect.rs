@@ -74,8 +74,8 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
     }
     let kind = detect(&file)?;
     if let Kind::Solution(solution) = &kind {
-        if args.list || args.r#match.is_some() || !args.signal.is_empty() {
-            bail!("--list, --match and --signal apply to HDF5 files, not solver solutions");
+        if args.r#match.is_some() || !args.signal.is_empty() {
+            bail!("--match and --signal apply to HDF5 files, not solver solutions");
         }
         return inspect_solution(solution, args.json, args.view);
     }
@@ -103,18 +103,29 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
 }
 
 fn inspect_solution(solution: &Value, json: bool, view: Option<Option<PathBuf>>) -> Result<()> {
-    if json && view.is_some() {
-        bail!("--json and --view cannot be combined");
-    }
-    if let Some(layout) = view {
-        let layout = layout.map(|path| ViewLayout::load(&path)).transpose()?;
-        return view_solution(solution, layout.as_ref());
-    }
-    let summary = solution::render_summary(solution)?;
+    let layout = match &view {
+        Some(Some(path)) => Some(ViewLayout::load(path)?),
+        _ => None,
+    };
     if json {
-        println!("{}", json!({ "kind": "solution", "summary": summary }));
+        // The layout is picked with `--view FILE`; frames exist only for body data.
+        let frames = (view.is_some() || solution.get("bodies").is_some())
+            .then(|| clab_core::view::frames_from_solution(solution, layout.as_ref()))
+            .transpose()?;
+        let summary = solution::render_summary(solution)?;
+        println!(
+            "{}",
+            json!({
+                "kind": "solution",
+                "summary": summary,
+                "signals": solution::plot_signals(solution)?,
+                "frames": frames,
+            })
+        );
+    } else if view.is_some() {
+        view_solution(solution, layout.as_ref())?;
     } else {
-        print!("{summary}");
+        print!("{}", solution::render_summary(solution)?);
     }
     Ok(())
 }

@@ -44,7 +44,7 @@ function createStep(label: string) {
   };
 }
 
-export function setupSolve() {
+export function setupSolve(openInInspect: (path: string) => void) {
   const form = document.querySelector<HTMLFormElement>("#solve-form")!;
   const designFields = document.querySelector<HTMLElement>("#solve-design")!;
   const designNote = document.querySelector<HTMLElement>("#solve-design-note")!;
@@ -55,6 +55,7 @@ export function setupSolve() {
   const summary = document.querySelector<HTMLElement>("#solve-summary")!;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
   const stop = document.querySelector<HTMLButtonElement>("#solve-stop")!;
+  const open = document.querySelector<HTMLButtonElement>("#solve-open")!;
 
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement;
 
@@ -191,6 +192,7 @@ export function setupSolve() {
     setBusy(true);
     stop.hidden = false;
     summary.hidden = true;
+    open.hidden = true;
     show("");
     const solve = createStep("Solve motion");
     const write = createStep("Write solution");
@@ -233,5 +235,7 @@ export function setupSolve() {
       ]),
     );
     summary.hidden = false;
+    open.onclick = () => openInInspect(output);
+    open.hidden = false;
   };
 }

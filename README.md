@@ -146,8 +146,10 @@ clab inspect reports/solution.json --view [VIEW_FILE]
 - `--view [FILE]` show a tui solution viewer, matlab soltion file needed and
   needs a solution made with `--include bodies` (`connectors` too if joints are
   drawn).
-- `--json` prints `{"kind": "solution", "summary": …}`.
-- `--list`, `--match` and `--signal` are for HDF5 only.
+- `--json` prints `{"kind": "solution", "summary", "signals", "frames"}`: the
+  text summary, the body velocities as signals to plot, and the scene frames
+  (null without `--include bodies`). `--view FILE` picks the layout for the frames.
+- `--match` and `--signal` are for HDF5 only; `--list` just prints the summary.
 - `--signal NAME` to read one signal by its listed name. Repeatable, needs
   `--json`.
 - `--json` to emit JSON for `--list`, `--match` or `--signal` (HDF5 only).
