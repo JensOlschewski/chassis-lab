@@ -200,9 +200,9 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .viewer-bar button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); }
 .viewer-axis { position: absolute; left: 0; top: 0; margin: -0.6em 0 0 -0.3em; font: 600 0.75rem sans-serif; pointer-events: none; }
 .viewer-speed { display: inline-flex; flex: none; flex-direction: row; gap: 4px; }
-.viewer-readout { display: inline-flex; flex: none; align-items: center; gap: 6px; }
+.viewer-readout { display: inline-flex; flex: none; align-items: center; gap: 4px; margin-right: 16px; }
 .viewer-bar > button:first-child { width: 2.25em; height: 2.25em; padding: 0; display: inline-grid; place-items: center; }
-.viewer-status { min-width: 24ch; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+.viewer-status { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
 .viewer-hint { display: block; margin-top: 6px; color: var(--muted); }
 .viewer:focus-visible .viewer-stage { border-color: var(--accent); }
 pre.info { display: block; font-family: var(--mono, ui-monospace, monospace); white-space: pre; overflow-x: auto; }
