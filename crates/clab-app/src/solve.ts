@@ -55,10 +55,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
   const summary = document.querySelector<HTMLElement>("#solve-summary")!;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
   const stop = document.querySelector<HTMLButtonElement>("#solve-stop")!;
-  const open = element("button", "Open in Inspect");
-  open.type = "button";
-  open.hidden = true;
-  summary.after(open);
+  const open = document.querySelector<HTMLButtonElement>("#solve-open")!;
 
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement;
 
