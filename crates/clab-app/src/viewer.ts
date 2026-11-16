@@ -34,7 +34,7 @@ const VIEWS = [
   { key: "4", name: "Iso", direction: [-1, -1, 1] },
 ] as const;
 
-const HINT = "Space play · ←/→ step · +/- speed · l loop · v labels · f/F fit · 1–4 view · drag orbit · right-drag pan · wheel zoom";
+const HINT = "Space play · ←/→ step · +/- or type speed · l loop · v labels · f/F fit · 1–4 view · drag orbit · right-drag pan · wheel zoom";
 
 /** Every position a frame draws. */
 function* positions({ bodies, joints }: ViewFrame): Generator<Vec3> {
@@ -74,7 +74,7 @@ function segmentLines(colors: THREE.Color[]) {
 
 function write({ geometry }: THREE.Object3D & { geometry: THREE.BufferGeometry }, points: Vec3[]) {
   const attribute = geometry.getAttribute("position") as THREE.BufferAttribute;
-  points.forEach(([x, y, z], index) => attribute.setXYZ(index, x, y, z));
+  for (let index = 0; index < points.length; index++) attribute.setXYZ(index, ...points[index]);
   attribute.needsUpdate = true;
 }
 
@@ -98,7 +98,14 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   timeline.max = String(last);
   timeline.ariaLabel = "Time step";
   const status = element("span", "", "viewer-status");
-  const speedText = element("span");
+  const speedInput = document.createElement("input");
+  speedInput.type = "number";
+  speedInput.min = String(FPS.min);
+  speedInput.max = String(FPS.max);
+  speedInput.ariaLabel = "Frames per second";
+  speedInput.title = "Frames per second (+/- changes it)";
+  const speedLabel = element("label", "", "viewer-speed");
+  speedLabel.append(speedInput, "fps");
   const playButton = button("", "Play/pause (Space)", () => togglePlay());
   const loopButton = button("", "Loop mode (l)", () => cycleLoop());
   const labelsButton = button("Labels", "Show labels (v)", () => toggleLabels());
@@ -112,32 +119,46 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     button("Fit", "Fit this step (f)", () => fit(false)),
     button("Fit all", "Fit all steps (F)", () => fit(true)),
     labelsButton,
-    button("−", "Slower (-)", () => speed(-FPS.step)),
-    speedText,
-    button("+", "Faster (+)", () => speed(FPS.step)),
+    speedLabel,
     loopButton,
   );
   root.append(stage, bar, element("small", HINT, "viewer-hint"));
   parent.replaceChildren(root);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(window.devicePixelRatio);
+  // No multisampling: it is what makes software-rendered WebGL (WSL) slow, and thin lines gain little.
+  const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   stage.append(renderer.domElement);
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1);
   camera.up.set(0, 0, 1);
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.addEventListener("change", () => (dirty = true));
+  controls.addEventListener("change", () => {
+    dirty = true;
+    flush();
+  });
 
-  const style = getComputedStyle(root);
   const scene = new THREE.Scene();
   const bodyLines = segmentLines(
     frames[0].bodies.flatMap(({ segments }, body) => segments.map(() => new THREE.Color(colorFor(body + 1)))),
   );
-  const jointLines = segmentLines(frames[0].joints.map(() => new THREE.Color(style.getPropertyValue("--muted").trim() || "#888")));
+  const jointLines = segmentLines(frames[0].joints.map(() => new THREE.Color()));
   const origins = new THREE.Points(
     new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(frames[0].bodies.length * 3), 3)),
-    new THREE.PointsMaterial({ size: 6, sizeAttenuation: false, color: style.color }),
+    new THREE.PointsMaterial({ size: 6, sizeAttenuation: false }),
   );
+  // The page's colors follow the system theme, so the scene's neutral colors are re-read when it changes.
+  const dark = window.matchMedia("(prefers-color-scheme: dark)");
+  function applyTheme() {
+    const style = getComputedStyle(root);
+    (origins.material as THREE.PointsMaterial).color.set(style.color);
+    const rgb = new THREE.Color(style.getPropertyValue("--muted").trim() || "#888").toArray();
+    const colors = jointLines.geometry.getAttribute("color") as THREE.BufferAttribute;
+    for (let i = 0; i < colors.count; i++) colors.setXYZ(i, rgb[0], rgb[1], rgb[2]);
+    colors.needsUpdate = true;
+    dirty = true;
+  }
+  dark.addEventListener("change", applyTheme);
+  applyTheme();
   origins.frustumCulled = false;
   scene.add(bodyLines, jointLines, origins);
 
@@ -147,6 +168,16 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   const triadCamera = new THREE.OrthographicCamera(-1.3, 1.3, 1.3, -1.3, 0.1, 10);
   triadCamera.up.copy(camera.up);
   renderer.autoClear = false;
+  const AXES = [
+    { name: "x", tip: new THREE.Vector3(1.15, 0, 0), color: "#e03131" },
+    { name: "y", tip: new THREE.Vector3(0, 1.15, 0), color: "#2f9e44" },
+    { name: "z", tip: new THREE.Vector3(0, 0, 1.15), color: "#1c7ed6" },
+  ].map((axis) => {
+    const node = element("span", axis.name, "viewer-axis");
+    node.style.color = axis.color;
+    stage.append(node);
+    return { ...axis, node };
+  });
 
   const labelLayer = element("div", "", "viewer-labels");
   stage.append(labelLayer);
@@ -196,7 +227,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     timeline.style.setProperty("--p", String(last ? index / last : 0));
     status.textContent = `${index + 1}/${frames.length}  t=${frames[index].time.toFixed(3)}`;
     playButton.textContent = playing ? "⏸" : "▶";
-    speedText.textContent = `${fps} fps`;
+    if (document.activeElement !== speedInput) speedInput.value = String(fps);
     loopButton.textContent = `loop: ${LOOPS[loop]}`;
     labelsButton.ariaPressed = String(showLabels);
     dirty = true;
@@ -215,6 +246,10 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     renderer.clearDepth();
     renderer.setViewport(4, 4, TRIAD_SIZE, TRIAD_SIZE);
     renderer.render(triadScene, triadCamera);
+    for (const { tip, node } of AXES) {
+      const { x, y } = tip.clone().project(triadCamera);
+      node.style.transform = `translate(${4 + ((x + 1) / 2) * TRIAD_SIZE}px, ${stage.clientHeight - 4 - ((y + 1) / 2) * TRIAD_SIZE}px)`;
+    }
     labelLayer.hidden = !showLabels;
     if (!showLabels) return;
     const { clientWidth: width, clientHeight: height } = stage;
@@ -222,6 +257,13 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
       const screen = new THREE.Vector3(...at(frame)).project(camera);
       node.style.transform = `translate(${((screen.x + 1) / 2) * width}px, ${((1 - screen.y) / 2) * height}px)`;
     }
+  }
+
+  /** Draws at once if anything changed; user input calls it so it never waits for the next frame. */
+  function flush() {
+    if (!dirty || !root.offsetParent) return;
+    dirty = false;
+    draw();
   }
 
   /** Same rules as the terminal viewer. */
@@ -253,10 +295,11 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     sync();
   }
 
-  function speed(by: number) {
-    fps = Math.min(Math.max(fps + by, FPS.min), FPS.max);
+  function setSpeed(value: number) {
+    if (Number.isFinite(value)) fps = Math.min(Math.max(Math.round(value), FPS.min), FPS.max);
     sync();
   }
+  const speed = (by: number) => setSpeed(fps + by);
 
   function cycleLoop() {
     [loop, direction] = [(loop + 1) % LOOPS.length, 1];
@@ -292,14 +335,24 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     if (!action) return;
     event.preventDefault();
     action();
+    flush();
   });
   // Keys work after a click anywhere in the viewer, buttons included.
-  root.addEventListener("click", () => root.focus());
+  root.addEventListener("click", (event) => {
+    if (event.target !== speedInput) root.focus();
+    flush();
+  });
   timeline.addEventListener("input", () => {
     playing = false;
     index = Number(timeline.value);
     sync();
+    flush();
   });
+  speedInput.addEventListener("change", () => setSpeed(speedInput.valueAsNumber));
+  speedInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === "Escape") root.focus();
+  });
+  speedInput.addEventListener("blur", sync);
 
   const observer = new ResizeObserver(resize);
   observer.observe(stage);
@@ -322,10 +375,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
         tick();
       }
     }
-    if (dirty) {
-      dirty = false;
-      draw();
-    }
+    flush();
   };
 
   look(1);
@@ -337,6 +387,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     destroy() {
       cancelAnimationFrame(frameId);
       observer.disconnect();
+      dark.removeEventListener("change", applyTheme);
       controls.dispose();
       renderer.dispose();
       root.remove();
