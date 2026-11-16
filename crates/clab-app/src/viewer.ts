@@ -175,6 +175,14 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   highlight.frustumCulled = false;
   highlight.renderOrder = 1;
   highlight.visible = false;
+  // A segment seen end-on has no length to draw, so the ends are marked with dots.
+  const highlightEnds = new THREE.Points(
+    new THREE.BufferGeometry(),
+    new THREE.PointsMaterial({ color: HIGHLIGHT, size: 8, sizeAttenuation: false, depthTest: false }),
+  );
+  highlightEnds.frustumCulled = false;
+  highlightEnds.renderOrder = 1;
+  highlightEnds.visible = false;
   const jointLines = segmentLines(frames[0].joints.map(() => new THREE.Color()));
   const origins = new THREE.Points(
     new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(frames[0].bodies.length * 3), 3)),
@@ -194,7 +202,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   dark.addEventListener("change", applyTheme);
   applyTheme();
   origins.frustumCulled = false;
-  scene.add(bodyLines, jointLines, origins, highlight);
+  scene.add(bodyLines, jointLines, origins, highlight, highlightEnds);
 
   // The axes live in their own scene, drawn in a corner with the main camera's orientation.
   const TRIAD_SIZE = 90;
@@ -278,10 +286,16 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     write(jointLines, frame.joints.flatMap(({ i, j }) => [i, j]));
     write(origins, frame.bodies.map(({ origin }) => origin));
     highlight.visible = selected >= 0;
-    if (selected >= 0) highlight.geometry.setPositions(frame.bodies[selected].segments.flat(2));
+    highlightEnds.visible = selected >= 0;
+    if (selected >= 0) {
+      const ends = frame.bodies[selected].segments.flat();
+      highlight.geometry.setPositions(ends.flat());
+      highlightEnds.geometry.setFromPoints(ends.map((end) => new THREE.Vector3(...end)));
+    }
     renderer.setViewport(0, 0, stage.clientWidth, stage.clientHeight);
     renderer.clear();
     renderer.render(scene, camera);
+    
     triadCamera.position.copy(camera.position).sub(controls.target).setLength(5);
     triadCamera.lookAt(0, 0, 0);
     renderer.clearDepth();
