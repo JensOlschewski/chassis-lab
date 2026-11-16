@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { colorFor } from "./colors";
 import { element } from "./sections";
 
@@ -28,6 +31,8 @@ const LOOPS = ["restart", "bounce", "once"] as const;
 const PADDING = 1.1;
 /** A click selects the body drawn within this many pixels. */
 const PICK_PX = 8;
+/** Bright enough to stand out from the body colors on light and dark backgrounds. */
+const HIGHLIGHT = "#ffd400";
 /** The camera sits this many scene radii from its target; the scene always fits in front of it. */
 const REACH = 4;
 
@@ -155,14 +160,21 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   let selected = -1;
   function paintBodies() {
     const colors = bodyLines.geometry.getAttribute("color") as THREE.BufferAttribute;
-    const mark = new THREE.Color(getComputedStyle(root).color);
     frames[0].bodies.forEach((_, body) => {
-      const color = body === selected ? mark : new THREE.Color(colorFor(body + 1));
+      const color = new THREE.Color(colorFor(body + 1));
       for (let vertex = 2 * first[body]; vertex < 2 * first[body + 1]; vertex++) colors.setXYZ(vertex, color.r, color.g, color.b);
     });
     colors.needsUpdate = true;
     dirty = true;
   }
+  // WebGL lines are one pixel wide, so the selected body is redrawn as a thick bright line on top.
+  const highlight = new LineSegments2(
+    new LineSegmentsGeometry(),
+    new LineMaterial({ color: HIGHLIGHT, linewidth: 5, depthTest: false }),
+  );
+  highlight.frustumCulled = false;
+  highlight.renderOrder = 1;
+  highlight.visible = false;
   const jointLines = segmentLines(frames[0].joints.map(() => new THREE.Color()));
   const origins = new THREE.Points(
     new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(frames[0].bodies.length * 3), 3)),
@@ -182,7 +194,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   dark.addEventListener("change", applyTheme);
   applyTheme();
   origins.frustumCulled = false;
-  scene.add(bodyLines, jointLines, origins);
+  scene.add(bodyLines, jointLines, origins, highlight);
 
   // The axes live in their own scene, drawn in a corner with the main camera's orientation.
   const TRIAD_SIZE = 90;
@@ -238,6 +250,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     const { clientWidth: width, clientHeight: height } = stage;
     if (!width || !height) return;
     renderer.setSize(width, height);
+    (highlight.material as LineMaterial).resolution.set(width, height);
     const aspect = width / height;
     Object.assign(camera, { left: -viewRadius * aspect, right: viewRadius * aspect, top: viewRadius, bottom: -viewRadius });
     camera.updateProjectionMatrix();
@@ -264,6 +277,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     write(bodyLines, frame.bodies.flatMap(({ segments }) => segments.flat()));
     write(jointLines, frame.joints.flatMap(({ i, j }) => [i, j]));
     write(origins, frame.bodies.map(({ origin }) => origin));
+    highlight.visible = selected >= 0;
+    if (selected >= 0) highlight.geometry.setPositions(frame.bodies[selected].segments.flat(2));
     renderer.setViewport(0, 0, stage.clientWidth, stage.clientHeight);
     renderer.clear();
     renderer.render(scene, camera);
