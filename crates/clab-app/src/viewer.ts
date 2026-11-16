@@ -47,7 +47,22 @@ const VIEWS = [
   { key: "4", name: "Iso", direction: [-1, -1, 1] },
 ] as const;
 
-const HINT = "Space play · ←/→ step · +/- speed · l loop · v labels · h hide · i isolate · a show all · f/F fit (this step/all) · 1–4 view · drag orbit · right-drag pan · wheel zoom";
+const HINT = "Space play · ←/→ step · +/- speed · ? all shortcuts";
+const HELP = [
+  ["Space", "play / pause"],
+  ["← →", "step"],
+  ["↑ ↓  + -", "speed"],
+  ["l", "loop mode"],
+  ["v", "labels"],
+  ["h", "hide selected body"],
+  ["i", "isolate selected body"],
+  ["a", "show all bodies"],
+  ["f / F", "fit this step / all steps"],
+  ["1–4", "XY XZ YZ Iso view"],
+  ["click", "select body"],
+  ["drag / right-drag / wheel", "orbit / pan / zoom"],
+  ["? / Esc", "this help"],
+];
 
 /** Every position a frame draws. */
 function* positions({ bodies, joints }: ViewFrame): Generator<Vec3> {
@@ -135,7 +150,12 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   const viewBar = element("div", "", "viewer-bar");
   const views = element("span", "", "viewer-views");
   views.append(...viewButtons);
-  viewBar.append(fpsText, speedSlider, modeText, views);
+  const bodyText = element("span", "", "viewer-body");
+  viewBar.append(fpsText, speedSlider, modeText, views, bodyText);
+  const help = element("div", "", "viewer-help");
+  help.hidden = true;
+  help.append(...HELP.map(([key, what]) => element("div", `${key}\u2003${what}`)));
+  stage.append(help);
   root.append(stage, playbackBar, viewBar, element("small", HINT, "viewer-hint"));
   parent.replaceChildren(root);
 
@@ -273,7 +293,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     timeline.style.setProperty("--p", String(last ? index / last : 0));
     status.textContent = `${pad(index + 1, digits)}/${frames.length}  t=${pad(frames[index].time.toFixed(3), timeWidth)}`;
     fpsText.textContent = `fps=${pad(fps, fpsDigits)}`;
-    modeText.textContent = `loop=${LOOPS[loop].padEnd(7, "\u2007")}  labels=${showLabels ? "on\u2007" : "off"}  hidden=${hidden.size}  body=${selected < 0 ? "none" : frames[0].bodies[selected].label}`;
+    modeText.textContent = `loop=${LOOPS[loop].padEnd(7, "\u2007")}  labels=${showLabels ? "on\u2007" : "off"}  hidden=${hidden.size}`;
+    bodyText.textContent = `body=${selected < 0 ? "none" : frames[0].bodies[selected].label}`;
     const position = positionOf(fps);
     speedSlider.value = String(position);
     speedSlider.style.setProperty("--p", String(position / 100));
@@ -412,6 +433,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     h: hideSelected,
     i: isolate,
     a: showAll,
+    "?": () => (help.hidden = !help.hidden),
+    Escape: () => (help.hidden = true),
     f: () => fit(false),
     F: () => fit(true),
     ...Object.fromEntries(VIEWS.map(({ key }, view) => [key, () => look(view)])),

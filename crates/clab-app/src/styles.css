@@ -204,6 +204,9 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .viewer-bar > button:first-child { width: 2.25em; height: 2.25em; padding: 0; display: inline-grid; place-items: center; }
 .viewer-bar button { white-space: nowrap; }
 .viewer-status { white-space: pre; font-variant-numeric: tabular-nums; color: var(--muted); }
+.viewer-body { margin-left: -6px; padding: 1px 8px; border-radius: var(--radius); background: var(--accent); color: var(--accent-text); font-weight: 600; white-space: pre; }
+.viewer-help { position: absolute; top: 12px; right: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 0.8125rem; line-height: 1.6; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); }
+.viewer-help[hidden] { display: none; }
 .viewer-hint { display: block; margin-top: 6px; color: var(--muted); }
 .viewer:focus-visible .viewer-stage { border-color: var(--accent); }
 pre.info { display: block; font-family: var(--mono, ui-monospace, monospace); white-space: pre; overflow-x: auto; }
