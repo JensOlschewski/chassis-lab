@@ -91,6 +91,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   const maxFps = Math.max(FPS.floor, frames.length);
   const fpsAt = (position: number) => Math.round(FPS.min * (maxFps / FPS.min) ** (position / 100));
   const positionOf = (value: number) => (100 * Math.log(value / FPS.min)) / Math.log(maxFps / FPS.min);
+  const statusText = (frame: number, rate: number) => `${frame + 1}/${frames.length}  t=${frames[frame].time.toFixed(3)} fps=${rate}`;
   let index = 0;
   let playing = last > 0;
   let fps = FPS.initial;
@@ -108,6 +109,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   timeline.max = String(last);
   timeline.ariaLabel = "Time step";
   const status = element("span", "", "viewer-status");
+  // Reserve the widest text so the buttons beside it never move.
+  status.style.minWidth = `${Math.max(statusText(0, maxFps).length, statusText(last, maxFps).length)}ch`;
   const speedSlider = document.createElement("input");
   speedSlider.type = "range";
   speedSlider.className = "viewer-speed";
@@ -118,6 +121,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   readout.append(status, speedSlider);
   const playButton = button("", "Play/pause (Space)", () => togglePlay());
   const loopButton = button("", "Loop mode (l)", () => cycleLoop());
+  loopButton.className = "viewer-loop";
   const labelsButton = button("Labels", "Show labels (v)", () => toggleLabels());
   const viewButtons = VIEWS.map(({ name, key }, view) => button(name, `${name} view (${key})`, () => look(view)));
   const bar = element("div", "", "viewer-bar");
@@ -234,12 +238,15 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   function sync() {
     timeline.value = String(index);
     timeline.style.setProperty("--p", String(last ? index / last : 0));
-    status.textContent = `${index + 1}/${frames.length}  t=${frames[index].time.toFixed(3)} fps=${fps}`;
+    status.textContent = statusText(index, fps);
     const position = positionOf(fps);
     speedSlider.value = String(position);
     speedSlider.style.setProperty("--p", String(position / 100));
-    playButton.innerHTML = playing ? ICONS.pause : ICONS.play;
-    loopButton.textContent = `loop: ${LOOPS[loop]}`;
+    // Rewriting a button's content during a click makes the browser drop the click, so write only changes.
+    const icon = playing ? ICONS.pause : ICONS.play;
+    if (playButton.innerHTML !== icon) playButton.innerHTML = icon;
+    const loopText = `loop: ${LOOPS[loop]}`;
+    if (loopButton.textContent !== loopText) loopButton.textContent = loopText;
     labelsButton.ariaPressed = String(showLabels);
     dirty = true;
   }
