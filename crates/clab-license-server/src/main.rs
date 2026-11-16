@@ -200,19 +200,33 @@ async fn main() -> Result<()> {
             println!("deleted license {id} ({person})");
         }
         Command::List => {
-            let ago = |at: Option<i64>| at.map_or("-".to_owned(), utc);
-            for license in open(&data, 0)?.list()? {
-                println!(
-                    "{:>4}  {:<24} {:<8} {:<6} {:<20} {:<15} {:<17} {}",
-                    license.id,
-                    license.person,
-                    if license.revoked { "revoked" } else { "active" },
-                    if license.auto { "auto" } else { "manual" },
-                    license.hostname.as_deref().unwrap_or("-"),
-                    license.last_ip.as_deref().unwrap_or("-"),
-                    ago(license.last_seen),
-                    license.version.as_deref().unwrap_or("-"),
-                );
+            let rows: Vec<[String; 8]> = open(&data, 0)?
+                .list()?
+                .into_iter()
+                .map(|license| {
+                    let or_dash = |text: Option<String>| text.unwrap_or_else(|| "-".to_owned());
+                    [
+                        license.id.to_string(),
+                        license.person,
+                        if license.revoked { "revoked" } else { "active" }.to_owned(),
+                        if license.auto { "auto" } else { "manual" }.to_owned(),
+                        or_dash(license.hostname),
+                        or_dash(license.last_ip),
+                        or_dash(license.last_seen.map(utc)),
+                        or_dash(license.version),
+                    ]
+                })
+                .collect();
+            let widths: [usize; 8] = std::array::from_fn(|column| {
+                rows.iter().map(|row| row[column].len()).max().unwrap_or(0)
+            });
+            for row in &rows {
+                let cells: Vec<String> = row
+                    .iter()
+                    .zip(widths)
+                    .map(|(cell, width)| format!("{cell:<width$}"))
+                    .collect();
+                println!("{}", cells.join("  ").trim_end());
             }
         }
     }
