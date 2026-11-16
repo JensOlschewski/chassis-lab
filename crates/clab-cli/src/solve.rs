@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use serde_json::Value;
 
 use crate::{inspect, solution};
@@ -16,11 +16,18 @@ use crate::{inspect, solution};
 const RUNTIME_RELEASE: &str = "R2024b";
 const SOLVER_ENV: &str = "CLAB_MKS_SOLVER";
 const RUNTIME_ENV: &str = "CLAB_MATLAB_RUNTIME";
+const INSTALLER_ENV: &str = "CLAB_MATLAB_RUNTIME_INSTALLER";
 const SOLVER_NAME: &str = if cfg!(windows) {
     "mks_solver.exe"
 } else {
     "mks_solver"
 };
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum RuntimeCommand {
+    /// Install the MATLAB Runtime the solver needs for this user.
+    Install,
+}
 
 #[derive(Debug, Args)]
 pub(crate) struct SolveArgs {
@@ -283,10 +290,86 @@ fn find_runtime() -> Result<PathBuf> {
     candidates
         .iter()
         .map(|dir| Path::new(dir).join(RUNTIME_RELEASE))
+        .chain(user_runtime_dir().map(|dir| dir.join(RUNTIME_RELEASE)))
         .find(|path| path.is_dir())
         .with_context(|| {
-            format!("MATLAB Runtime {RUNTIME_RELEASE} not found: install it or set {RUNTIME_ENV}")
+            format!(
+                "MATLAB Runtime {RUNTIME_RELEASE} not found: run `clab runtime install` or set {RUNTIME_ENV}"
+            )
         })
+}
+
+/// Where `clab runtime install` puts the Runtime. It needs no administrator rights.
+fn user_runtime_dir() -> Option<PathBuf> {
+    let env = |name: &str| std::env::var_os(name).map(PathBuf::from);
+    let base = if cfg!(windows) {
+        env("LOCALAPPDATA")
+    } else if cfg!(target_os = "macos") {
+        env("HOME").map(|home| home.join("Library/Application Support"))
+    } else {
+        env("XDG_DATA_HOME").or_else(|| env("HOME").map(|home| home.join(".local/share")))
+    };
+    Some(base?.join("ChassisLab/matlab-runtime"))
+}
+
+pub(crate) fn runtime(command: RuntimeCommand) -> Result<()> {
+    match command {
+        RuntimeCommand::Install => install_runtime(),
+    }
+}
+
+fn install_runtime() -> Result<()> {
+    let installer = find_installer()?;
+    let dir = user_runtime_dir().context("cannot find the user data directory")?;
+    eprintln!(
+        "installing MATLAB Runtime {RUNTIME_RELEASE} into {} (downloads about 1.5 GB)",
+        dir.display()
+    );
+    let status = Command::new(&installer)
+        .args([
+            "-mode",
+            "silent",
+            "-agreeToLicense",
+            "yes",
+            "-destinationFolder",
+        ])
+        .arg(&dir)
+        .status()
+        .with_context(|| format!("cannot start {}", installer.display()))?;
+    if !status.success() {
+        bail!("MATLAB Runtime installer failed: {status}");
+    }
+    find_runtime().map(|_| ())
+}
+
+fn find_installer() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os(INSTALLER_ENV).map(PathBuf::from) {
+        if path.is_file() {
+            return Ok(path);
+        }
+        bail!(
+            "{INSTALLER_ENV} does not point to a file: {}",
+            path.display()
+        );
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| installer_in(exe.parent()?))
+        .with_context(|| {
+            format!("Runtime installer not found: install it next to clab or set {INSTALLER_ENV}")
+        })
+}
+
+/// The installer `customInstaller` builds: a `.app` on macOS, `.install` on Linux.
+fn installer_in(dir: &Path) -> Option<PathBuf> {
+    [
+        "mks_runtime.install",
+        "mks_runtime.exe",
+        "mks_runtime.app/Contents/MacOS/setup",
+    ]
+    .iter()
+    .map(|name| dir.join(name))
+    .find(|path| path.is_file())
 }
 
 /// Library search path variable the solver needs to find the Runtime.
@@ -318,6 +401,16 @@ fn library_path(runtime: &Path) -> Result<Option<(&'static str, OsString)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_installer_in_macos_app_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(installer_in(dir.path()), None);
+        let inner = dir.path().join("mks_runtime.app/Contents/MacOS");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(inner.join("setup"), "").unwrap();
+        assert_eq!(installer_in(dir.path()), Some(inner.join("setup")));
+    }
 
     #[test]
     fn finds_solver_in_macos_app_bundle() {

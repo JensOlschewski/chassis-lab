@@ -36,6 +36,9 @@ enum Command {
     Convert(convert::ConvertArgs),
     /// Solve a multibody model with the MATLAB solver.
     Solve(solve::SolveArgs),
+    /// Manage the MATLAB Runtime the solver needs.
+    #[command(subcommand)]
+    Runtime(solve::RuntimeCommand),
     /// Manage the license of this installation.
     #[command(subcommand)]
     License(license::LicenseCommand),
@@ -108,6 +111,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Inspect(args) => inspect::inspect(args),
         Command::Convert(args) => convert::convert(args),
         Command::Solve(args) => solve::solve(args),
+        Command::Runtime(command) => solve::runtime(command),
         Command::License(command) => license::run(command),
         Command::Completion { shell } => {
             generate(shell, &mut Cli::command(), "clab", &mut std::io::stdout());
