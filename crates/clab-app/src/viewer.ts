@@ -47,7 +47,7 @@ const VIEWS = [
   { key: "4", name: "Iso", direction: [-1, -1, 1] },
 ] as const;
 
-const HINT = "Space play · ←/→ step · +/- speed · l loop · v labels · f/F fit (this step/all) · 1–4 view · drag orbit · right-drag pan · wheel zoom";
+const HINT = "Space play · ←/→ step · +/- speed · l loop · v labels · h hide · i isolate · a show all · f/F fit (this step/all) · 1–4 view · drag orbit · right-drag pan · wheel zoom";
 
 /** Every position a frame draws. */
 function* positions({ bodies, joints }: ViewFrame): Generator<Vec3> {
@@ -158,6 +158,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   // Body `b` owns segments `first[b]` up to `first[b + 1]` of `bodyLines`.
   const first = frames[0].bodies.reduce((starts, { segments }) => [...starts, starts[starts.length - 1] + segments.length], [0]);
   let selected = -1;
+  const hidden = new Set<number>();
   function paintBodies() {
     const colors = bodyLines.geometry.getAttribute("color") as THREE.BufferAttribute;
     frames[0].bodies.forEach((_, body) => {
@@ -272,7 +273,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     timeline.style.setProperty("--p", String(last ? index / last : 0));
     status.textContent = `${pad(index + 1, digits)}/${frames.length}  t=${pad(frames[index].time.toFixed(3), timeWidth)}`;
     fpsText.textContent = `fps=${pad(fps, fpsDigits)}`;
-    modeText.textContent = `loop=${LOOPS[loop].padEnd(7, "\u2007")}  labels=${showLabels ? "on\u2007" : "off"}  body=${selected < 0 ? "none" : frames[0].bodies[selected].label}`;
+    modeText.textContent = `loop=${LOOPS[loop].padEnd(7, "\u2007")}  labels=${showLabels ? "on\u2007" : "off"}  hidden=${hidden.size}  body=${selected < 0 ? "none" : frames[0].bodies[selected].label}`;
     const position = positionOf(fps);
     speedSlider.value = String(position);
     speedSlider.style.setProperty("--p", String(position / 100));
@@ -284,9 +285,12 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
 
   function draw() {
     const frame = frames[index];
-    write(bodyLines, frame.bodies.flatMap(({ segments }) => segments.flat()));
+    // A hidden body's segments collapse to its origin, which draws nothing.
+    write(bodyLines, frame.bodies.flatMap(({ origin, segments }, body) => (hidden.has(body) ? segments.flatMap(() => [origin, origin]) : segments.flat())));
     write(jointLines, frame.joints.flatMap(({ i, j }) => [i, j]));
-    write(origins, frame.bodies.map(({ origin }) => origin));
+    const shown = frame.bodies.filter((_, body) => !hidden.has(body));
+    write(origins, shown.map(({ origin }) => origin));
+    origins.geometry.setDrawRange(0, shown.length);
     highlight.visible = selected >= 0;
     highlightEnds.visible = selected >= 0;
     if (selected >= 0) {
@@ -313,7 +317,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     labelLayer.hidden = !showLabels;
     if (!showLabels) return;
     const { clientWidth: width, clientHeight: height } = stage;
-    for (const { at, node } of labels) {
+    for (const [number, { at, node }] of labels.entries()) {
+      node.hidden = number < frame.bodies.length && hidden.has(number);
       const screen = new THREE.Vector3(...at(frame)).project(camera);
       node.style.transform = `translate(${((screen.x + 1) / 2) * width}px, ${((1 - screen.y) / 2) * height}px)`;
     }
@@ -365,6 +370,29 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     sync();
   }
 
+  /** Hides the selected body. */
+  function hideSelected() {
+    if (selected < 0) return;
+    hidden.add(selected);
+    selected = -1;
+    onSelect?.(null);
+    paintBodies();
+    sync();
+  }
+
+  /** Shows only the selected body; again, or with nothing selected, shows all. */
+  function isolate() {
+    const isolated = selected >= 0 && hidden.size === frames[0].bodies.length - 1 && !hidden.has(selected);
+    hidden.clear();
+    if (!isolated && selected >= 0) frames[0].bodies.forEach((_, body) => body !== selected && hidden.add(body));
+    sync();
+  }
+
+  function showAll() {
+    hidden.clear();
+    sync();
+  }
+
   function toggleLabels() {
     showLabels = !showLabels;
     sync();
@@ -381,6 +409,9 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     "-": () => speed(-1),
     l: cycleLoop,
     v: toggleLabels,
+    h: hideSelected,
+    i: isolate,
+    a: showAll,
     f: () => fit(false),
     F: () => fit(true),
     ...Object.fromEntries(VIEWS.map(({ key }, view) => [key, () => look(view)])),
@@ -410,6 +441,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
     };
     let [best, nearest] = [-1, PICK_PX];
     frames[index].bodies.forEach(({ origin, segments }, body) => {
+      if (hidden.has(body)) return;
       for (const [a, b] of segments.length ? segments : [[origin, origin] as [Vec3, Vec3]]) {
         const [ax, ay] = screen(a);
         const [bx, by] = screen(b);
