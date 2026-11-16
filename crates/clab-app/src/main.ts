@@ -23,5 +23,8 @@ const analyze = setupAnalyze((directory, test) => {
   showPane("inspect");
   void inspect.show(directory, test);
 });
-setupSolve();
+setupSolve((path) => {
+  showPane("inspect");
+  void inspect.show(path);
+});
 setupSession(setupConvert(), inspect, analyze);

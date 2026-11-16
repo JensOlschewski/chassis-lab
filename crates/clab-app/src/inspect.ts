@@ -3,6 +3,7 @@ import { setupBrowse } from "./browse";
 import { colorFor } from "./colors";
 import { AXIS, Curve, SignalInfo, Signals, Summary, drawChart, labelOf, setupTools } from "./chart";
 import { setupReport } from "./report";
+import type { Viewer, ViewFrame } from "./viewer";
 import { describe, errorLine, run } from "./worker";
 
 interface Choice {
@@ -27,8 +28,20 @@ export interface InspectState {
 }
 
 
-async function inspect<T>(file: string, signals: string[]): Promise<T> {
-  const outcome = await run("run_inspect", { file, signals });
+/** `clab inspect --json` of a solver solution; HDF5 listings have no `kind`. */
+interface SolutionResult {
+  kind: "solution";
+  summary: string;
+  /** Body velocities, ready to plot. */
+  signals: Signals;
+  /** Null unless solved with `--include bodies`. */
+  frames: ViewFrame[] | null;
+}
+
+const isSolution = (result: object): result is SolutionResult => "kind" in result && result.kind === "solution";
+
+async function inspect<T>(file: string, signals: string[], view?: string): Promise<T> {
+  const outcome = await run("run_inspect", { file, signals, view });
   if (outcome.exit_code !== 0) {
     throw new Error(errorLine(outcome.stderr) ?? describe(outcome).message);
   }
@@ -51,6 +64,12 @@ export function setupInspect() {
   const plot = document.querySelector<HTMLElement>("#inspect-plot")!;
   const footer = document.querySelector<HTMLElement>("#inspect-footer")!;
   const info = document.querySelector<HTMLElement>("#inspect-info")!;
+  const summaryText = document.querySelector<HTMLElement>("#inspect-summary")!;
+  const viewRoot = document.querySelector<HTMLElement>("#inspect-view")!;
+  const viewBar = document.querySelector<HTMLElement>("#inspect-viewbar")!;
+  const viewOn = document.querySelector<HTMLButtonElement>("#inspect-view-on")!;
+  const viewShown = () => viewOn.getAttribute("aria-pressed") === "true";
+  const layout = form.elements.namedItem("view") as HTMLInputElement;
   const curvesRoot = document.querySelector<HTMLElement>("#curves")!;
   const addButton = document.querySelector<HTMLButtonElement>("#add-curve")!;
   const file = pathForm.elements.namedItem("file") as HTMLInputElement;
@@ -59,6 +78,10 @@ export function setupInspect() {
   let choices: Choice[] = [];
   let axes: string[] = [];
   let plotted = false;
+  /** A solver solution carries its signals with the listing; HDF5 signals are read per plot. */
+  let solution: Signals | null = null;
+  let viewer: Viewer | null = null;
+  let scene: ViewFrame[] | null = null;
 
   const show = (message: string, ok = true) => {
     status.textContent = message;
@@ -181,6 +204,7 @@ export function setupInspect() {
     );
 
   setupBrowse(pathForm);
+  setupBrowse(form);
   setupTools(chart, document.querySelector<HTMLElement>("#inspect-tools")!, () => axes, show);
 
   addButton.addEventListener("click", () => {
@@ -197,8 +221,39 @@ export function setupInspect() {
     submit.disabled = true;
     addButton.disabled = true;
     info.hidden = true;
+    summaryText.hidden = true;
+    drawScene(null);
+    viewBar.hidden = true;
+    layout.value = "";
+    viewOn.setAttribute("aria-pressed", "true");
+    solution = null;
     curvesRoot.replaceChildren();
   };
+
+  /** Replaces the 3D view; `null`, or the Viewer button off, leaves none. */
+  async function drawScene(frames: ViewFrame[] | null): Promise<void> {
+    viewer?.destroy();
+    viewer = null;
+    scene = frames;
+    viewRoot.hidden = !frames || !viewShown();
+    if (viewRoot.hidden) return;
+    const { createViewer } = await import("./viewer");
+    viewer = createViewer(viewRoot, frames!);
+  }
+
+  viewOn.addEventListener("click", () => {
+    viewOn.setAttribute("aria-pressed", String(!viewShown()));
+    drawScene(scene);
+  });
+  layout.addEventListener("change", async () => {
+    try {
+      const result = await inspect<SolutionResult>(file.value, [], layout.value.trim() || undefined);
+      await drawScene(result.frames);
+      show("");
+    } catch (error) {
+      show(String(error), false);
+    }
+  });
 
   /** Lists the file's signals and starts with one default row; false if that failed. */
   async function loadSignals(): Promise<boolean> {
@@ -206,8 +261,19 @@ export function setupInspect() {
     showBody("signals");
     show("Loading signals…");
     try {
-      const { summary, signals } = await inspect<{ summary: Summary; signals: SignalInfo[] }>(file.value, []);
-      showInfo(summary);
+      const result = await inspect<SolutionResult | { summary: Summary; signals: SignalInfo[] }>(file.value, []);
+      let signals: SignalInfo[];
+      if (isSolution(result)) {
+        solution = result.signals;
+        signals = solution.signals;
+        summaryText.textContent = result.summary;
+        summaryText.hidden = false;
+        viewBar.hidden = !result.frames;
+        await drawScene(result.frames);
+      } else {
+        signals = result.signals;
+        showInfo(result.summary);
+      }
       const sorted = [...signals]
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((signal) => ({ value: signal.name, text: labelOf(signal) }));
@@ -251,7 +317,7 @@ export function setupInspect() {
     try {
       const names = new Set(curves.flatMap(({ x, y }) => [x, y]));
       names.delete(AXIS);
-      const data = await inspect<Signals>(file.value, [...names]);
+      const data = solution ?? (await inspect<Signals>(file.value, [...names]));
       plot.hidden = false;
       const pressed = document.querySelector<HTMLElement>("#inspect-tools [aria-pressed=true]");
       // Keep the tool the user picked across redraws.

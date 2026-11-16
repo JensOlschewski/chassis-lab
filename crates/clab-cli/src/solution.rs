@@ -2,49 +2,28 @@
 
 use std::fmt::Write;
 
-use anyhow::{Context, Result, bail};
-use serde_json::Value;
+use anyhow::{Result, bail};
+use clab_core::solution::{matrix, time};
+use serde::Serialize;
+use serde_json::{Value, json};
 
 const ZERO_THRESHOLD: f64 = 0.5e-12;
 /// `v_hat` holds 6 rows (3 linear, 3 angular velocity) per body.
 const DOF_PER_BODY: usize = 6;
 
-/// Reads a JSON array of equally long number arrays (a MATLAB matrix).
-pub(crate) fn matrix(value: &Value, what: &str) -> Result<Vec<Vec<f64>>> {
-    let rows = value
-        .as_array()
-        .with_context(|| format!("solution has no `{what}` matrix"))?;
-    rows.iter()
-        .map(|row| {
-            row.as_array()
-                .with_context(|| format!("`{what}` is not a matrix"))?
-                .iter()
-                .map(|n| {
-                    n.as_f64()
-                        .with_context(|| format!("`{what}` is not numeric"))
-                })
-                .collect()
-        })
-        .collect()
-}
-
-pub(crate) fn time(solution: &Value) -> Result<Vec<f64>> {
-    solution["time"]
-        .as_array()
-        .context("solution has no `time` vector")?
-        .iter()
-        .map(|n| n.as_f64().context("`time` is not numeric"))
-        .collect()
-}
-
-/// One block per time step and one line per body, in kinemagic's text style.
-pub(crate) fn render_text(solution: &Value) -> Result<String> {
+/// The time vector and the `v_hat` matrix, checked to have 6 rows per body.
+fn velocities(solution: &Value) -> Result<(Vec<f64>, Vec<Vec<f64>>)> {
     let time = time(solution)?;
     let v_hat = matrix(&solution["v_hat"], "v_hat")?;
     if v_hat.len() % DOF_PER_BODY != 0 || v_hat.iter().any(|row| row.len() != time.len()) {
         bail!("`v_hat` does not match `time` and 6 rows per body");
     }
+    Ok((time, v_hat))
+}
 
+/// One block per time step and one line per body, in kinemagic's text style.
+pub(crate) fn render_text(solution: &Value) -> Result<String> {
+    let (time, v_hat) = velocities(solution)?;
     let mut out = String::new();
     for (step, t) in time.iter().enumerate() {
         writeln!(out, "time {}", format_number(*t))?;
@@ -52,6 +31,154 @@ pub(crate) fn render_text(solution: &Value) -> Result<String> {
             let values: Vec<String> = body.iter().map(|row| format_number(row[step])).collect();
             writeln!(out, "body {} velocity [{}]", index + 1, values.join(", "))?;
         }
+    }
+    Ok(out)
+}
+
+/// Body names in `v_hat` order. `v_hat` lists the bodies after ground, so body `n` has bodyID `n`.
+fn body_names(solution: &Value, count: usize) -> Vec<String> {
+    (1..=count)
+        .map(|id| {
+            solution["bodies"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|body| body["bodyID"].as_u64() == Some(id as u64))
+                .and_then(|body| body["name"].as_str())
+                .map_or_else(|| format!("body {id}"), str::to_owned)
+        })
+        .collect()
+}
+
+fn signal(name: String, values: impl Serialize) -> Value {
+    json!({ "name": name, "unit": "", "values": values })
+}
+
+/// The solution in the shape the app plots HDF5 signals in: the time axis plus one
+/// signal per body velocity component and, if solved `--include suspension`, one
+/// per suspension characteristic (`toecamber.l_toe`, `wheel_points.l_wc.x`, …).
+/// The solver states no units.
+pub(crate) fn plot_signals(solution: &Value) -> Result<Value> {
+    const COMPONENTS: [&str; DOF_PER_BODY] = ["vx", "vy", "vz", "wx", "wy", "wz"];
+    let (time, v_hat) = velocities(solution)?;
+    let names = body_names(solution, v_hat.len() / DOF_PER_BODY);
+    let mut signals: Vec<Value> = names
+        .iter()
+        .zip(v_hat.chunks(DOF_PER_BODY))
+        .flat_map(|(name, rows)| {
+            COMPONENTS
+                .iter()
+                .zip(rows)
+                .map(move |(component, values)| signal(format!("{name}.{component}"), values))
+        })
+        .collect();
+    for (section, entries) in solution["characteristics"]
+        .as_object()
+        .into_iter()
+        .flatten()
+    {
+        for (key, value) in entries.as_object().into_iter().flatten() {
+            let name = format!("{section}.{key}");
+            // A vector over time, or x/y/z rows; a step the solver could not compute is null.
+            match value.as_array().map(|rows| rows.first()) {
+                Some(Some(Value::Array(_))) => {
+                    let rows = matrix(value, &name)?;
+                    if rows.len() != 3 || rows.iter().any(|row| row.len() != time.len()) {
+                        bail!("`{name}` is not 3 × {}", time.len());
+                    }
+                    signals.extend(
+                        rows.iter()
+                            .zip(["x", "y", "z"])
+                            .map(|(row, axis)| signal(format!("{name}.{axis}"), row)),
+                    );
+                }
+                Some(_) => {
+                    let values = value.as_array().unwrap();
+                    if values.len() != time.len()
+                        || values.iter().any(|n| !n.is_number() && !n.is_null())
+                    {
+                        bail!("`{name}` does not match `time`");
+                    }
+                    signals.push(signal(name, values));
+                }
+                None => {}
+            }
+        }
+    }
+    Ok(json!({ "axis": time, "signals": signals }))
+}
+
+/// What `--include` writes into a solution, and the keys it adds.
+const SECTIONS: [(&str, &[&str]); 3] = [
+    ("bodies", &["bodies"]),
+    ("connectors", &["joints", "bushings"]),
+    ("suspension", &["characteristics"]),
+];
+
+/// Steps, time span, counts, the sections present and the peak velocity of each body.
+pub(crate) fn render_summary(solution: &Value) -> Result<String> {
+    let (time, v_hat) = velocities(solution)?;
+    let mut out = String::new();
+    writeln!(out, "steps: {}", time.len())?;
+    if let (Some(first), Some(last)) = (time.first(), time.last()) {
+        writeln!(out, "time: {first:.4} to {last:.4}")?;
+    }
+    let bodies = v_hat.len() / DOF_PER_BODY;
+    writeln!(out, "bodies: {bodies}")?;
+    if let Some(joints) = solution["joints"].as_object() {
+        let count = |kind: &str| {
+            joints
+                .get(kind)
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len)
+        };
+        writeln!(
+            out,
+            "joints: {} primary, {} secondary",
+            count("primary"),
+            count("secondary")
+        )?;
+    }
+    let included: Vec<_> = SECTIONS
+        .iter()
+        .filter(|(_, keys)| keys.iter().any(|key| !solution[key].is_null()))
+        .map(|(name, _)| *name)
+        .collect();
+    writeln!(
+        out,
+        "included: {}",
+        if included.is_empty() {
+            "none".to_owned()
+        } else {
+            included.join(", ")
+        }
+    )?;
+    if !included.contains(&"bodies") {
+        writeln!(
+            out,
+            "note: no body positions; solve with --include bodies to view the motion"
+        )?;
+    }
+
+    let names = body_names(solution, bodies);
+    let width = names
+        .iter()
+        .map(String::len)
+        .max()
+        .unwrap_or(0)
+        .max("body".len());
+    writeln!(
+        out,
+        "{:<width$}  {:>12}  {:>12}",
+        "body", "peak linear", "peak angular"
+    )?;
+    for (name, rows) in names.iter().zip(v_hat.chunks(DOF_PER_BODY)) {
+        let [linear, angular] = [&rows[..3], &rows[3..]].map(|axes| {
+            (0..time.len())
+                .map(|step| axes.iter().map(|row| row[step].powi(2)).sum::<f64>().sqrt())
+                .fold(0.0, f64::max)
+        });
+        writeln!(out, "{name:<width$}  {linear:>12.4}  {angular:>12.4}")?;
     }
     Ok(out)
 }
@@ -87,8 +214,112 @@ mod tests {
     }
 
     #[test]
+    fn plot_signals_are_named_per_body_and_component() {
+        let mut solution = json!({
+            "time": [0.0, 0.5],
+            "v_hat": [[1.0, 2.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 3.0]],
+            "bodies": [{ "name": "Link", "bodyID": 1 }],
+        });
+        let signals = plot_signals(&solution).unwrap();
+        assert_eq!(signals["axis"], json!([0.0, 0.5]));
+        assert_eq!(signals["signals"].as_array().unwrap().len(), 6);
+        assert_eq!(signals["signals"][0]["name"], "Link.vx");
+        assert_eq!(signals["signals"][5]["name"], "Link.wz");
+        assert_eq!(signals["signals"][5]["values"], json!([0.0, 3.0]));
+        solution["bodies"] = json!([]);
+        assert_eq!(
+            plot_signals(&solution).unwrap()["signals"][0]["name"],
+            "body 1.vx"
+        );
+    }
+
+    #[test]
+    fn plot_signals_include_suspension_characteristics() {
+        let solution = json!({
+            "time": [0.0, 0.5],
+            "v_hat": [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
+            "characteristics": {
+                "toecamber": { "l_toe": [0.2, 0.3] },
+                "roll": { "roll_rate": [null, 1.0] },
+                "wheel_points": { "l_wc": [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]] },
+            },
+        });
+        let signals = plot_signals(&solution).unwrap()["signals"].clone();
+        let named = |name: &str| {
+            signals
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == name)
+        };
+        assert_eq!(
+            named("toecamber.l_toe").unwrap()["values"],
+            json!([0.2, 0.3])
+        );
+        assert_eq!(
+            named("roll.roll_rate").unwrap()["values"],
+            json!([null, 1.0])
+        );
+        assert_eq!(
+            named("wheel_points.l_wc.y").unwrap()["values"],
+            json!([3.0, 4.0])
+        );
+
+        let mut short = solution.clone();
+        short["characteristics"]["toecamber"]["l_toe"] = json!([0.2]);
+        assert!(plot_signals(&short).is_err());
+    }
+
+    #[test]
     fn rejects_mismatched_v_hat() {
         let solution = json!({ "time": [0.0], "v_hat": [[1.0]] });
         assert!(render_text(&solution).is_err());
+    }
+
+    fn summarized() -> Value {
+        json!({
+            "time": [0.0, 0.5],
+            "v_hat": [
+                [3.0, 0.0], [4.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 2.0],
+            ],
+        })
+    }
+
+    #[test]
+    fn summary_without_bodies_asks_for_them() {
+        let text = render_summary(&summarized()).unwrap();
+        assert!(
+            text.contains("steps: 2\ntime: 0.0000 to 0.5000\nbodies: 1\n"),
+            "{text}"
+        );
+        assert!(text.contains("included: none"), "{text}");
+        assert!(text.contains("--include bodies"), "{text}");
+        assert!(
+            text.contains("body 1  ") && text.contains("5.0000"),
+            "{text}"
+        );
+        assert!(!text.contains("joints:"), "{text}");
+    }
+
+    #[test]
+    fn summary_lists_sections_names_and_joints() {
+        let mut solution = summarized();
+        solution["bodies"] = json!([{ "name": "Link", "bodyID": 1 }]);
+        solution["joints"] = json!({ "primary": [{}, {}], "secondary": [{}] });
+        solution["characteristics"] = json!({});
+        let text = render_summary(&solution).unwrap();
+        assert!(text.contains("joints: 2 primary, 1 secondary"), "{text}");
+        assert!(
+            text.contains("included: bodies, connectors, suspension"),
+            "{text}"
+        );
+        assert!(!text.contains("note:"), "{text}");
+        assert!(text.contains("Link  "), "{text}");
+        assert!(text.contains("2.0000"), "{text}");
+    }
+
+    #[test]
+    fn summary_rejects_mismatched_v_hat() {
+        assert!(render_summary(&json!({ "time": [0.0], "v_hat": [[1.0]] })).is_err());
     }
 }

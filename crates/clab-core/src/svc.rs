@@ -542,12 +542,12 @@ pub struct Signal {
 
 #[derive(Debug, Error)]
 pub enum SvcJsonError {
-    #[error("failed to read SVC JSON '{path}': {source}")]
+    #[error("failed to read SVC JSON '{path}'")]
     Read {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("invalid SVC JSON '{path}': {source}")]
+    #[error("invalid SVC JSON '{path}'")]
     Parse {
         path: PathBuf,
         source: serde_json::Error,

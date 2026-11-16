@@ -294,3 +294,90 @@ fn json_rejects_unknown_signal_bad_flags_and_non_hdf5() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains(".h5 or .hdf5"));
 }
+
+#[test]
+fn summarizes_a_solver_solution() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("solution.json");
+    fs::write(
+        &path,
+        r#"{"time": [0.0, 1.0], "v_hat": [[3.0, 0.0], [4.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]}"#,
+    )
+    .unwrap();
+    let output = inspect(&path, &[]);
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("steps: 2\ntime: 0.0000 to 1.0000\nbodies: 1\n"),
+        "{text}"
+    );
+    assert!(text.contains("--include bodies"), "{text}");
+    assert!(text.contains("5.0000"), "{text}");
+}
+
+#[test]
+fn solution_json_carries_frames_for_the_chosen_layout() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("solution.json");
+    let row = "[[0.0, 1.0], [0.0, 0.0], [0.0, 0.0]]";
+    let v_hat = ["[0.0, 0.0]"; 6].join(",");
+    fs::write(
+        &path,
+        format!(
+            r#"{{"time": [0.0, 1.0], "v_hat": [{v_hat}], "bodies": [{{"name": "Link", "bodyID": 1, "cm": {{"position": {row}}},
+            "points": {{"A": {{"position": {row}}}, "B": {{"position": {row}}}}}}}]}}"#
+        ),
+    )
+    .unwrap();
+    let value = inspect_json(&path, &[]);
+    assert_eq!(value["signals"]["signals"][0]["name"], "Link.vx");
+    assert_eq!(value["frames"].as_array().unwrap().len(), 2);
+    assert_eq!(value["frames"][1]["bodies"][0]["label"], "Link");
+    assert_eq!(value["frames"][1]["bodies"][0]["origin"][0], 1.0);
+
+    let layout = directory.path().join("layout.json");
+    fs::write(&layout, r#"{"bodies": {"Link": {"points": ["A"]}}}"#).unwrap();
+    let layout = layout.to_str().unwrap();
+    let value = inspect_json(&path, &["--view", layout]);
+    assert_eq!(
+        value["frames"][0]["bodies"][0]["segments"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    fs::write(
+        directory.path().join("bad.json"),
+        r#"{"bodies": {"Nope": {"points": []}}}"#,
+    )
+    .unwrap();
+    let bad = directory.path().join("bad.json");
+    let output = inspect(&path, &["--json", "--view", bad.to_str().unwrap()]);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no body `Nope`"));
+}
+
+#[test]
+fn solution_json_is_tagged_and_signal_flags_are_refused() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("solution.json");
+    fs::write(
+        &path,
+        r#"{"time": [0.0], "v_hat": [[0.0],[0.0],[0.0],[0.0],[0.0],[0.0]]}"#,
+    )
+    .unwrap();
+    let value = inspect_json(&path, &[]);
+    assert_eq!(value["kind"], "solution");
+    assert!(value["summary"].as_str().unwrap().contains("steps: 1"));
+    assert_eq!(inspect_json(&path, &["--list"])["kind"], "solution");
+    for flags in [&["--match", "x"][..], &["--signal", "x"]] {
+        let output = inspect(&path, flags);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("not solver solutions"));
+    }
+    let output = inspect(&path, &["--view"]);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--include bodies"),
+        "{output:?}"
+    );
+}
