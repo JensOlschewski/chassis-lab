@@ -269,6 +269,11 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[], onSelect?
   function look(view: number) {
     target(controls.target.clone(), new THREE.Vector3(...VIEWS[view].direction));
     viewButtons.forEach((node, i) => node.setAttribute("aria-pressed", String(i === view)));
+    // A draw inside the click may not be shown while paused; draw again on the next frame.
+    requestAnimationFrame(() => {
+      dirty = true;
+      flush();
+    });
   }
 
   function fit(everything: boolean) {
