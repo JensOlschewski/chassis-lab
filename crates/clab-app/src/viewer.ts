@@ -17,7 +17,12 @@ export interface Viewer {
 }
 
 /** The terminal viewer's playback rules, so both viewers feel the same. */
-const FPS = { min: 1, max: 100, step: 10, initial: 10 };
+const FPS_STEPS = [1, 2, 5, 10, 15, 20, 30, 60, 100];
+const DEFAULT_FPS = 10;
+const ICONS = {
+  play: '<svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor"><path d="M2 1l9 5-9 5z"/></svg>',
+  pause: '<svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor"><path d="M2 1h3v10H2zM7 1h3v10H7z"/></svg>',
+};
 const LOOPS = ["restart", "bounce", "once"] as const;
 const PADDING = 1.1;
 /** The camera sits this many scene radii from its target; the scene always fits in front of it. */
@@ -83,7 +88,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   const last = frames.length - 1;
   let index = 0;
   let playing = last > 0;
-  let fps = FPS.initial;
+  let fps = DEFAULT_FPS;
   let loop = 0;
   let direction = 1;
   let showLabels = false;
@@ -100,9 +105,11 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   const status = element("span", "", "viewer-status");
   const speedButtons = element("span", "", "viewer-speed");
   speedButtons.append(
-    button("−", "Slower (-)", () => speed(-FPS.step)),
-    button("+", "Faster (+)", () => speed(FPS.step)),
+    button("−", "Slower (-)", () => speed(-1)),
+    button("+", "Faster (+)", () => speed(1)),
   );
+  const readout = element("span", "", "viewer-readout");
+  readout.append(status, speedButtons);
   const playButton = button("", "Play/pause (Space)", () => togglePlay());
   const loopButton = button("", "Loop mode (l)", () => cycleLoop());
   const labelsButton = button("Labels", "Show labels (v)", () => toggleLabels());
@@ -111,8 +118,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   bar.append(
     playButton,
     timeline,
-    status,
-    speedButtons,
+    readout,
     ...viewButtons,
     button("Fit", "Fit this step (f)", () => fit(false)),
     button("Fit all", "Fit all steps (F)", () => fit(true)),
@@ -223,7 +229,7 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     timeline.value = String(index);
     timeline.style.setProperty("--p", String(last ? index / last : 0));
     status.textContent = `${index + 1}/${frames.length}  t=${frames[index].time.toFixed(3)} fps=${fps}`;
-    playButton.textContent = playing ? "⏸" : "▶";
+    playButton.innerHTML = playing ? ICONS.pause : ICONS.play;
     loopButton.textContent = `loop: ${LOOPS[loop]}`;
     labelsButton.ariaPressed = String(showLabels);
     dirty = true;
@@ -292,7 +298,8 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
   }
 
   function speed(by: number) {
-    fps = Math.min(Math.max(fps + by, FPS.min), FPS.max);
+    const at = FPS_STEPS.indexOf(fps) + by;
+    fps = FPS_STEPS[Math.min(Math.max(at, 0), FPS_STEPS.length - 1)];
     sync();
   }
 
@@ -310,11 +317,11 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     " ": togglePlay,
     ArrowLeft: () => step(-1),
     ArrowRight: () => step(1),
-    ArrowUp: () => speed(FPS.step),
-    ArrowDown: () => speed(-FPS.step),
-    "+": () => speed(FPS.step),
-    "=": () => speed(FPS.step),
-    "-": () => speed(-FPS.step),
+    ArrowUp: () => speed(1),
+    ArrowDown: () => speed(-1),
+    "+": () => speed(1),
+    "=": () => speed(1),
+    "-": () => speed(-1),
     l: cycleLoop,
     v: toggleLabels,
     f: () => fit(false),
