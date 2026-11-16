@@ -302,8 +302,13 @@ export function createViewer(parent: HTMLElement, frames: ViewFrame[]): Viewer {
     // Nothing is drawn or played while the pane is hidden.
     if (!root.offsetParent) return;
     if (playing) {
-      owed += elapsed;
-      for (; owed >= 1000 / fps; owed -= 1000 / fps) tick();
+      // One step per drawn frame at most, so a slow renderer plays slower instead of skipping steps.
+      const interval = 1000 / fps;
+      owed = Math.min(owed + elapsed, 2 * interval);
+      if (owed >= interval) {
+        owed -= interval;
+        tick();
+      }
     }
     if (dirty) {
       dirty = false;

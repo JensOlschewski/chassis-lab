@@ -40,8 +40,8 @@ interface SolutionResult {
 
 const isSolution = (result: object): result is SolutionResult => "kind" in result && result.kind === "solution";
 
-async function inspect<T>(file: string, signals: string[]): Promise<T> {
-  const outcome = await run("run_inspect", { file, signals });
+async function inspect<T>(file: string, signals: string[], view?: string): Promise<T> {
+  const outcome = await run("run_inspect", { file, signals, view });
   if (outcome.exit_code !== 0) {
     throw new Error(errorLine(outcome.stderr) ?? describe(outcome).message);
   }
@@ -66,6 +66,9 @@ export function setupInspect() {
   const info = document.querySelector<HTMLElement>("#inspect-info")!;
   const summaryText = document.querySelector<HTMLElement>("#inspect-summary")!;
   const viewRoot = document.querySelector<HTMLElement>("#inspect-view")!;
+  const viewBar = document.querySelector<HTMLElement>("#inspect-viewbar")!;
+  const viewOn = document.querySelector<HTMLInputElement>("#inspect-view-on")!;
+  const layout = form.elements.namedItem("view") as HTMLInputElement;
   const curvesRoot = document.querySelector<HTMLElement>("#curves")!;
   const addButton = document.querySelector<HTMLButtonElement>("#add-curve")!;
   const file = pathForm.elements.namedItem("file") as HTMLInputElement;
@@ -77,6 +80,7 @@ export function setupInspect() {
   /** A solver solution carries its signals with the listing; HDF5 signals are read per plot. */
   let solution: Signals | null = null;
   let viewer: Viewer | null = null;
+  let scene: ViewFrame[] | null = null;
 
   const show = (message: string, ok = true) => {
     status.textContent = message;
@@ -199,6 +203,7 @@ export function setupInspect() {
     );
 
   setupBrowse(pathForm);
+  setupBrowse(form);
   setupTools(chart, document.querySelector<HTMLElement>("#inspect-tools")!, () => axes, show);
 
   addButton.addEventListener("click", () => {
@@ -216,12 +221,35 @@ export function setupInspect() {
     addButton.disabled = true;
     info.hidden = true;
     summaryText.hidden = true;
-    viewer?.destroy();
-    viewer = null;
-    viewRoot.hidden = true;
+    drawScene(null);
+    viewBar.hidden = true;
+    layout.value = "";
+    viewOn.checked = true;
     solution = null;
     curvesRoot.replaceChildren();
   };
+
+  /** Replaces the 3D view; `null`, or the checkbox off, leaves none. */
+  async function drawScene(frames: ViewFrame[] | null): Promise<void> {
+    viewer?.destroy();
+    viewer = null;
+    scene = frames;
+    viewRoot.hidden = !frames || !viewOn.checked;
+    if (viewRoot.hidden) return;
+    const { createViewer } = await import("./viewer");
+    viewer = createViewer(viewRoot, frames!);
+  }
+
+  viewOn.addEventListener("change", () => drawScene(scene));
+  layout.addEventListener("change", async () => {
+    try {
+      const result = await inspect<SolutionResult>(file.value, [], layout.value.trim() || undefined);
+      await drawScene(result.frames);
+      show("");
+    } catch (error) {
+      show(String(error), false);
+    }
+  });
 
   /** Lists the file's signals and starts with one default row; false if that failed. */
   async function loadSignals(): Promise<boolean> {
@@ -236,11 +264,8 @@ export function setupInspect() {
         signals = solution.signals;
         summaryText.textContent = result.summary;
         summaryText.hidden = false;
-        if (result.frames) {
-          viewRoot.hidden = false;
-          const { createViewer } = await import("./viewer");
-          viewer = createViewer(viewRoot, result.frames);
-        }
+        viewBar.hidden = !result.frames;
+        await drawScene(result.frames);
       } else {
         signals = result.signals;
         showInfo(result.summary);

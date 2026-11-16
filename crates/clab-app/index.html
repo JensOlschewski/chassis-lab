@@ -103,6 +103,13 @@
         <form id="inspect-signals" hidden>
           <dl id="inspect-info" class="info" hidden></dl>
           <pre id="inspect-summary" class="info" hidden></pre>
+          <div id="inspect-viewbar" hidden>
+            <label class="check"><input type="checkbox" id="inspect-view-on" checked />3D view</label>
+            <span class="path-row">
+              <input name="view" placeholder="optional view layout .json" />
+              <button type="button" data-browse="file" data-target="view" data-extensions="json">File…</button>
+            </span>
+          </div>
           <div id="inspect-view" hidden></div>
 
           <div id="curves" class="curves"></div>

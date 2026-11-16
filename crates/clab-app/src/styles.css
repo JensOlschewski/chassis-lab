@@ -189,7 +189,10 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .viewer-labels[hidden] { display: none; }
 .viewer-labels span { position: absolute; left: 0; top: 0; white-space: nowrap; color: var(--muted); }
 .viewer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; font-size: 0.8125rem; }
-.viewer-bar input[type=range] { flex: 1 1 160px; min-width: 120px; }
+.viewer-bar input[type=range] { flex: 1 1 160px; min-width: 120px; accent-color: var(--accent); }
+#inspect-viewbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 12px 0 0; }
+#inspect-viewbar[hidden] { display: none; }
+#inspect-viewbar .path-row { flex: 1 1 280px; }
 .viewer-bar button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); }
 .viewer-status { min-width: 9em; font-variant-numeric: tabular-nums; color: var(--muted); }
 .viewer-hint { display: block; margin-top: 6px; color: var(--muted); }
