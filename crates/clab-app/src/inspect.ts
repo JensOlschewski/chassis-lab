@@ -67,7 +67,8 @@ export function setupInspect() {
   const summaryText = document.querySelector<HTMLElement>("#inspect-summary")!;
   const viewRoot = document.querySelector<HTMLElement>("#inspect-view")!;
   const viewBar = document.querySelector<HTMLElement>("#inspect-viewbar")!;
-  const viewOn = document.querySelector<HTMLInputElement>("#inspect-view-on")!;
+  const viewOn = document.querySelector<HTMLButtonElement>("#inspect-view-on")!;
+  const viewShown = () => viewOn.getAttribute("aria-pressed") === "true";
   const layout = form.elements.namedItem("view") as HTMLInputElement;
   const curvesRoot = document.querySelector<HTMLElement>("#curves")!;
   const addButton = document.querySelector<HTMLButtonElement>("#add-curve")!;
@@ -224,23 +225,26 @@ export function setupInspect() {
     drawScene(null);
     viewBar.hidden = true;
     layout.value = "";
-    viewOn.checked = true;
+    viewOn.setAttribute("aria-pressed", "true");
     solution = null;
     curvesRoot.replaceChildren();
   };
 
-  /** Replaces the 3D view; `null`, or the checkbox off, leaves none. */
+  /** Replaces the 3D view; `null`, or the Viewer button off, leaves none. */
   async function drawScene(frames: ViewFrame[] | null): Promise<void> {
     viewer?.destroy();
     viewer = null;
     scene = frames;
-    viewRoot.hidden = !frames || !viewOn.checked;
+    viewRoot.hidden = !frames || !viewShown();
     if (viewRoot.hidden) return;
     const { createViewer } = await import("./viewer");
     viewer = createViewer(viewRoot, frames!);
   }
 
-  viewOn.addEventListener("change", () => drawScene(scene));
+  viewOn.addEventListener("click", () => {
+    viewOn.setAttribute("aria-pressed", String(!viewShown()));
+    drawScene(scene);
+  });
   layout.addEventListener("change", async () => {
     try {
       const result = await inspect<SolutionResult>(file.value, [], layout.value.trim() || undefined);
