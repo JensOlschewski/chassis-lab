@@ -86,12 +86,24 @@ jobs:
         if: runner.os == 'Linux'
         run: packaging/build-embedded-runtime.sh dist/embed-bundle-linux-x86_64
 
+      - name: Download MATLAB solver and Runtime installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download mks-assets-r2024b --pattern mks-windows-x86_64.zip --dir dist
+          Expand-Archive dist\mks-windows-x86_64.zip -DestinationPath dist
+
       - name: Build Windows embedded runtime
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          MKS_SOLVER_DIR: ${{ github.workspace }}\dist\mks-solver
+          MKS_RUNTIME_INSTALLER_DIR: ${{ github.workspace }}\dist\runtime-installer
         run: .\packaging\build-embedded-runtime-windows.ps1 dist\embed-bundle-windows-x86_64
 
-      - name: Download MATLAB solver and Runtime installer
+      - name: Download MATLAB solver and Runtime installer (macOS)
         if: runner.os == 'macOS'
         env:
           GH_TOKEN: ${{ github.token }}
