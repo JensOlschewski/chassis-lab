@@ -37,11 +37,16 @@ target triple: `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, or
 ## Solver
 
 `clab solve` runs `mks_solver`, a MATLAB Compiler executable built per OS by
-`packaging/build-mks-solver.sh` or `.ps1`. Set `MKS_SOLVER_BINARY` to that file
-when running a `build-embedded-runtime` script and it is copied to `bin/` next
-to `clab`, where `clab solve` and the desktop app find it. Without it the
-archive has no solver. The free MATLAB Runtime R2024b must be installed on the
-machine that solves; the app and `clab solve` report when it is missing.
+`packaging/build-mks-solver.sh` or `.ps1`. The same build makes `mks_runtime`,
+the small web installer behind `clab runtime install`. Set `MKS_SOLVER_DIR` and
+`MKS_RUNTIME_INSTALLER_DIR` to its output folders (`dist/mks-solver`,
+`dist/runtime-installer`) when running a `build-embedded-runtime` script. Both are
+copied to `bin/` next to `clab`, where `clab solve`, `clab runtime install` and the
+desktop app find them (on macOS as `mks_solver.app` and `mks_runtime.app`).
+Without them the archive has no solver.
+
+The MATLAB Runtime R2024b is not bundled. The app and `clab solve` offer to
+install it per user on first use.
 
 ## Locked Inputs
 

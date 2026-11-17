@@ -410,6 +410,7 @@ fn find_installer() -> Result<PathBuf> {
 fn installer_in(dir: &Path) -> Option<PathBuf> {
     [
         "mks_runtime.install",
+        "mks_runtime_linux.install",
         "mks_runtime.exe",
         "mks_runtime.app/Contents/MacOS/setup",
     ]
