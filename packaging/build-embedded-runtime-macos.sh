@@ -63,7 +63,9 @@ SH
 chmod +x "$output/bin/clab"
 rm "$pyo3_config"
 # `clab solve` finds the solver beside clab. See docs/runtime-packaging.md.
-if [ -n "${MKS_SOLVER_BINARY:-}" ]; then cp "$MKS_SOLVER_BINARY" "$output/bin/mks_solver"; fi
+# MKS_SOLVER_DIR and MKS_RUNTIME_INSTALLER_DIR are the outputs of build-mks-solver.sh.
+if [ -n "${MKS_SOLVER_DIR:-}" ]; then cp -R "$MKS_SOLVER_DIR"/mks_solver* "$output/bin/"; fi
+if [ -n "${MKS_RUNTIME_INSTALLER_DIR:-}" ]; then cp -R "$MKS_RUNTIME_INSTALLER_DIR"/mks_runtime* "$output/bin/"; fi
 
 find "$output" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$output" -name direct_url.json -delete

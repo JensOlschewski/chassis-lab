@@ -232,7 +232,10 @@ Without `--json` or `--view` it prints the time and the body velocities as text.
 
 #### MATLAB Runtime and `mks_solver`
 
-Environment variables (only needed for non-standard installs):
+Desktop and `clab` archives ship `mks_solver` and a small installer for the Runtime.
+`clab runtime install` (or the **Install MATLAB Runtime…** button in the Solve pane)
+installs the Runtime for the current user. Environment variables (only needed for
+non-standard installs):
 
 - `CLAB_MATLAB_RUNTIME` path to the MATLAB Runtime R2024b root. Without it
   `clab` checks the standard R2024b install locations.
