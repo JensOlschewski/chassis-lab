@@ -330,7 +330,12 @@ fn install_runtime() -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("cannot create {}", parent.display()))?;
     }
-    let status = Command::new(&installer)
+    let log = installer_log();
+    let log_start = log
+        .as_ref()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map_or(0, |m| m.len());
+    let mut child = Command::new(&installer)
         .args([
             "-mode",
             "silent",
@@ -339,8 +344,23 @@ fn install_runtime() -> Result<()> {
             "-destinationFolder",
         ])
         .arg(&dir)
-        .status()
+        .spawn()
         .with_context(|| format!("cannot start {}", installer.display()))?;
+    // The macOS installer logs "End - Successful" but its process never exits.
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if log
+            .as_deref()
+            .is_some_and(|p| log_reports_success(p, log_start))
+        {
+            child.kill()?;
+            child.wait()?;
+            break std::process::ExitStatus::default();
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    };
     if !status.success() {
         bail!("MATLAB Runtime installer failed: {status}");
     }
@@ -351,6 +371,21 @@ fn install_runtime() -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn installer_log() -> Option<PathBuf> {
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .ok()?;
+    Some(std::env::temp_dir().join(format!("mathworks_{user}.log")))
+}
+
+/// True when the installer log, past byte `from`, ends the run successfully.
+fn log_reports_success(log: &Path, from: u64) -> bool {
+    std::fs::read(log).is_ok_and(|bytes| {
+        let new = bytes.get(from as usize..).unwrap_or_default();
+        String::from_utf8_lossy(new).contains("End - Successful")
+    })
 }
 
 fn find_installer() -> Result<PathBuf> {
