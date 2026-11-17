@@ -73,7 +73,9 @@ foreach ($dll in @("python3.dll", "python312.dll", "vcruntime140.dll", "vcruntim
 }
 Remove-Item $pyo3Config -Force
 # `clab solve` finds the solver beside clab. See docs/runtime-packaging.md.
-if ($env:MKS_SOLVER_BINARY) { Copy-Item $env:MKS_SOLVER_BINARY (Join-Path $bin "mks_solver.exe") }
+# MKS_SOLVER_DIR and MKS_RUNTIME_INSTALLER_DIR are the outputs of build-mks-solver.ps1.
+if ($env:MKS_SOLVER_DIR) { Copy-Item (Join-Path $env:MKS_SOLVER_DIR "mks_solver.exe") $bin }
+if ($env:MKS_RUNTIME_INSTALLER_DIR) { Copy-Item (Join-Path $env:MKS_RUNTIME_INSTALLER_DIR "mks_runtime.exe") $bin }
 
 Get-ChildItem $output -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
 Get-ChildItem $output -Recurse -File -Filter direct_url.json | Remove-Item -Force
