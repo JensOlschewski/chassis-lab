@@ -26,7 +26,9 @@ function [kMatrixLok, cMatrixLok, cMatrixLokRange, kMatrixLokNullspace] = create
 
         case 'bushing'
             % Initialize lokal stiffness matrix (kMatrixLok) based on stiffness values k1-k6
-            kMatrixLok = diag([struct2array(conStruct.charStruct.k).kValue]);
+            kNames = {'k1', 'k2', 'k3', 'k4', 'k5', 'k6'};
+            kValues = cellfun(@(name) conStruct.charStruct.k.(name).kValue, kNames);
+            kMatrixLok = diag(kValues);
                 
             % Compute local compliance matrices from stiffness matrices
             cMatrixLok = computeLocCompMat(kMatrixLok);
