@@ -27,6 +27,8 @@ const SOLVER_NAME: &str = if cfg!(windows) {
 pub(crate) enum RuntimeCommand {
     /// Install the MATLAB Runtime the solver needs for this user.
     Install,
+    /// Succeed when the solver and the MATLAB Runtime it needs are both found.
+    Check,
 }
 
 #[derive(Debug, Args)]
@@ -316,6 +318,7 @@ fn user_runtime_dir() -> Option<PathBuf> {
 pub(crate) fn runtime(command: RuntimeCommand) -> Result<()> {
     match command {
         RuntimeCommand::Install => install_runtime(),
+        RuntimeCommand::Check => find_solver().and(find_runtime()).map(drop),
     }
 }
 

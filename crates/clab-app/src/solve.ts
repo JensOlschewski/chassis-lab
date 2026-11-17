@@ -76,7 +76,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
     installRuntime.hidden = !message.startsWith("MATLAB Runtime");
   };
 
-  installRuntime.addEventListener("click", async () => {
+  const offerInstall = async () => {
     const proceed = await ask(
       "The solver needs the MATLAB Runtime. It downloads about 1.5 GB and installs for your user only. This can take several minutes.\n\nBy installing you accept the MathWorks MATLAB Runtime license.",
       { title: "Install MATLAB Runtime", okLabel: "Install", cancelLabel: "Cancel" },
@@ -98,7 +98,22 @@ export function setupSolve(openInInspect: (path: string) => void) {
     } finally {
       setBusy(false);
     }
-  });
+  };
+
+  installRuntime.addEventListener("click", offerInstall);
+
+  // Offer the install once, on the first launch that finds the solver without its Runtime.
+  const offered = "runtimeOffered";
+  if (!localStorage.getItem(offered)) {
+    invoke<Outcome>("check_runtime")
+      .then((outcome) => {
+        if (outcome.exit_code === 0 || !errorLine(outcome.stderr)?.startsWith("MATLAB Runtime")) return;
+        localStorage.setItem(offered, "1");
+        installRuntime.hidden = false;
+        return offerInstall();
+      })
+      .catch(() => {});
+  }
 
   /** Values of a loaded design file; names without a cell (such as inside drive expressions) still reach the solver. */
   let loaded: Record<string, DesignValue> = {};
