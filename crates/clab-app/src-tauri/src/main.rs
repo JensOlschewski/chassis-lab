@@ -85,6 +85,12 @@ async fn run_solve(
     outcome
 }
 
+/// Succeeds when the solver and the MATLAB Runtime are found.
+#[tauri::command]
+async fn check_runtime(app: AppHandle) -> Result<worker::Outcome, String> {
+    worker::run(&app, ["runtime", "check"].map(Into::into).to_vec()).await
+}
+
 /// Installs the MATLAB Runtime the solver needs; this can take minutes while it downloads.
 #[tauri::command]
 async fn install_runtime(app: AppHandle) -> Result<worker::Outcome, String> {
@@ -258,6 +264,7 @@ fn main() {
             read_design,
             export_case,
             run_solve,
+            check_runtime,
             install_runtime,
             cancel_solve,
             solution_summary,
