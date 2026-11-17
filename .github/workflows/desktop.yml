@@ -61,6 +61,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-desktop-
 
+      # The MATLAB files are read-only, so Tauri cannot copy over a cached copy.
+      # Old installers in the cached bundle folder would also be uploaded.
+      - name: Drop cached runtime resources and old bundles
+        shell: bash
+        run: rm -rf target/release/clab-runtime target/release/bundle
+
       - name: Install Rust build tools
         run: python -m pip install "cmake>=3.26,<4"
 
