@@ -1080,7 +1080,7 @@
     },
     "drives": {
         "force_torque_drives": {
-            "f3": {
+            "Force Left Wheelcenter": {
                 "signal": [
                     "sin(2*pi*1/30*TIME)*1000*0",
                     "sin(2*pi*1/30*TIME)*1000*0",
@@ -1092,7 +1092,7 @@
                 "i": 0,
                 "j": 3
             },
-            "f10": {
+            "Force Right Wheelcenter": {
                 "signal": [
                     "sin(2*pi*1/30*TIME)*1000*0",
                     "sin(2*pi*1/30*TIME)*1000*0",
@@ -1104,26 +1104,26 @@
                 "i": 0,
                 "j": 10
             },
-            "f4": {
+            "Force Left Wheelpatch": {
                 "signal": ["~", "sin(2*pi*1/30*TIME)*1000*0", "~", "~", "~", "~"],
                 "i": 0,
                 "j": 4
             },
-            "f11": {
+            "Force Right Wheelpatch": {
                 "signal": ["~", "sin(2*pi*1/30*TIME)*1000*0", "~", "~", "~", "~"],
                 "i": 0,
                 "j": 11
             }
         },
         "relonomic_drives": {
-            "b5": {
+            "Displacement Left Platform": {
                 "signal": ["~", "~", "+1*TIME", "~", "~", "~"],
                 "i": 0,
                 "j": 5,
                 "jointTopology": "secondary",
                 "jointID": 2
             },
-            "b12": {
+            "Displacement Right Platform": {
                 "signal": ["~", "~", "+1*TIME", "~", "~", "~"],
                 "i": 0,
                 "j": 12,
