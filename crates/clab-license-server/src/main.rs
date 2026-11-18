@@ -219,13 +219,23 @@ async fn main() -> Result<()> {
                     [
                         license.id.to_string(),
                         license.person,
-                        if license.revoked { "revoked" } else { "active" }.to_owned(),
+                        match (license.revoked, license.refused > 0) {
+                            (true, true) => "revoked, still asking",
+                            (true, false) => "revoked",
+                            (false, _) => "active",
+                        }
+                        .to_owned(),
                         if license.auto { "auto" } else { "manual" }.to_owned(),
                         or_dash(license.hostname),
                         or_dash(license.last_ip),
                         or_dash(license.last_seen.map(utc)),
                         or_dash(license.version),
-                        license.requests.to_string(),
+                        match (license.refused, license.refused_at) {
+                            (refused, Some(at)) if refused > 0 => {
+                                format!("{} ok, {refused} refused ({})", license.ok, utc(at))
+                            }
+                            _ => format!("{} ok", license.ok),
+                        },
                     ]
                 })
                 .collect();

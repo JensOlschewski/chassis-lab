@@ -164,7 +164,7 @@ async fn deactivate(
     Json(request): Json<SeatRequest>,
 ) -> Result<StatusCode, Failure> {
     let store = app.store.lock().expect("store lock");
-    store.deactivate(&request.key, &request.install_id)?;
+    store.deactivate(&request.key, &request.install_id, now())?;
     Ok(StatusCode::NO_CONTENT)
 }
 
