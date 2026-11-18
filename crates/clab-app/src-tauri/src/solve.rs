@@ -817,8 +817,16 @@ mod tests {
             ["hardpoints", "bushings", "forces", "drives", "simulation"]
         );
         assert!(cells(&sections).all(|cell| model.pointer(&cell.pointer).is_some()));
-        let bushings = sections.iter().find(|section| section.id == "bushings").unwrap();
-        assert!(bushings.rows.iter().all(|row| !row.name.ends_with("TBEFLEX")));
+        let bushings = sections
+            .iter()
+            .find(|section| section.id == "bushings")
+            .unwrap();
+        assert!(
+            bushings
+                .rows
+                .iter()
+                .all(|row| !row.name.ends_with("TBEFLEX"))
+        );
     }
 
     #[test]
