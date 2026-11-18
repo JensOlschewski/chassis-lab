@@ -50,7 +50,11 @@ enum Command {
     Name { id: i64, person: String },
     /// Free the seat of a license, for example after a machine change.
     Unbind { id: i64 },
-    /// Remove a license for good, for example one created by mistake. Prefer `revoke`.
+    /// Issue a new key for a lost or leaked one and print it once. The old key stops working and
+    /// the seat is freed.
+    Rekey { id: i64 },
+    /// Remove a license for good, for example one created by mistake. Prefer `revoke`. Its
+    /// machine block goes too.
     Delete { id: i64 },
     /// Show all licenses.
     List,
@@ -193,6 +197,13 @@ async fn main() -> Result<()> {
             store.unbind(id)?;
             println!("freed the seat of license {id} ({person})");
         }
+        Command::Rekey { id } => {
+            let store = open(&data, 0)?;
+            let person = person(&store, id)?;
+            if let Some(key) = store.rekey(id)? {
+                println!("license {id} for {person}; the old key no longer works\n{key}");
+            }
+        }
         Command::Delete { id } => {
             let store = open(&data, 0)?;
             let person = person(&store, id)?;
@@ -200,7 +211,7 @@ async fn main() -> Result<()> {
             println!("deleted license {id} ({person})");
         }
         Command::List => {
-            let rows: Vec<[String; 8]> = open(&data, 0)?
+            let rows: Vec<[String; 9]> = open(&data, 0)?
                 .list()?
                 .into_iter()
                 .map(|license| {
@@ -214,10 +225,11 @@ async fn main() -> Result<()> {
                         or_dash(license.last_ip),
                         or_dash(license.last_seen.map(utc)),
                         or_dash(license.version),
+                        license.requests.to_string(),
                     ]
                 })
                 .collect();
-            let widths: [usize; 8] = std::array::from_fn(|column| {
+            let widths: [usize; 9] = std::array::from_fn(|column| {
                 rows.iter().map(|row| row[column].len()).max().unwrap_or(0)
             });
             for row in &rows {

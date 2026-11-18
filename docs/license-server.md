@@ -58,16 +58,20 @@ Run on server:
 ```sh
 alias licenses='docker exec clab-license clab-license-server --data /data'
 licenses create --person "Ada Lovelace"   # manual license; prints key once
-licenses list                             # person, state, auto/manual, host, IP, last seen (UTC date and time), version
+licenses list                             # person, state, auto/manual, host, IP, last seen (UTC date and time), version, requests
 licenses name 3 "Ada Lovelace"            # name an automatic license
 licenses revoke 3                         # stop it, block its machine
 licenses unrevoke 3                       # undo revoke: license works, machine unblocked
 licenses unbind 3                         # free seat after machine change
+licenses rekey 3                          # new key (printed once) for a lost or leaked one; old key stops, seat freed
 licenses delete 3                         # remove license made by mistake; prefer revoke
 ```
 
-Keys stored as SHA-256 hashes, never shown again. Machine block belongs to
-license id and survives `delete`; `unrevoke <id>` before deleting lifts it.
+Keys stored as SHA-256 hashes, never shown again. After `rekey` the new key
+is activated with `clab license activate <NEWKEY>`. Machine block belongs to
+license id; `unrevoke` and `delete` both lift it. `requests` counts requests
+that name the license, including those of a revoked license and those refused
+because its machine is blocked.
 `serve --open-registration=false` stops new registrations; existing
 installations keep working.
 

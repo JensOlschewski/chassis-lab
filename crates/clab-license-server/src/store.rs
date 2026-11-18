@@ -15,9 +15,6 @@ const MAX_FINGERPRINT: usize = 128;
 const MAX_HOSTNAME: usize = 255;
 const MAX_VERSION: usize = 32;
 
-/// `user_version` of the current schema. Older databases are migrated on open.
-const SCHEMA_VERSION: i64 = 2;
-
 pub enum Failure {
     Denied(ErrorCode),
     Internal(rusqlite::Error),
@@ -44,6 +41,7 @@ pub struct Listed {
     pub last_ip: Option<String>,
     pub last_seen: Option<i64>,
     pub version: Option<String>,
+    pub requests: i64,
 }
 
 struct Row {
@@ -104,7 +102,7 @@ fn migrate(connection: &Connection) -> rusqlite::Result<()> {
         )",
     )?;
     let version: i64 = connection.query_row("pragma user_version", [], |row| row.get(0))?;
-    if version < SCHEMA_VERSION {
+    if version < 2 {
         connection.execute_batch(
             "begin;
             alter table licenses add column fingerprint text;
@@ -119,6 +117,14 @@ fn migrate(connection: &Connection) -> rusqlite::Result<()> {
                 blocked_at integer not null
             );
             pragma user_version = 2;
+            commit;",
+        )?;
+    }
+    if version < 3 {
+        connection.execute_batch(
+            "begin;
+            alter table licenses add column requests integer not null default 0;
+            pragma user_version = 3;
             commit;",
         )?;
     }
@@ -195,18 +201,34 @@ impl Store {
         )? > 0)
     }
 
-    /// The key then behaves like an unknown one. A machine block stays.
+    /// A new key for a lost or leaked one. The old key stops working and the seat is
+    /// freed, so the new key is activated afresh. Returns the key; it is not recoverable later.
+    pub fn rekey(&self, id: i64) -> rusqlite::Result<Option<String>> {
+        let key = new_key();
+        let changed = self.connection.execute(
+            "update licenses set key_hash = ?2, install_id = null, hostname = null, activated_at = null
+             where id = ?1",
+            params![id, hash(&key)],
+        )?;
+        Ok((changed > 0).then_some(key))
+    }
+
+    /// The key then behaves like an unknown one. The machine block goes with the license.
     pub fn delete(&self, id: i64) -> rusqlite::Result<bool> {
-        Ok(self
-            .connection
-            .execute("delete from licenses where id = ?1", [id])?
-            > 0)
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "delete from blocked_fingerprints where license_id = ?1",
+            [id],
+        )?;
+        let deleted = transaction.execute("delete from licenses where id = ?1", [id])? > 0;
+        transaction.commit()?;
+        Ok(deleted)
     }
 
     pub fn list(&self) -> rusqlite::Result<Vec<Listed>> {
         self.connection
             .prepare(
-                "select id, person, revoked, auto, hostname, last_ip, last_seen, version
+                "select id, person, revoked, auto, hostname, last_ip, last_seen, version, requests
                  from licenses order by id",
             )?
             .query_map([], |row| {
@@ -219,6 +241,7 @@ impl Store {
                     last_ip: row.get(5)?,
                     last_seen: row.get(6)?,
                     version: row.get(7)?,
+                    requests: row.get(8)?,
                 })
             })?
             .collect()
@@ -253,7 +276,7 @@ impl Store {
             Some((id, person)) => {
                 self.connection.execute(
                     "update licenses set key_hash = ?1, install_id = ?2, hostname = ?3, last_ip = ?4,
-                     last_seen = ?5, version = ?6 where id = ?7",
+                     last_seen = ?5, version = ?6, requests = requests + 1 where id = ?7",
                     params![hash(&key), request.install_id, request.hostname, ip, now as i64, request.version, id],
                 )?;
                 (id, person)
@@ -261,8 +284,8 @@ impl Store {
             None => {
                 self.connection.execute(
                     "insert into licenses (key_hash, person, auto, install_id, hostname, fingerprint,
-                     activated_at, last_seen, last_ip, version)
-                     values (?1, ?2, 1, ?3, ?2, ?4, ?5, ?5, ?6, ?7)",
+                     activated_at, last_seen, last_ip, version, requests)
+                     values (?1, ?2, 1, ?3, ?2, ?4, ?5, ?5, ?6, ?7, 1)",
                     params![
                         hash(&key),
                         request.hostname,
@@ -352,16 +375,19 @@ impl Store {
         Ok(())
     }
 
+    /// Whether the machine is blocked. A refused request counts for the license that caused the block.
     fn blocked(&self, fingerprint: &str) -> rusqlite::Result<bool> {
-        self.connection.query_row(
-            "select exists(select 1 from blocked_fingerprints where fingerprint = ?1)",
+        Ok(self.connection.execute(
+            "update licenses set requests = requests + 1 where id in
+             (select license_id from blocked_fingerprints where fingerprint = ?1)",
             [fingerprint],
-            |row| row.get(0),
-        )
+        )? > 0)
     }
 
+    /// Looks the key up and counts the request, also for a revoked license.
     fn find(&self, key: &str) -> rusqlite::Result<Option<Row>> {
-        self.connection
+        let row = self
+            .connection
             .query_row(
                 "select id, person, revoked, install_id from licenses where key_hash = ?1",
                 [hash(key)],
@@ -374,7 +400,14 @@ impl Store {
                     })
                 },
             )
-            .optional()
+            .optional()?;
+        if let Some(row) = &row {
+            self.connection.execute(
+                "update licenses set requests = requests + 1 where id = ?1",
+                [row.id],
+            )?;
+        }
+        Ok(row)
     }
 
     /// A known, unrevoked license.
@@ -790,19 +823,74 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_license_keeps_the_machine_block() {
+    fn deleting_a_license_lifts_its_machine_block() {
         let store = store();
-        let registered = store
-            .register(&registration("a", "fp-1", "pc"), None, NOW)
+        let (id, key) = store.create("Ada").unwrap();
+        store
+            .activate(&activation(&key, "a", "pc"), None, NOW)
             .ok()
             .unwrap();
-        let id = verified(&store, &registered.token).license_id;
         store.revoke(id, NOW).unwrap();
-        store.delete(id).unwrap();
         assert_eq!(
-            denied(store.register(&registration("b", "fp-1", "pc"), None, NOW)),
+            denied(store.activate(&activation(&key, "a", "pc"), None, NOW)),
             ErrorCode::InvalidKey
         );
+        store.delete(id).unwrap();
+        let (_, other_key) = store.create("Grace").unwrap();
+        assert!(
+            store
+                .activate(&activation(&other_key, "b", "pc"), None, NOW)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn rekeying_replaces_the_key_and_frees_the_seat() {
+        let store = store();
+        let (id, key) = store.create("Ada").unwrap();
+        store
+            .activate(&activation(&key, "a", "pc"), None, NOW)
+            .ok()
+            .unwrap();
+        let new = store.rekey(id).unwrap().unwrap();
+        assert_ne!(new, key);
+        assert_eq!(
+            denied(store.validate(&validation(&key, "a"), None, NOW)),
+            ErrorCode::InvalidKey
+        );
+        assert_eq!(
+            denied(store.validate(&validation(&new, "a"), None, NOW)),
+            ErrorCode::NotActivated
+        );
+        assert!(
+            store
+                .activate(&activation(&new, "b", "laptop"), None, NOW)
+                .is_ok()
+        );
+        let listed = &store.list().unwrap()[0];
+        assert_eq!((listed.id, listed.person.as_str()), (id, "Ada"));
+        assert!(store.rekey(999).unwrap().is_none());
+    }
+
+    #[test]
+    fn requests_are_counted_also_after_revoking() {
+        let store = store();
+        let (id, key) = store.create("Ada").unwrap();
+        store
+            .activate(&activation(&key, "a", "pc"), None, NOW)
+            .ok()
+            .unwrap();
+        store
+            .validate(&validation(&key, "a"), None, NOW)
+            .ok()
+            .unwrap();
+        assert_eq!(store.list().unwrap()[0].requests, 2);
+        store.revoke(id, NOW).unwrap();
+        let _ = store.validate(&validation(&key, "a"), None, NOW);
+        let _ = store.activate(&activation("CLAB-OTHER", "b", "pc"), None, NOW);
+        let listed = &store.list().unwrap()[0];
+        assert!(listed.revoked);
+        assert_eq!(listed.requests, 4);
     }
 
     #[test]
@@ -856,7 +944,7 @@ mod tests {
             .connection
             .query_row("pragma user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(version, 3);
     }
 
     #[test]
