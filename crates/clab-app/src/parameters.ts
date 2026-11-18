@@ -28,7 +28,11 @@ export interface Section {
 export const decimalMessage = "Numbers need . as the decimal point";
 export const invalidMessage = (input: HTMLInputElement) => (isEmpty(input) ? "Fill in every cell" : decimalMessage);
 
-const isEmpty = (input: HTMLInputElement) => input.type === "text" && input.value.trim() === "";
+/** A drive signal that is not defined is `~` in the model and an empty cell here. */
+const UNDEFINED = "~";
+
+const isEmpty = (input: HTMLInputElement) =>
+  input.type === "text" && input.dataset.kind !== "expression" && input.value.trim() === "";
 const isBad = (input: HTMLInputElement) =>
   isEmpty(input) || (input.dataset.kind === "number" && Number.isNaN(Number(input.value)));
 
@@ -44,7 +48,25 @@ const write = (input: HTMLInputElement, text: string) => {
 };
 
 /** The model's own value of a cell, as the user would type it. */
-const literal = (cell: Cell) => String(cell.value);
+const literal = (cell: Cell) => (cell.kind === "expression" && cell.value === UNDEFINED ? "" : String(cell.value));
+
+/** The model's own value of an input, which `modelValue` compares against. */
+const modelDefault = (input: HTMLInputElement) => {
+  const original = input.dataset.default!;
+  const { kind } = input.dataset;
+  if (kind === "number") return Number(original);
+  if (kind === "switch") return Number(original === "true" || original === "1");
+  return kind === "expression" ? original || UNDEFINED : original;
+};
+
+/** An input's value as the model holds it. */
+const modelValue = (input: HTMLInputElement) => {
+  const { kind, off } = input.dataset;
+  if (off === "true") return UNDEFINED;
+  if (kind === "number") return Number(input.value);
+  if (kind === "switch") return Number(input.checked);
+  return kind === "expression" ? input.value.trim() || UNDEFINED : input.value;
+};
 
 function createInput(cell: Cell, kept: Map<string, string>) {
   const input = document.createElement("input");
@@ -66,13 +88,32 @@ function createInput(cell: Cell, kept: Map<string, string>) {
   return input;
 }
 
+/** Drive signals have no `active` value in the model: a drive is active when any of its signals is defined. */
+function createDriveToggle(row: HTMLTableRowElement, cells: Cell[]) {
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggle.title = "active";
+  toggle.checked = cells.some((cell) => cell.value !== UNDEFINED);
+  const apply = () =>
+    inputs(row).forEach((input) => {
+      input.disabled = !toggle.checked;
+      input.dataset.off = String(!toggle.checked);
+      fire(input);
+    });
+  toggle.addEventListener("change", apply);
+  row.insertCell().append(toggle);
+  return apply;
+}
+
 /** A foldable table of one section. Variable inputs take their text from `kept`, by variable name. */
 export function createSection(section: Section, kept: Map<string, string>, open: boolean) {
   const body = document.createElement("tbody");
+  const drives = section.id === "drives";
 
   section.rows.forEach(({ name, cells }) => {
     const row = body.insertRow();
     row.insertCell().textContent = name;
+    const applyToggle = drives ? createDriveToggle(row, cells) : undefined;
     let next = 0;
     cells.forEach((cell) => {
       for (; next < cell.column; next++) row.insertCell();
@@ -82,6 +123,7 @@ export function createSection(section: Section, kept: Map<string, string>, open:
       next = cell.column + cell.span;
     });
     for (; next < section.columns.length; next++) row.insertCell();
+    applyToggle?.();
   });
 
   setupGrid(body, (input) => {
@@ -89,7 +131,7 @@ export function createSection(section: Section, kept: Map<string, string>, open:
   });
 
   const head = element("tr");
-  ["", ...section.columns].forEach((title) => head.append(element("th", title)));
+  ["", ...(drives ? ["Active"] : []), ...section.columns].forEach((title) => head.append(element("th", title)));
   const table = element("table", "", "grid");
   table.createTHead().append(head);
   table.append(body);
@@ -125,8 +167,8 @@ export function readParameters(root: ParentNode) {
     const { kind, variable, pointer } = input.dataset;
     if (variable) {
       design[variable] = kind === "number" ? Number(input.value) : kind === "switch" ? input.checked : input.value;
-    } else if (read(input) !== input.dataset.default) {
-      overrides[pointer!] = kind === "number" ? Number(input.value) : kind === "switch" ? Number(input.checked) : input.value;
+    } else if (modelValue(input) !== modelDefault(input)) {
+      overrides[pointer!] = modelValue(input);
     }
   }
   return { design, overrides };

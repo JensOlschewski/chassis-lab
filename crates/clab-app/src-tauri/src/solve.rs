@@ -154,6 +154,14 @@ fn stiffness_cells(model: &Value, owner: &str, labels: &[&str]) -> Vec<Cell> {
     }
 }
 
+/// Flex bushings (`primaryFlex`, `secondaryFlex`) are ignored by the solver, so there is nothing to edit.
+fn is_flex(model: &Value, group: &str, name: &str) -> bool {
+    model
+        .pointer(&format!("/{group}/{}/bushTopology", escape(name)))
+        .and_then(Value::as_str)
+        .is_some_and(|topology| topology.ends_with("Flex"))
+}
+
 fn bushing_row(model: &Value, group: &str, name: &str) -> Row {
     let owner = format!("/{group}/{}", escape(name));
     let mut cells = cells_at(
@@ -237,7 +245,9 @@ fn parameters(model: &Value) -> Result<Vec<Section>, String> {
     let bushings = BUSHING_GROUPS
         .iter()
         .flat_map(|group| {
-            members(model, &format!("/{group}")).map(move |name| bushing_row(model, group, name))
+            members(model, &format!("/{group}"))
+                .filter(move |name| !is_flex(model, group, name))
+                .map(move |name| bushing_row(model, group, name))
         })
         .collect();
     let forces = members(model, "/additional_forces")
@@ -807,6 +817,8 @@ mod tests {
             ["hardpoints", "bushings", "forces", "drives", "simulation"]
         );
         assert!(cells(&sections).all(|cell| model.pointer(&cell.pointer).is_some()));
+        let bushings = sections.iter().find(|section| section.id == "bushings").unwrap();
+        assert!(bushings.rows.iter().all(|row| !row.name.ends_with("TBEFLEX")));
     }
 
     #[test]

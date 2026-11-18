@@ -89,12 +89,15 @@ export function setupGrid(body: HTMLTableSectionElement, onInput: (input: HTMLIn
         textInput(cell)!.value = "";
         fire(textInput(cell)!);
       });
+    } else if (event.key === "Escape") {
+      input.select();
     } else if (arrow || event.key === "Enter") {
       clearSelection();
-      // Left and right move cells only at the edge of the text; up, down and Enter always do.
+      // A cell is either selected as a whole or being edited. Left and right move cells only while it is
+      // selected as a whole (a click or Esc does that); once the text is being edited they move the caret.
       const sideways = arrow && arrow[1] !== 0;
-      const atEdge = event.key === "ArrowLeft" ? input.selectionStart === 0 : input.selectionEnd === input.value.length;
-      if (sideways && !atEdge) return;
+      const editing = input.selectionStart !== 0 || input.selectionEnd !== input.value.length;
+      if (sideways && editing) return;
       event.preventDefault();
       moveFocus(td, arrow ?? [1, 0]);
     }
