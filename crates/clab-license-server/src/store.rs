@@ -193,10 +193,10 @@ impl Store {
             "delete from blocked_fingerprints where license_id = ?1",
             [id],
         )?;
-        Ok(self
-            .connection
-            .execute("update licenses set revoked = 0 where id = ?1", [id])?
-            > 0)
+        Ok(self.connection.execute(
+            "update licenses set revoked = 0, refused = 0, refused_at = null where id = ?1",
+            [id],
+        )? > 0)
     }
 
     pub fn rename(&self, id: i64, person: &str) -> rusqlite::Result<bool> {
@@ -916,9 +916,13 @@ mod tests {
             (listed.ok, listed.refused, listed.refused_at),
             (2, 2, Some((NOW + 9) as i64))
         );
-        // A new revoke starts the refusals afresh.
+        // Unrevoking and revoking again both start the refusals afresh.
         store.unrevoke(id).unwrap();
+        let listed = &store.list().unwrap()[0];
+        assert_eq!((listed.refused, listed.refused_at), (0, None));
         store.revoke(id, NOW + 20).unwrap();
+        let _ = store.validate(&validation(&key, "a"), None, NOW + 21);
+        store.revoke(id, NOW + 22).unwrap();
         let listed = &store.list().unwrap()[0];
         assert_eq!((listed.refused, listed.refused_at), (0, None));
     }
