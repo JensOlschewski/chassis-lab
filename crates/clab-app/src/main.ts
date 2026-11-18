@@ -4,7 +4,7 @@ import { setupInspect } from "./inspect";
 import { setupSession } from "./session";
 import { setupSolve } from "./solve";
 
-const navItems = document.querySelectorAll<HTMLButtonElement>(".nav-item");
+const navItems = document.querySelectorAll<HTMLButtonElement>(".nav-item[data-pane]");
 const panes = document.querySelectorAll<HTMLElement>(".pane");
 
 function showPane(id: string): void {

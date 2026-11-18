@@ -144,9 +144,19 @@ export function setupSession(
     saveAs: () => saveSession(true),
   };
 
+  const menu = document.querySelector<HTMLDetailsElement>(".session-menu")!;
   document.querySelectorAll<HTMLButtonElement>("[data-session]").forEach((button) =>
-    button.addEventListener("click", () => actions[button.dataset.session!]()),
+    button.addEventListener("click", () => {
+      menu.open = false;
+      void actions[button.dataset.session!]();
+    }),
   );
+  document.addEventListener("click", (event) => {
+    if (!menu.contains(event.target as Node)) menu.open = false;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") menu.open = false;
+  });
 
   document.addEventListener("keydown", (event) => {
     if (!(event.ctrlKey || event.metaKey)) return;
