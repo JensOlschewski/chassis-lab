@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod analyze;
+#[cfg(all(unix, any(target_os = "macos", test)))]
+mod cli_link;
 mod convert;
 mod inspect;
 mod report;
@@ -254,6 +256,11 @@ fn main() {
         .setup(|app| {
             // Extracted inputs of earlier runs are unreachable now; a failure only wastes disk.
             let _ = session::clear_cache(&sessions_cache(app.handle())?);
+            // The terminal command is a convenience; the app works without it.
+            #[cfg(target_os = "macos")]
+            if let Err(error) = cli_link::install(app.handle()) {
+                eprintln!("could not link clab into ~/.local/bin: {error}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
