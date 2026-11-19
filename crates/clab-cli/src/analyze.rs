@@ -13,7 +13,7 @@ use clap::Args;
 use sha2::{Digest, Sha256};
 
 use crate::analysis::{
-    display,
+    OpenFiles, display,
     knc::{self, KncTest},
     svc,
 };
@@ -182,6 +182,7 @@ fn write_combined_run(
         .map(|reports| reports.warnings.clone())
         .unwrap_or_default();
     let mut knc_reports = Vec::new();
+    let mut files = OpenFiles::default();
     for &(test, unit, path) in knc_tests {
         let debug = debug_info(args.debug, &args.config, &[path])?;
         let report = knc::analyze_input(
@@ -190,6 +191,7 @@ fn write_combined_run(
             path,
             svc_corner_mass_kg.as_ref(),
             debug.as_deref(),
+            &mut files,
         )?;
         warnings.extend(report.warnings.iter().cloned());
         knc_reports.push((test, unit, path, report, debug));
@@ -888,7 +890,14 @@ fn write_knc(
     run: Option<&Path>,
 ) -> Result<()> {
     let debug = debug_info(args.debug, &args.config, &[input])?;
-    let report = knc::analyze_input(config, test, input, None, debug.as_deref())?;
+    let report = knc::analyze_input(
+        config,
+        test,
+        input,
+        None,
+        debug.as_deref(),
+        &mut OpenFiles::default(),
+    )?;
     let footer = analysis_footer(&args.config, config, &report.conditions, input, run)?;
     show_knc_section(args, test, &[&report]);
     let Some(output) = &args.output else {

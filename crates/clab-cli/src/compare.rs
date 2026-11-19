@@ -7,14 +7,14 @@ use std::{
 };
 
 use anyhow::{Result, bail};
-use clab_core::canonical_hdf5::{CanonicalFile, SourceKind};
+use clab_core::canonical_hdf5::SourceKind;
 use clap::Args;
 use serde::Serialize;
 use sha2::Digest;
 
 use crate::{
     analysis::{
-        display,
+        OpenFiles, display,
         knc::{self, KncTest},
         svc,
     },
@@ -690,6 +690,7 @@ pub(crate) fn compare(args: CompareArgs) -> Result<()> {
 
 fn load_input(config: &Path, path: &Path) -> Result<Input> {
     validate_comparison_input(path)?;
+    let mut files = OpenFiles::default();
     let extension = path
         .extension()
         .and_then(|v| v.to_str())
@@ -701,7 +702,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
         Some("json") => clab_core::config::load_config_with_input(config, path, None)
             .map(|case| (case, true, false)),
         Some("h5" | "hdf5") => {
-            let file = CanonicalFile::open(path)?;
+            let file = files.open(path)?;
             match (
                 file.summary().domain.as_deref(),
                 file.summary().test.as_deref(),
@@ -779,7 +780,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
             }
         }
         for path in paths {
-            if let Some(warning) = CanonicalFile::open(path)?.summary().legacy_warning() {
+            if let Some(warning) = files.open(path)?.summary().legacy_warning() {
                 eprintln!("warning: {warning}");
             }
         }
@@ -790,7 +791,7 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
     if include_svc && case.svc_source_kind.is_some() {
         let values = match case.svc_source_kind {
             Some(clab_core::config::SourceKind::Simulation) if is_hdf5(&case.simulation_json) => {
-                svc::evaluate_hdf5_case(&case)?
+                svc::evaluate_hdf5_case(&case, &mut files)?
             }
             Some(clab_core::config::SourceKind::Simulation) => svc::evaluate_case(&case)?,
             Some(clab_core::config::SourceKind::Measurement) => {
@@ -818,7 +819,14 @@ fn load_input(config: &Path, path: &Path) -> Result<Input> {
     }
     let mut knc_reports = Vec::new();
     for (test, unit, source) in &units {
-        let report = knc::analyze_input(unit, *test, source, svc_corner_mass_kg.as_ref(), None)?;
+        let report = knc::analyze_input(
+            unit,
+            *test,
+            source,
+            svc_corner_mass_kg.as_ref(),
+            None,
+            &mut files,
+        )?;
         sources.push(source.clone());
         if let Some(static_input) = test
             .config(unit)

@@ -20,6 +20,7 @@ use clab_core::conventions::{
 
 use crate::progress::ReportProgress;
 
+use super::OpenFiles;
 use super::display::{mapping_missing, missing_unit_warning, tag_warnings};
 
 const CORNERS: [&str; 4] = ["front_left", "front_right", "rear_left", "rear_right"];
@@ -557,8 +558,10 @@ pub(crate) fn analyze_input(
     path: &Path,
     svc_corner_mass_kg: Option<&BTreeMap<String, f64>>,
     debug: Option<&str>,
+    files: &mut OpenFiles,
 ) -> Result<Reports> {
-    let file = CanonicalFile::open(path)
+    let file = files
+        .open(path)
         .with_context(|| format!("failed to read HDF5 '{}'", path.display()))?;
     let conditions = Conditions::from_file(&file)?;
     let (curves, mut warnings, normalization) = match file.summary().source_kind {
@@ -572,7 +575,7 @@ pub(crate) fn analyze_input(
                     config,
                     test,
                     &mut curves,
-                    &CanonicalFile::open(static_path)?,
+                    &*files.open(static_path)?,
                 )?);
                 (
                     curves,
