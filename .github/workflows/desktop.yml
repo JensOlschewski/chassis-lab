@@ -143,6 +143,16 @@ jobs:
         working-directory: crates/clab-app
         run: npm run ${{ matrix.script }}
 
+      - name: Check the .deb puts clab on PATH
+        if: runner.os == 'Linux'
+        run: |
+          deb=$(ls target/release/bundle/deb/*.deb)
+          sudo dpkg -i "$deb"
+          test "$(readlink /usr/bin/clab)" = /usr/lib/ChassisLab/clab-runtime/bin/clab
+          clab --version
+          sudo dpkg -r "$(dpkg-deb -f "$deb" Package)"
+          test ! -e /usr/bin/clab
+
       - name: Upload desktop bundle
         uses: actions/upload-artifact@v7
         with:

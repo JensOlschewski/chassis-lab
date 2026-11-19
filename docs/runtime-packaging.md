@@ -48,6 +48,25 @@ Without them the archive has no solver.
 The MATLAB Runtime R2024b is not bundled. The app and `clab solve` offer to
 install it per user on first use.
 
+## Desktop installers and PATH
+
+The desktop bundles carry this layout as the `clab-runtime/` resource. Each
+installer exposes its `bin/clab` without moving it, because libraries resolve
+relative to the real binary:
+
+- Linux `.deb`: `postinst.sh` links `/usr/bin/clab` to
+  `/usr/lib/ChassisLab/clab-runtime/bin/clab` unless a regular file is there;
+  `prerm.sh` removes the link on removal.
+- Windows NSIS (`installMode: currentUser`): `windows/hooks.nsh` adds
+  `<install dir>\clab-runtime\bin` to the user `PATH` (HKCU, `REG_EXPAND_SZ`) and
+  removes it on uninstall.
+- macOS DMG: the app links `~/.local/bin/clab` at start (`cli_link.rs`). It
+  repoints a link into an older ChassisLab bundle and leaves any other `clab`
+  alone. Development builds have no bundled runtime and skip it.
+
+CI checks the `.deb` only (install, `clab --version`, remove). Windows and macOS
+are checked by hand: install, new terminal, `clab --version`, uninstall.
+
 ## Locked Inputs
 
 Each platform has its own lock file:

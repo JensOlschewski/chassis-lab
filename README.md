@@ -230,6 +230,21 @@ clab solve matlab/examples/mlta-model-file-1e2.json \
 
 Without `--json` or `--view` it prints the time and the body velocities as text.
 
+#### `clab` on the command line
+
+The desktop installers also make `clab` available in a terminal. It uses the
+license the app activated.
+
+- Linux (`.deb`): `/usr/bin/clab` links to the bundled `clab`.
+- Windows (`.exe`): the install folder's `clab-runtime\bin` is added to your user
+  `PATH`. Open a new terminal afterwards.
+- macOS (`.dmg`): the app links `~/.local/bin/clab` when it starts. Add
+  `~/.local/bin` to your `PATH` if it is not there yet.
+
+An existing `clab` earlier on your `PATH` (for example `~/.cargo/bin/clab`) is used
+instead; `which clab` shows which one runs. The macOS link never replaces a `clab`
+you put in `~/.local/bin` yourself.
+
 #### MATLAB Runtime and `mks_solver`
 
 Desktop and `clab` archives ship `mks_solver` and a small installer for the Runtime.
