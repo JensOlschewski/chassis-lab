@@ -13,6 +13,7 @@ use clab_core::{
 };
 use sha2::{Digest, Sha256};
 
+use super::OpenFiles;
 use super::display::{mapping_missing, missing_unit_warning, tag_warnings};
 
 const WHEEL_LOADS: [&str; 4] = [
@@ -87,7 +88,7 @@ pub(crate) fn evaluate_case(config: &CaseConfig) -> Result<BTreeMap<String, f64>
 }
 
 pub(crate) fn analyze_hdf5(config: &CaseConfig) -> Result<Reports> {
-    let (values, warnings) = evaluate_hdf5(config)?;
+    let (values, warnings) = evaluate_hdf5(config, &mut OpenFiles::default())?;
     reports(config, values, warnings)
 }
 
@@ -105,8 +106,11 @@ pub(crate) fn supports_hdf5(config: &CaseConfig, simulation: &CanonicalFile) -> 
     })
 }
 
-fn evaluate_hdf5(config: &CaseConfig) -> Result<(BTreeMap<String, f64>, Vec<String>)> {
-    let simulation = CanonicalFile::open(&config.simulation_json).with_context(|| {
+fn evaluate_hdf5(
+    config: &CaseConfig,
+    files: &mut OpenFiles,
+) -> Result<(BTreeMap<String, f64>, Vec<String>)> {
+    let simulation = files.open(&config.simulation_json).with_context(|| {
         format!(
             "failed to read SVC simulation HDF5 '{}'",
             config.simulation_json.display()
@@ -129,8 +133,11 @@ fn evaluate_hdf5(config: &CaseConfig) -> Result<(BTreeMap<String, f64>, Vec<Stri
     Ok((values, warnings))
 }
 
-pub(crate) fn evaluate_hdf5_case(config: &CaseConfig) -> Result<BTreeMap<String, f64>> {
-    Ok(evaluate_hdf5(config)?.0)
+pub(crate) fn evaluate_hdf5_case(
+    config: &CaseConfig,
+    files: &mut OpenFiles,
+) -> Result<BTreeMap<String, f64>> {
+    Ok(evaluate_hdf5(config, files)?.0)
 }
 
 fn evaluate(
