@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "clab-app"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "clab-cli"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "clab-converter",
@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "clab-converter"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "clab-core",
@@ -567,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "clab-core"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "hdf5-metno",
@@ -580,7 +580,7 @@ dependencies = [
 
 [[package]]
 name = "clab-license"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -591,7 +591,7 @@ dependencies = [
 
 [[package]]
 name = "clab-license-server"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "axum",
