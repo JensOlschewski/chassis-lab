@@ -55,7 +55,13 @@ RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,@loader_path/../lib" \
 cp "$root/target/x86_64-apple-darwin/release/clab" "$output/bin/clab-bin"
 cat > "$output/bin/clab" <<'SH'
 #!/bin/sh
-root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+self=$0
+while [ -L "$self" ]; do
+  dir=$(dirname -- "$self")
+  self=$(readlink -- "$self")
+  case $self in /*) ;; *) self=$dir/$self ;; esac
+done
+root=$(CDPATH= cd -- "$(dirname -- "$self")/.." && pwd -P)
 unset PYTHONHOME PYTHONPATH VIRTUAL_ENV DYLD_LIBRARY_PATH
 export PYTHONHOME="$root"
 exec "$root/bin/clab-bin" "$@"
