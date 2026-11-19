@@ -40,7 +40,7 @@ enum Command {
     #[command(subcommand)]
     Runtime(solve::RuntimeCommand),
     /// Manage the license of this installation.
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     License(license::LicenseCommand),
     /// Generate shell completion scripts.
     Completion { shell: Shell },

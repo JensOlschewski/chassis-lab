@@ -39,7 +39,8 @@ These commands are gated with license check.
 
 `clab convert|analyze|compare|inspect|solve`
 (`crates/clab-cli/src/license.rs`). `--help`, `--version`, `clab license ...`
-need none.
+need none. `clab license` is hidden from `clab --help` and completions, but
+still runs.
 
 - State: `license.json` in user config dir (`~/.config/clab` on Linux), mode
   `0600`. Holds install ID, key, token.

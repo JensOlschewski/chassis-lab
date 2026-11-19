@@ -13,6 +13,26 @@ fn emits_shell_completions() {
 }
 
 #[test]
+fn license_command_is_hidden_but_runnable() {
+    let clab = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_clab"))
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let help = clab(&["--help"]);
+    assert!(help.status.success());
+    assert!(!String::from_utf8(help.stdout).unwrap().contains("license"));
+    let license = clab(&["license", "--help"]);
+    assert!(license.status.success());
+    assert!(
+        String::from_utf8(license.stdout)
+            .unwrap()
+            .contains("activate")
+    );
+}
+
+#[test]
 fn report_bundle_flags_are_report_only() {
     for command in ["analyze", "compare"] {
         let output = Command::new(env!("CARGO_BIN_EXE_clab"))
