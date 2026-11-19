@@ -2,6 +2,12 @@
   "bundle": {
     "resources": {
       "../../../dist/embed-bundle-linux-x86_64/": "clab-runtime/"
+    },
+    "linux": {
+      "deb": {
+        "postInstallScript": "./linux/postinst.sh",
+        "preRemoveScript": "./linux/prerm.sh"
+      }
     }
   }
 }
