@@ -32,15 +32,10 @@ end
 
 % Output for connectors
 if outputStruct.isConOutput
-    % Initialize joint and bushing structures
     joints = struct();
-    bushings = struct();
-
-    % Function for process connector output
-    [joints.primary, bushings.primary] = processConnectors(jointPrimStruct, bushPrimStruct, historyStruct, timeArray, h);
-    [joints.secondary, bushings.secondary] = processConnectors(jointSecStruct, bushSecStruct, historyStruct, timeArray, h);
+    joints.primary = processConnectors(jointPrimStruct, bushPrimStruct, historyStruct, timeArray, h);
+    joints.secondary = processConnectors(jointSecStruct, bushSecStruct, historyStruct, timeArray, h);
     historyStruct.joints = joints;
-    historyStruct.bushings = bushings;
 end
 
 
@@ -171,86 +166,78 @@ end
 end
 
 
-function [joints,bushings] = processConnectors(jointStruct, bushStruct, historyStruct, timeArray, h)
+function joints = processConnectors(jointStruct, bushStruct, historyStruct, timeArray, h)
 
 % Extract number of joints
 numJoints = numel(jointStruct);
 
 % Predefine the structure fields for joint Struct
 joints = struct();
-bushings = struct();
 
 % Loop over all joints in jointStruct
 for idx = 1:numJoints
 
-    % Determine 'conMode' (joint or bushing)
-    conMode = 'joint';
-    if idx <= numel(bushStruct) && bushStruct(idx).active && ismember(bushStruct(idx).jointID, [jointStruct.jointID])
-        conMode = 'bushing';
+    % The joint stays in the solver with an active bushing: fpi/fpj hold the
+    % joint reaction plus the bushing force.
+    currentJointStruct = jointStruct(idx);
+
+    % Current topology
+    currentJointTopology = currentJointStruct.topology;
+
+    % Write basic information
+    joints(idx).name = currentJointStruct.name;
+    joints(idx).jointID = currentJointStruct.jointID;
+    joints(idx).type = currentJointStruct.type;
+
+    sidesName = {'i', 'j'};
+
+    % Iterate through sides
+    for k = 1:2
+        sideName = sidesName{k};
+        currentSideStruct = currentJointStruct.(sideName);
+        bodyID = currentSideStruct.bodyID;
+
+        joints(idx).(sideName).name = currentSideStruct.pointName;
+        joints(idx).(sideName).bodyID = bodyID;
+
+        % Process side
+        initialPosition = currentSideStruct.point;
+
+        if bodyID == 0
+            % Ground
+            numSteps = length(timeArray);
+            joints(idx).(sideName).velocity = zeros(6, numSteps);
+            joints(idx).(sideName).position = repmat(initialPosition, 1, numSteps);
+        else
+            % Extract v_hat for the body
+            bodyIndices = (bodyID * 6 - 5):(bodyID * 6);
+            vCmArray = historyStruct.v_hat(bodyIndices, :);
+
+            % s vector
+            s = currentSideStruct.s;
+
+            % Calculate velocities and positions
+            [velocity, position] = processSinglePoint(vCmArray, s, initialPosition, timeArray, h);
+
+            joints(idx).(sideName).velocity = velocity;
+            joints(idx).(sideName).position = position;
+        end
+
+        % Extract reaction forces
+        if strcmp(currentJointTopology,"primary")
+            reactionName = ['fp', sideName];
+        elseif strcmp(currentJointTopology,"secondary")
+            reactionName = ['fs', sideName];
+        end
+        reactionIndices = (currentJointStruct.jointID * 6 - 5):(currentJointStruct.jointID * 6);
+        joints(idx).(sideName).reactions = historyStruct.(reactionName)(reactionIndices, :);
     end
-
-    switch conMode
-        case 'joint'
-            currentJointStruct = jointStruct(idx);
-
-            % Current topology
-            currentJointTopology = currentJointStruct.topology;
-
-            % Write basic information
-            joints(idx).name = currentJointStruct.name;
-            joints(idx).jointID = currentJointStruct.jointID;
-            joints(idx).type = currentJointStruct.type;
-
-            sidesName = {'i', 'j'};
-
-            % Iterate through sides
-            for k = 1:2
-                sideName = sidesName{k};
-                currentSideStruct = currentJointStruct.(sideName);
-                bodyID = currentSideStruct.bodyID;
-
-                joints(idx).(sideName).name = currentSideStruct.pointName;
-                joints(idx).(sideName).bodyID = bodyID;
-
-                % Process side
-                initialPosition = currentSideStruct.point;
-
-                if bodyID == 0
-                    % Ground
-                    numSteps = length(timeArray);
-                    joints(idx).(sideName).velocity = zeros(6, numSteps);
-                    joints(idx).(sideName).position = repmat(initialPosition, 1, numSteps);
-                else
-                    % Extract v_hat for the body
-                    bodyIndices = (bodyID * 6 - 5):(bodyID * 6);
-                    vCmArray = historyStruct.v_hat(bodyIndices, :);
-
-                    % s vector
-                    s = currentSideStruct.s;
-
-                    % Calculate velocities and positions
-                    [velocity, position] = processSinglePoint(vCmArray, s, initialPosition, timeArray, h);
-
-                    joints(idx).(sideName).velocity = velocity;
-                    joints(idx).(sideName).position = position;
-                end
-
-                % Extract reaction forces
-                if strcmp(currentJointTopology,"primary")
-                    reactionName = ['fp', sideName];
-                elseif strcmp(currentJointTopology,"secondary")
-                    reactionName = ['fs', sideName];
-                end
-                reactionIndices = (currentJointStruct.jointID * 6 - 5):(currentJointStruct.jointID * 6);
-                joints(idx).(sideName).reactions = historyStruct.(reactionName)(reactionIndices, :);
-            end
-
-        case 'bushing'
-
-            % Process bushing
-
-    end
+    joints(idx).bushing = hasActiveBushing(bushStruct, currentJointStruct.jointID);
 end
+end
+
+function active = hasActiveBushing(bushStruct, jointID)
+active = isfield(bushStruct, 'active') && any([bushStruct.active] & [bushStruct.jointID] == jointID);
 end
 
 function entity = processEntity(entityStruct, historyStruct, timeArray, h, pointFields, initialPositions)
