@@ -134,7 +134,7 @@ fn prints_text_without_json() {
     let dir = tempfile::tempdir().unwrap();
     let solver = fake_solver(
         dir.path(),
-        r#"echo '{"time":[0.0],"v_hat":[[1.0],[0.0],[0.0],[0.0],[0.0],[0.0]]}' > "$2""#,
+        r#"echo '{"format":2,"time":[0.0],"bodies":{"Link":{"velocity":{"linear":[[1.0],[0.0],[0.0]],"angular":[[0.0],[0.0],[0.0]]}}}}' > "$2""#,
     );
     let output = clab(&solver, dir.path(), &[&model(dir.path())]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -181,7 +181,10 @@ fn real_solver_solves_example_model() {
     assert!(output.status.success(), "{}", stderr(&output));
     let result: serde_json::Value = serde_json::from_slice(&std::fs::read(out).unwrap()).unwrap();
     assert_eq!(result["time"].as_array().unwrap().len(), 101);
-    assert_eq!(result["v_hat"].as_array().unwrap().len(), 84);
+    assert_eq!(result["format"], 2);
+    let wheelcarrier = &result["bodies"]["B2_Wheelcarrier"]["velocity"];
+    assert_eq!(wheelcarrier["angular"].as_array().unwrap().len(), 3);
+    assert_eq!(wheelcarrier["angular"][0].as_array().unwrap().len(), 101);
 
     // Bushing, force and time settings take design variables too. The copy sits beside the
     // model so that its relative characteristic paths keep working.
@@ -220,12 +223,19 @@ fn real_solver_solves_example_model() {
     assert_eq!(result["time"].as_array().unwrap().len(), 11);
 
     // Every joint is written; the bushing flag follows the joint ID, not the list position.
-    let joints = result["joints"]["primary"].as_array().unwrap();
-    assert!(joints.iter().all(|joint| joint["name"].is_string()));
+    let joints = result["joints"].as_object().unwrap();
+    assert_eq!(joints.len(), 20);
     let flagged: Vec<_> = joints
         .iter()
-        .filter(|joint| joint["bushing"] == true)
-        .map(|joint| joint["jointID"].as_u64().unwrap())
+        .filter(|(_, joint)| joint["bushing"] == true)
+        .map(|(name, _)| name.as_str())
         .collect();
-    assert_eq!(flagged, [9]);
+    assert_eq!(flagged, ["RL9"]);
+    assert_eq!(
+        joints["RU13"]["i"]["reaction"]["force"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
 }

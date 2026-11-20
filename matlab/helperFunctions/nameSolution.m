@@ -1,7 +1,7 @@
 function solution = nameSolution(history)
 % Builds solution format 2 from the post-processed history: bodies and joints
 % are addressed by the names of the model JSON, 6-row blocks are split into
-% linear/angular and force/moment. Everything stacked by position in the
+% linear/angular and force/moment. Ground is not a body entry. Everything stacked by position in the
 % solver (v_hat, fpi, dfpi, ...) is dropped from the top level.
 
 solution = struct();
@@ -13,6 +13,9 @@ bodyNames = {history.bodies.name};
 
 solution.bodies = struct();
 for body = history.bodies(:)'
+    if body.bodyID == 0
+        continue    % ground never moves; joints name it in their "body" field
+    end
     name = uniqueName(solution.bodies, body.name, 'body');
     entry = struct();
     entry.velocity = splitVelocity(body.cm.velocity);
