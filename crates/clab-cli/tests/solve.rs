@@ -134,7 +134,7 @@ fn prints_text_without_json() {
     let dir = tempfile::tempdir().unwrap();
     let solver = fake_solver(
         dir.path(),
-        r#"echo '{"time":[0.0],"v_hat":[[1.0],[0.0],[0.0],[0.0],[0.0],[0.0]]}' > "$2""#,
+        r#"echo '{"format":2,"time":[0.0],"bodies":{"Link":{"velocity":{"linear":[[1.0],[0.0],[0.0]],"angular":[[0.0],[0.0],[0.0]]}}}}' > "$2""#,
     );
     let output = clab(&solver, dir.path(), &[&model(dir.path())]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -146,18 +146,25 @@ fn prints_text_without_json() {
 #[test]
 fn real_solver_solves_example_model() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let solver = root.join("dist/mks-solver/mks_solver");
-    let runtime = [
-        "/usr/local/MATLAB/MATLAB_Runtime/R2024b",
-        "/usr/local/MATLAB/R2024b",
-    ]
-    .map(Path::new)
-    .into_iter()
-    .find(|path| path.is_dir());
+    let solver = std::env::var_os("CLAB_MKS_SOLVER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("dist/mks-solver/mks_solver"));
+    let runtime = std::env::var_os("CLAB_MATLAB_RUNTIME")
+        .map(PathBuf::from)
+        .into_iter()
+        .chain(
+            [
+                "/usr/local/MATLAB/MATLAB_Runtime/R2024b",
+                "/usr/local/MATLAB/R2024b",
+            ]
+            .map(PathBuf::from),
+        )
+        .find(|path| path.is_dir());
     let (true, Some(runtime)) = (solver.is_file(), runtime) else {
         eprintln!("skipped: solver or MATLAB Runtime missing");
         return;
     };
+    let runtime = runtime.as_path();
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("out.json");
     let examples = root.join("matlab/examples");
@@ -174,22 +181,21 @@ fn real_solver_solves_example_model() {
     assert!(output.status.success(), "{}", stderr(&output));
     let result: serde_json::Value = serde_json::from_slice(&std::fs::read(out).unwrap()).unwrap();
     assert_eq!(result["time"].as_array().unwrap().len(), 101);
-    assert_eq!(result["v_hat"].as_array().unwrap().len(), 84);
+    assert_eq!(result["format"], 2);
+    let wheelcarrier = &result["bodies"]["B2_Wheelcarrier"]["velocity"];
+    assert_eq!(wheelcarrier["angular"].as_array().unwrap().len(), 3);
+    assert_eq!(wheelcarrier["angular"][0].as_array().unwrap().len(), 101);
 
     // Bushing, force and time settings take design variables too. The copy sits beside the
     // model so that its relative characteristic paths keep working.
     let mut changed: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&model).unwrap()).unwrap();
-    let bushing = changed["primary_bushings"]
-        .as_object_mut()
-        .unwrap()
-        .values_mut()
-        .next()
-        .unwrap();
+    let bushing = &mut changed["primary_bushings"]["RL9"];
     bushing["active"] = "BUSH_ON".into();
     bushing["stiffness"][0] = "BUSH_KX".into();
     changed["sim_param"]["step_parameters"]["t_end"] = "T_END".into();
-    changed["drives"]["relonomic_drives"]["b5"]["signal"][2] = "STEER*TIME".into();
+    changed["drives"]["relonomic_drives"]["Displacement Left Platform"]["signal"][2] =
+        "STEER*TIME".into();
     let copy = tempfile::Builder::new()
         .suffix(".json")
         .tempfile_in(&examples)
@@ -215,4 +221,21 @@ fn real_solver_solves_example_model() {
     assert!(output.status.success(), "{}", stderr(&output));
     let result: serde_json::Value = serde_json::from_slice(&std::fs::read(out).unwrap()).unwrap();
     assert_eq!(result["time"].as_array().unwrap().len(), 11);
+
+    // Every joint is written; the bushing flag follows the joint ID, not the list position.
+    let joints = result["joints"].as_object().unwrap();
+    assert_eq!(joints.len(), 20);
+    let flagged: Vec<_> = joints
+        .iter()
+        .filter(|(_, joint)| joint["bushing"] == true)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    assert_eq!(flagged, ["RL9"]);
+    assert_eq!(
+        joints["RU13"]["i"]["reaction"]["force"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
 }
