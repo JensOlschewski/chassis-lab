@@ -311,7 +311,6 @@ fn summarizes_a_solver_solution() {
         text.contains("steps: 2\ntime: 0.0000 to 1.0000\nbodies: 1\n"),
         "{text}"
     );
-    assert!(text.contains("--include bodies"), "{text}");
     assert!(text.contains("5.0000"), "{text}");
 }
 
@@ -377,7 +376,7 @@ fn solution_json_is_tagged_and_signal_flags_are_refused() {
     }
     let output = inspect(&path, &["--view"]);
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("--include bodies"),
+        String::from_utf8_lossy(&output.stderr).contains("no body data"),
         "{output:?}"
     );
 }

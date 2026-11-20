@@ -3,25 +3,20 @@
 //! The solver is a MATLAB Compiler executable. It needs the free MATLAB
 //! Runtime of the release it was compiled with, so no MATLAB licence is needed.
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Args, Subcommand};
 use serde_json::Value;
 
+use crate::matlab::{
+    self, RUNTIME_RELEASE, file_path, find_runtime, find_solver, format_json, library_path,
+    user_runtime_dir,
+};
 use crate::{inspect, solution};
 
-const RUNTIME_RELEASE: &str = "R2024b";
-const SOLVER_ENV: &str = "CLAB_MKS_SOLVER";
-const RUNTIME_ENV: &str = "CLAB_MATLAB_RUNTIME";
 const INSTALLER_ENV: &str = "CLAB_MATLAB_RUNTIME_INSTALLER";
-const SOLVER_NAME: &str = if cfg!(windows) {
-    "mks_solver.exe"
-} else {
-    "mks_solver"
-};
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum RuntimeCommand {
@@ -41,9 +36,6 @@ pub(crate) struct SolveArgs {
     /// directory. Give the model before this flag.
     #[arg(long, value_name = "PATH", num_args = 0..=1)]
     json: Option<Option<PathBuf>>,
-    /// Optional solution content for --json, comma separated.
-    #[arg(long, value_enum, value_delimiter = ',', requires = "json")]
-    include: Vec<Include>,
     /// Show the solved motion in the terminal. An optional view file (JSON)
     /// picks the bodies and points to draw; without it everything is drawn.
     #[arg(long, value_name = "FILE", num_args = 0..=1)]
@@ -59,26 +51,6 @@ pub(crate) struct SolveArgs {
     progress: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, ValueEnum)]
-enum Include {
-    /// Positions and velocities of bodies and their points.
-    Bodies,
-    /// Positions and reactions of joints and bushings.
-    Connectors,
-    /// Wheel, toe, camber, roll and rate characteristics.
-    Suspension,
-}
-
-impl Include {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Bodies => "bodies",
-            Self::Connectors => "connectors",
-            Self::Suspension => "suspension",
-        }
-    }
-}
-
 pub(crate) fn solve(args: SolveArgs) -> Result<()> {
     let model = file_path(&args.input, "model")?;
     let design = args
@@ -89,7 +61,7 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
     let output = args
         .json
         .as_ref()
-        .map(|path| output_path(path.as_deref(), &args.input))
+        .map(|path| matlab::output_path(path.as_deref(), &args.input, "solution"))
         .transpose()?;
     if let Some(output) = &output {
         if *output == model {
@@ -113,33 +85,10 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .map(|path| clab_core::view::ViewLayout::load(path))
         .next()
         .transpose()?;
-    let mut include = args.include;
-    if args.view.is_some() {
-        let joints = layout
-            .as_ref()
-            .is_none_or(clab_core::view::ViewLayout::shows_joints);
-        let needed = [Include::Bodies]
-            .into_iter()
-            .chain(joints.then_some(Include::Connectors));
-        for needed in needed {
-            if !include.contains(&needed) {
-                include.push(needed);
-            }
-        }
-    }
-
     let solver = find_solver()?;
     let runtime = find_runtime()?;
 
-    // A file in the output directory can replace the output atomically on success.
-    let mut scratch = tempfile::Builder::new();
-    #[cfg(unix)]
-    scratch.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o644));
-    let scratch = match output.as_ref().and_then(|output| output.parent()) {
-        Some(dir) => scratch.tempfile_in(dir),
-        None => scratch.tempfile(),
-    }
-    .context("cannot create a scratch file")?;
+    let scratch = matlab::scratch_file(output.as_deref())?;
     let mut command = Command::new(&solver);
     command
         .arg(&model)
@@ -147,10 +96,6 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .current_dir(model.parent().unwrap_or(Path::new(".")));
     if let Some(design) = &design {
         command.arg("--design").arg(design);
-    }
-    if !include.is_empty() {
-        let names: Vec<_> = include.iter().map(|item| item.name()).collect();
-        command.arg("--include").arg(names.join(","));
     }
     if let Some(var) = library_path(&runtime)? {
         command.env(var.0, var.1);
@@ -190,129 +135,6 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         inspect::view_solution(&solution, layout.as_ref())?;
     }
     Ok(())
-}
-
-/// `--json` without a value writes to the current directory; a directory
-/// (existing, or written with a trailing separator) receives the default name.
-fn output_path(requested: Option<&Path>, input: &Path) -> Result<PathBuf> {
-    let stem = input.file_stem().unwrap_or_default().to_string_lossy();
-    let name = format!("{stem}-solution.json");
-    let path = match requested {
-        None => PathBuf::from(name),
-        Some(path) if path.is_dir() || path.to_string_lossy().ends_with(['/', '\\']) => {
-            path.join(name)
-        }
-        Some(path) => path.to_path_buf(),
-    };
-    absolute(&path)
-}
-
-/// Indents objects and arrays of containers; arrays of scalars stay on one line.
-fn format_json(value: &Value, depth: usize, out: &mut String) {
-    match value {
-        Value::Array(items) if items.iter().any(|v| v.is_array() || v.is_object()) => {
-            out.push_str("[\n");
-            for (index, item) in items.iter().enumerate() {
-                out.push_str(&"  ".repeat(depth + 1));
-                format_json(item, depth + 1, out);
-                out.push_str(if index + 1 < items.len() { ",\n" } else { "\n" });
-            }
-            out.push_str(&"  ".repeat(depth));
-            out.push(']');
-        }
-        Value::Object(map) if !map.is_empty() => {
-            out.push_str("{\n");
-            for (index, (key, item)) in map.iter().enumerate() {
-                out.push_str(&"  ".repeat(depth + 1));
-                out.push_str(&Value::from(key.as_str()).to_string());
-                out.push_str(": ");
-                format_json(item, depth + 1, out);
-                out.push_str(if index + 1 < map.len() { ",\n" } else { "\n" });
-            }
-            out.push_str(&"  ".repeat(depth));
-            out.push('}');
-        }
-        scalar_or_flat => out.push_str(&scalar_or_flat.to_string()),
-    }
-}
-
-fn absolute(path: &Path) -> Result<PathBuf> {
-    std::path::absolute(path).with_context(|| format!("invalid path: {}", path.display()))
-}
-
-fn file_path(path: &Path, what: &str) -> Result<PathBuf> {
-    if !path.is_file() {
-        bail!("{what} file does not exist: {}", path.display());
-    }
-    absolute(path)
-}
-
-fn find_solver() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os(SOLVER_ENV).map(PathBuf::from) {
-        if path.is_file() {
-            return Ok(path);
-        }
-        bail!("{SOLVER_ENV} does not point to a file: {}", path.display());
-    }
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| solver_in(exe.parent()?))
-        .with_context(|| {
-            format!("solver not found: install {SOLVER_NAME} next to clab or set {SOLVER_ENV}")
-        })
-}
-
-/// MATLAB Compiler builds an app bundle on macOS, so look inside it too.
-fn solver_in(dir: &Path) -> Option<PathBuf> {
-    [
-        dir.join(SOLVER_NAME),
-        dir.join("mks_solver.app/Contents/MacOS/mks_solver"),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
-}
-
-fn find_runtime() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os(RUNTIME_ENV).map(PathBuf::from) {
-        if path.is_dir() {
-            return Ok(path);
-        }
-        bail!(
-            "{RUNTIME_ENV} does not point to a directory: {}",
-            path.display()
-        );
-    }
-    let candidates: &[&str] = if cfg!(windows) {
-        &["C:\\Program Files\\MATLAB\\MATLAB Runtime"]
-    } else if cfg!(target_os = "macos") {
-        &["/Applications/MATLAB/MATLAB_Runtime"]
-    } else {
-        &["/usr/local/MATLAB/MATLAB_Runtime", "/usr/local/MATLAB"]
-    };
-    candidates
-        .iter()
-        .map(|dir| Path::new(dir).join(RUNTIME_RELEASE))
-        .chain(user_runtime_dir().map(|dir| dir.join(RUNTIME_RELEASE)))
-        .find(|path| path.is_dir())
-        .with_context(|| {
-            format!(
-                "MATLAB Runtime {RUNTIME_RELEASE} not found: run `clab runtime install` or set {RUNTIME_ENV}"
-            )
-        })
-}
-
-/// Where `clab runtime install` puts the Runtime. It needs no administrator rights.
-fn user_runtime_dir() -> Option<PathBuf> {
-    let env = |name: &str| std::env::var_os(name).map(PathBuf::from);
-    let base = if cfg!(windows) {
-        env("LOCALAPPDATA")
-    } else if cfg!(target_os = "macos") {
-        // Not "Application Support": the macOS installer silently installs nothing into a path with a space.
-        env("HOME").map(|home| home.join("Library"))
-    } else {
-        env("XDG_DATA_HOME").or_else(|| env("HOME").map(|home| home.join(".local/share")))
-    };
-    Some(base?.join("ChassisLab/matlab-runtime"))
 }
 
 pub(crate) fn runtime(command: RuntimeCommand) -> Result<()> {
@@ -422,32 +244,6 @@ fn installer_in(dir: &Path) -> Option<PathBuf> {
     .find(|path| path.is_file())
 }
 
-/// Library search path variable the solver needs to find the Runtime.
-/// Windows needs none: the Runtime installer adds itself to `PATH`.
-fn library_path(runtime: &Path) -> Result<Option<(&'static str, OsString)>> {
-    let (var, dirs): (&str, &[&str]) = if cfg!(windows) {
-        return Ok(None);
-    } else if cfg!(target_os = "macos") {
-        (
-            "DYLD_LIBRARY_PATH",
-            &["runtime/maci64", "bin/maci64", "sys/os/maci64"],
-        )
-    } else {
-        (
-            "LD_LIBRARY_PATH",
-            &[
-                "runtime/glnxa64",
-                "bin/glnxa64",
-                "sys/os/glnxa64",
-                "sys/opengl/lib/glnxa64",
-            ],
-        )
-    };
-    let mut paths: Vec<PathBuf> = dirs.iter().map(|dir| runtime.join(dir)).collect();
-    paths.extend(std::env::var_os(var).iter().flat_map(std::env::split_paths));
-    Ok(Some((var, std::env::join_paths(paths)?)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,15 +256,5 @@ mod tests {
         std::fs::create_dir_all(&inner).unwrap();
         std::fs::write(inner.join("setup"), "").unwrap();
         assert_eq!(installer_in(dir.path()), Some(inner.join("setup")));
-    }
-
-    #[test]
-    fn finds_solver_in_macos_app_bundle() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(solver_in(dir.path()), None);
-        let inner = dir.path().join("mks_solver.app/Contents/MacOS");
-        std::fs::create_dir_all(&inner).unwrap();
-        std::fs::write(inner.join("mks_solver"), "").unwrap();
-        assert_eq!(solver_in(dir.path()), Some(inner.join("mks_solver")));
     }
 }

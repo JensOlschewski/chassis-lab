@@ -34,7 +34,7 @@ interface SolutionResult {
   summary: string;
   /** Body velocities, ready to plot. */
   signals: Signals;
-  /** Null unless solved with `--include bodies`. */
+  /** Null for solutions without body data. */
   frames: ViewFrame[] | null;
 }
 

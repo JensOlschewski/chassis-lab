@@ -143,12 +143,10 @@ clab inspect reports/solution.json
 clab inspect reports/solution.json --view [VIEW_FILE]
 ```
 
-- `--view [FILE]` show a tui solution viewer, matlab soltion file needed and
-  needs a solution made with `--include bodies` (`connectors` too if joints are
-  drawn).
+- `--view [FILE]` show a tui solution viewer, matlab solution file needed.
 - `--json` prints `{"kind": "solution", "summary", "signals", "frames"}`: the
-  text summary, the body velocities as signals to plot, and the scene frames
-  (null without `--include bodies`). `--view FILE` picks the layout for the frames.
+  text summary, the body velocities as signals to plot, and the scene frames.
+  `--view FILE` picks the layout for the frames.
 - `--match` and `--signal` are for HDF5 only; `--list` just prints the summary.
 - `--signal NAME` to read one signal by its listed name. Repeatable, needs
   `--json`.
@@ -212,8 +210,6 @@ Solve a multibody kinematic or compliant model defined in JSON.
 - `--json [PATH]` write the solution as JSON. Without a path it writes
   `<model>-solution.json` in the current directory. A directory path receives
   that file name.
-- `--include LIST` choose `bodies`, `connectors` and `suspension` for the JSON
-  (needs `--json`). Without it all three are off.
 - `--design FILE` apply design variables from a flat JSON object, e.g.
   `{"HP_L_X": 3945.2}`
 - `--view [FILE]` step through the solution in a terminal viewer. An optional
@@ -224,8 +220,7 @@ Solve a multibody kinematic or compliant model defined in JSON.
 ```bash
 clab solve matlab/examples/mlta-model-file-1e2.json \
     --design matlab/examples/mlta-design-file-1e2.json \
-    --json reports/solution.json \
-    --include bodies,connectors
+    --json reports/solution.json
 ```
 
 Without `--json` or `--view` it prints the time and the body velocities as text.

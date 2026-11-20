@@ -10,6 +10,7 @@ mod compare;
 mod convert;
 mod inspect;
 mod license;
+mod matlab;
 mod progress;
 mod report;
 mod signals;

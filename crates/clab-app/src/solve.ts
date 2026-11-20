@@ -131,9 +131,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
     designNote.textContent = "";
   };
 
-  const include = document.querySelector<HTMLElement>("#solve-include")!;
   const showDesign = () => {
-    include.hidden = !adjust.checked;
     designFields.hidden = !adjust.checked || !sections.hasChildNodes();
   };
   adjust.addEventListener("change", showDesign);
@@ -232,7 +230,6 @@ export function setupSolve(openInInspect: (path: string) => void) {
     const request = {
       ...readCase(),
       output,
-      include: [...form.querySelectorAll<HTMLInputElement>("[name=include]:checked")].map((box) => box.value),
       force: field("force").checked,
     };
     stopped = false;

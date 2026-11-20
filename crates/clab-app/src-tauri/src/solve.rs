@@ -575,30 +575,11 @@ impl Prepared {
     }
 }
 
-#[derive(Deserialize, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
-enum Include {
-    Bodies,
-    Connectors,
-    Suspension,
-}
-
-impl Include {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Bodies => "bodies",
-            Self::Connectors => "connectors",
-            Self::Suspension => "suspension",
-        }
-    }
-}
-
 #[derive(Deserialize)]
 pub struct SolveRequest {
     #[serde(flatten)]
     case: Case,
     output: PathBuf,
-    include: Vec<Include>,
     force: bool,
 }
 
@@ -613,10 +594,6 @@ impl SolveRequest {
         args.extend(["--json".into(), clean_path(&self.output).into()]);
         if self.force {
             args.push("--force".into());
-        }
-        if !self.include.is_empty() {
-            let names: Vec<_> = self.include.iter().map(|include| include.name()).collect();
-            args.extend(["--include".into(), names.join(",").into()]);
         }
         args
     }
@@ -977,7 +954,6 @@ mod tests {
         let request = SolveRequest {
             case: case(design(), &[]),
             output: PathBuf::from("/data/out.json"),
-            include: vec![Include::Bodies, Include::Suspension],
             force: true,
         };
         let prepared = request.case.prepare().unwrap();
@@ -992,8 +968,6 @@ mod tests {
             "--json".into(),
             "/data/out.json".into(),
             "--force".into(),
-            "--include".into(),
-            "bodies,suspension".into(),
         ];
         assert_eq!(args, expected);
     }
