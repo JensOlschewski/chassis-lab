@@ -135,6 +135,7 @@ if ~outputStruct.isBodyOutput && isfield(historyStruct, 'bodies')
     historyStruct = rmfield(historyStruct, 'bodies');
 end
 
+historyStruct = nameSolution(historyStruct);
 end
 
 
@@ -231,6 +232,9 @@ for idx = 1:numJoints
         end
         reactionIndices = (currentJointStruct.jointID * 6 - 5):(currentJointStruct.jointID * 6);
         joints(idx).(sideName).reactions = historyStruct.(reactionName)(reactionIndices, :);
+        if isfield(historyStruct, ['d' reactionName])
+            joints(idx).(sideName).reactionGradients = historyStruct.(['d' reactionName])(reactionIndices, :);
+        end
     end
     joints(idx).bushing = hasActiveBushing(bushStruct, currentJointStruct.jointID);
 end
