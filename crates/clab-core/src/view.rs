@@ -146,7 +146,7 @@ struct JointTracks {
 }
 
 /// Builds one frame per time step from the `bodies` and `joints` of a solution
-/// that was solved with `--include bodies,connectors`.
+/// with body data.
 pub fn frames_from_solution(
     solution: &Value,
     layout: Option<&ViewLayout>,
@@ -156,7 +156,7 @@ pub fn frames_from_solution(
 
     let bodies = solution["bodies"]
         .as_array()
-        .context("solution has no body data: solve with `--include bodies,connectors`")?;
+        .context("solution has no body data: solve the model again with `clab solve`")?;
     let mut tracks = Vec::new();
     // Ground never moves; its joint ends are drawn with the joints.
     for body in bodies
@@ -357,6 +357,6 @@ mod tests {
     #[test]
     fn asks_for_body_data() {
         let error = frames_from_solution(&json!({ "time": [0.0] }), None).unwrap_err();
-        assert!(error.to_string().contains("--include bodies,connectors"));
+        assert!(error.to_string().contains("solution has no body data"));
     }
 }

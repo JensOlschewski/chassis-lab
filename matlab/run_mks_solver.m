@@ -1,4 +1,4 @@
-function historyStruct = run_mks_solver(jsonFile, designDic, include)
+function historyStruct = run_mks_solver(jsonFile, designDic)
 %==========================================================================
 % run_mks_solver
 %
@@ -21,10 +21,6 @@ function historyStruct = run_mks_solver(jsonFile, designDic, include)
 %                                 design parameters for optimization purposes.
 %                                 This vector allows adjusting specific parameters
 %                                 to influence the behavior of the system.
-%
-%   - include (string array) : [Optional] Outputs to include: "bodies",
-%                              "connectors", "suspension". When given, it
-%                              replaces the include_* switches of the JSON.
 %
 % Output:
 %   - historyStruct (struct) : A structure containing the results of the MKS
@@ -95,13 +91,6 @@ jsonStr = fileread(jsonFile);
 % Initialization
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 [jointPrim, jointSec, bushPrim, bushSec, forceAdd, bodiesStruct, solverStruct, driveStruct,outputStruct] = solver_init(jsonStr, designDic);
-
-% Optional include list overrides the output switches of the model JSON
-if nargin >= 3
-    outputStruct.isBodyOutput = ismember("bodies", include);
-    outputStruct.isConOutput = ismember("connectors", include);
-    outputStruct.isSuspensionParamOutput = ismember("suspension", include);
-end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Preload & Main Processing

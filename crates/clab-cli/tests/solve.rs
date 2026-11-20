@@ -130,7 +130,7 @@ fn rejects_invalid_solver_json() {
 
 #[cfg(unix)]
 #[test]
-fn prints_text_without_json_and_passes_no_include() {
+fn prints_text_without_json() {
     let dir = tempfile::tempdir().unwrap();
     let solver = fake_solver(
         dir.path(),
@@ -140,38 +140,6 @@ fn prints_text_without_json_and_passes_no_include() {
     assert!(output.status.success(), "{}", stderr(&output));
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(text.starts_with("time 0.000000000000\nbody 1 velocity [1.000000000000"));
-}
-
-#[cfg(unix)]
-#[test]
-fn passes_include_list_to_solver() {
-    let dir = tempfile::tempdir().unwrap();
-    let solver = fake_solver(dir.path(), r#"printf '{"args":"%s"}' "$*" > "$2""#);
-    let model = model(dir.path());
-    let target = dir.path().join("o.json");
-    let mut args = json_args(&model, &target).to_vec();
-    args.extend([Path::new("--include"), Path::new("bodies,connectors")]);
-    let output = clab(&solver, dir.path(), &args);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let text = std::fs::read_to_string(&target).unwrap();
-    assert!(text.contains("--include bodies,connectors"), "{text}");
-}
-
-#[test]
-fn include_needs_json_and_a_known_name() {
-    let dir = tempfile::tempdir().unwrap();
-    let model = model(dir.path());
-    let run = |extra: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_clab"))
-            .arg("solve")
-            .arg(&model)
-            .args(extra)
-            .output()
-            .unwrap()
-    };
-    assert!(!run(&["--include", "bodies"]).status.success());
-    let bad = run(&["--json", "--include", "wheels"]);
-    assert!(stderr(&bad).contains("wheels"));
 }
 
 /// Needs `dist/mks-solver/mks_solver` and a MATLAB Runtime; skipped otherwise.
