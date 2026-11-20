@@ -146,18 +146,25 @@ fn prints_text_without_json() {
 #[test]
 fn real_solver_solves_example_model() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let solver = root.join("dist/mks-solver/mks_solver");
-    let runtime = [
-        "/usr/local/MATLAB/MATLAB_Runtime/R2024b",
-        "/usr/local/MATLAB/R2024b",
-    ]
-    .map(Path::new)
-    .into_iter()
-    .find(|path| path.is_dir());
+    let solver = std::env::var_os("CLAB_MKS_SOLVER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("dist/mks-solver/mks_solver"));
+    let runtime = std::env::var_os("CLAB_MATLAB_RUNTIME")
+        .map(PathBuf::from)
+        .into_iter()
+        .chain(
+            [
+                "/usr/local/MATLAB/MATLAB_Runtime/R2024b",
+                "/usr/local/MATLAB/R2024b",
+            ]
+            .map(PathBuf::from),
+        )
+        .find(|path| path.is_dir());
     let (true, Some(runtime)) = (solver.is_file(), runtime) else {
         eprintln!("skipped: solver or MATLAB Runtime missing");
         return;
     };
+    let runtime = runtime.as_path();
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("out.json");
     let examples = root.join("matlab/examples");
@@ -180,16 +187,12 @@ fn real_solver_solves_example_model() {
     // model so that its relative characteristic paths keep working.
     let mut changed: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&model).unwrap()).unwrap();
-    let bushing = changed["primary_bushings"]
-        .as_object_mut()
-        .unwrap()
-        .values_mut()
-        .next()
-        .unwrap();
+    let bushing = &mut changed["primary_bushings"]["RL9"];
     bushing["active"] = "BUSH_ON".into();
     bushing["stiffness"][0] = "BUSH_KX".into();
     changed["sim_param"]["step_parameters"]["t_end"] = "T_END".into();
-    changed["drives"]["relonomic_drives"]["b5"]["signal"][2] = "STEER*TIME".into();
+    changed["drives"]["relonomic_drives"]["Displacement Left Platform"]["signal"][2] =
+        "STEER*TIME".into();
     let copy = tempfile::Builder::new()
         .suffix(".json")
         .tempfile_in(&examples)
@@ -215,4 +218,14 @@ fn real_solver_solves_example_model() {
     assert!(output.status.success(), "{}", stderr(&output));
     let result: serde_json::Value = serde_json::from_slice(&std::fs::read(out).unwrap()).unwrap();
     assert_eq!(result["time"].as_array().unwrap().len(), 11);
+
+    // Every joint is written; the bushing flag follows the joint ID, not the list position.
+    let joints = result["joints"]["primary"].as_array().unwrap();
+    assert!(joints.iter().all(|joint| joint["name"].is_string()));
+    let flagged: Vec<_> = joints
+        .iter()
+        .filter(|joint| joint["bushing"] == true)
+        .map(|joint| joint["jointID"].as_u64().unwrap())
+        .collect();
+    assert_eq!(flagged, [9]);
 }
