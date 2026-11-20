@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Args, Subcommand};
 use serde_json::Value;
 
 use crate::{inspect, solution};
@@ -41,9 +41,6 @@ pub(crate) struct SolveArgs {
     /// directory. Give the model before this flag.
     #[arg(long, value_name = "PATH", num_args = 0..=1)]
     json: Option<Option<PathBuf>>,
-    /// Optional solution content for --json, comma separated.
-    #[arg(long, value_enum, value_delimiter = ',', requires = "json")]
-    include: Vec<Include>,
     /// Show the solved motion in the terminal. An optional view file (JSON)
     /// picks the bodies and points to draw; without it everything is drawn.
     #[arg(long, value_name = "FILE", num_args = 0..=1)]
@@ -57,26 +54,6 @@ pub(crate) struct SolveArgs {
     /// Show solver progress on stderr.
     #[arg(long)]
     progress: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, ValueEnum)]
-enum Include {
-    /// Positions and velocities of bodies and their points.
-    Bodies,
-    /// Positions and reactions of joints and bushings.
-    Connectors,
-    /// Wheel, toe, camber, roll and rate characteristics.
-    Suspension,
-}
-
-impl Include {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Bodies => "bodies",
-            Self::Connectors => "connectors",
-            Self::Suspension => "suspension",
-        }
-    }
 }
 
 pub(crate) fn solve(args: SolveArgs) -> Result<()> {
@@ -113,21 +90,6 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .map(|path| clab_core::view::ViewLayout::load(path))
         .next()
         .transpose()?;
-    let mut include = args.include;
-    if args.view.is_some() {
-        let joints = layout
-            .as_ref()
-            .is_none_or(clab_core::view::ViewLayout::shows_joints);
-        let needed = [Include::Bodies]
-            .into_iter()
-            .chain(joints.then_some(Include::Connectors));
-        for needed in needed {
-            if !include.contains(&needed) {
-                include.push(needed);
-            }
-        }
-    }
-
     let solver = find_solver()?;
     let runtime = find_runtime()?;
 
@@ -147,10 +109,6 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .current_dir(model.parent().unwrap_or(Path::new(".")));
     if let Some(design) = &design {
         command.arg("--design").arg(design);
-    }
-    if !include.is_empty() {
-        let names: Vec<_> = include.iter().map(|item| item.name()).collect();
-        command.arg("--include").arg(names.join(","));
     }
     if let Some(var) = library_path(&runtime)? {
         command.env(var.0, var.1);

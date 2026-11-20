@@ -55,7 +55,7 @@ fn signal(name: String, values: impl Serialize) -> Value {
 }
 
 /// The solution in the shape the app plots HDF5 signals in: the time axis plus one
-/// signal per body velocity component and, if solved `--include suspension`, one
+/// signal per body velocity component and one
 /// per suspension characteristic (`toecamber.l_toe`, `wheel_points.l_wc.x`, …).
 /// The solver states no units.
 pub(crate) fn plot_signals(solution: &Value) -> Result<Value> {
@@ -108,14 +108,7 @@ pub(crate) fn plot_signals(solution: &Value) -> Result<Value> {
     Ok(json!({ "axis": time, "signals": signals }))
 }
 
-/// What `--include` writes into a solution, and the keys it adds.
-const SECTIONS: [(&str, &[&str]); 3] = [
-    ("bodies", &["bodies"]),
-    ("connectors", &["joints", "bushings"]),
-    ("suspension", &["characteristics"]),
-];
-
-/// Steps, time span, counts, the sections present and the peak velocity of each body.
+/// Steps, time span, counts and the peak velocity of each body.
 pub(crate) fn render_summary(solution: &Value) -> Result<String> {
     let (time, v_hat) = velocities(solution)?;
     let mut out = String::new();
@@ -137,26 +130,6 @@ pub(crate) fn render_summary(solution: &Value) -> Result<String> {
             "joints: {} primary, {} secondary",
             count("primary"),
             count("secondary")
-        )?;
-    }
-    let included: Vec<_> = SECTIONS
-        .iter()
-        .filter(|(_, keys)| keys.iter().any(|key| !solution[key].is_null()))
-        .map(|(name, _)| *name)
-        .collect();
-    writeln!(
-        out,
-        "included: {}",
-        if included.is_empty() {
-            "none".to_owned()
-        } else {
-            included.join(", ")
-        }
-    )?;
-    if !included.contains(&"bodies") {
-        writeln!(
-            out,
-            "note: no body positions; solve with --include bodies to view the motion"
         )?;
     }
 
@@ -286,14 +259,12 @@ mod tests {
     }
 
     #[test]
-    fn summary_without_bodies_asks_for_them() {
+    fn summary_lists_steps_and_peaks() {
         let text = render_summary(&summarized()).unwrap();
         assert!(
             text.contains("steps: 2\ntime: 0.0000 to 0.5000\nbodies: 1\n"),
             "{text}"
         );
-        assert!(text.contains("included: none"), "{text}");
-        assert!(text.contains("--include bodies"), "{text}");
         assert!(
             text.contains("body 1  ") && text.contains("5.0000"),
             "{text}"
@@ -309,11 +280,6 @@ mod tests {
         solution["characteristics"] = json!({});
         let text = render_summary(&solution).unwrap();
         assert!(text.contains("joints: 2 primary, 1 secondary"), "{text}");
-        assert!(
-            text.contains("included: bodies, connectors, suspension"),
-            "{text}"
-        );
-        assert!(!text.contains("note:"), "{text}");
         assert!(text.contains("Link  "), "{text}");
         assert!(text.contains("2.0000"), "{text}");
     }
