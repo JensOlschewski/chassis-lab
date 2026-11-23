@@ -18,6 +18,7 @@ env:
 
 jobs:
   quality:
+    name: Rust
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -56,6 +57,7 @@ jobs:
         run: cargo test --workspace --exclude clab-app --locked --features clab-cli/skip-license-gate
 
   python:
+    name: Python
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -84,6 +86,7 @@ jobs:
         run: pytest -q --durations=20
 
   linux-runtime:
+    name: Linux runtime
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -116,7 +119,7 @@ jobs:
       - name: Verify Linux runtime checksum
         run: sha256sum --check dist/clab-runtime-linux-x86_64.tar.gz.sha256
 
-      - name: Run Linux runtime smoke tests in clean Ubuntu container
+      - name: Test Linux runtime in clean container
         run: |
           smoke_input="$(mktemp)"
           trap 'rm -f "$smoke_input"' EXIT
