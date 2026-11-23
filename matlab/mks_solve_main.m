@@ -1,6 +1,11 @@
 function mks_solve_main(modelJson, outJson, varargin)
 % mks_solver <model.json> <out.json> [--design FILE]
+% mks_solver --optimize <problem.json> <out.json> --design FILE --dry-run
 try
+    if strcmp(modelJson, '--optimize')
+        mks_optimize_main(outJson, varargin{:});
+        return
+    end
     design = [];
     for k = 1:2:numel(varargin)
         switch varargin{k}
@@ -17,18 +22,5 @@ try
 catch err
     fprintf(2, '%s\n%s\n', err.identifier, err.message);
     exit(1);
-end
-end
-
-function design = readDesign(file)
-s = jsondecode(fileread(file));
-names = string(fieldnames(s));
-design = configureDictionary("string", "cell");
-for n = names'
-    value = s.(n);
-    if ~ischar(value)
-        value = double(value);
-    end
-    design(n) = {value};
 end
 end

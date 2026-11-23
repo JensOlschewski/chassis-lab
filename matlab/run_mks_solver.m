@@ -60,7 +60,6 @@ function historyStruct = run_mks_solver(jsonFile, designDic)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 if nargin >= 2 && ~isempty(designDic)
     % designDic is provided, JSON will be updated with the provided values
-    disp('Design dictionary provided. The JSON structure will be updated with the provided design parameters.');
 else
     designDic = [];
     % designDic is not provided, default values will be used
