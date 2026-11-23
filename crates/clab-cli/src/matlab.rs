@@ -31,6 +31,25 @@ pub(crate) fn output_path(requested: Option<&Path>, input: &Path, kind: &str) ->
     absolute(&path)
 }
 
+/// Refuses an output that is one of the input files, exists without `force`, or has no directory.
+pub(crate) fn check_output(output: &Path, inputs: &[(&Path, &str)], force: bool) -> Result<()> {
+    for (input, what) in inputs {
+        if output == *input {
+            bail!("output is the {what} file: {}", output.display());
+        }
+    }
+    if output.exists() && !force {
+        bail!(
+            "output exists: {} (use --force to replace it)",
+            output.display()
+        );
+    }
+    if !output.parent().is_some_and(Path::is_dir) {
+        bail!("output directory does not exist: {}", output.display());
+    }
+    Ok(())
+}
+
 /// A file in the output directory, so it can replace the output atomically on success.
 pub(crate) fn scratch_file(output: Option<&Path>) -> Result<tempfile::NamedTempFile> {
     let mut scratch = tempfile::Builder::new();
@@ -81,6 +100,34 @@ pub(crate) fn file_path(path: &Path, what: &str) -> Result<PathBuf> {
         bail!("{what} file does not exist: {}", path.display());
     }
     absolute(path)
+}
+
+/// Runs the solver with `args` in `cwd` and fails with its stderr. With `progress`
+/// its progress output goes to stderr, so stdout stays free for results.
+pub(crate) fn run_solver(args: &[&Path], cwd: &Path, progress: bool) -> Result<()> {
+    let solver = find_solver()?;
+    let runtime = find_runtime()?;
+    let mut command = std::process::Command::new(&solver);
+    command.args(args).current_dir(cwd);
+    if let Some(var) = library_path(&runtime)? {
+        command.env(var.0, var.1);
+    }
+    if progress {
+        command.env("MKS_PROGRESS", "1").stdout(std::io::stderr());
+    }
+    let result = command
+        .output()
+        .with_context(|| format!("cannot start {}", solver.display()))?;
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        if stderr.contains("MCLMCR_Invalid_MATLAB_Runtime") {
+            bail!(
+                "the installed MATLAB Runtime does not match the solver: run `clab runtime install` again"
+            );
+        }
+        bail!("solver failed ({}): {}", result.status, stderr.trim());
+    }
+    Ok(())
 }
 
 pub(crate) fn find_solver() -> Result<PathBuf> {

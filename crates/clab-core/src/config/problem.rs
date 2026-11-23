@@ -485,9 +485,111 @@ fn sorted_signals(
         .collect())
 }
 
+impl Kind {
+    fn solver_form(self) -> (&'static str, Vec<f64>) {
+        match self {
+            Kind::Lower(v) => ("lower", vec![v]),
+            Kind::Upper(v) => ("upper", vec![v]),
+            Kind::Range(lo, hi) => ("range", vec![lo, hi]),
+            Kind::Target(v) => ("target", vec![v]),
+            Kind::Goal(Goal::Minimize) => ("minimize", vec![]),
+            Kind::Goal(Goal::Maximize) => ("maximize", vec![]),
+        }
+    }
+}
+
+impl Problem {
+    /// The problem as `mks_solver --optimize` reads it: rewritten expressions,
+    /// resolved deduction factors, absolute model paths.
+    pub fn solver_json(&self) -> Value {
+        let objectives: Vec<Value> = self
+            .objectives
+            .iter()
+            .map(|o| {
+                let (kind, limits) = o.kind.solver_form();
+                serde_json::json!({
+                    "name": o.name,
+                    "expr": o.value.matlab,
+                    "kind": kind,
+                    "limits": limits,
+                    "weight": o.weight,
+                    "deduction_factor": o.deduction_factor,
+                })
+            })
+            .collect();
+        let constraints: Vec<Value> = self
+            .constraints
+            .iter()
+            .map(|c| {
+                let relation = match c.relation {
+                    Relation::AtMost => "<=",
+                    Relation::AtLeast => ">=",
+                };
+                serde_json::json!({
+                    "name": c.name,
+                    "lhs": c.lhs.matlab,
+                    "relation": relation,
+                    "rhs": c.rhs.matlab,
+                })
+            })
+            .collect();
+        let mut json = serde_json::json!({
+            "models": self.models,
+            "design": self.design.iter().map(|d| serde_json::json!({
+                "name": d.name, "lower": d.lower, "upper": d.upper,
+            })).collect::<Vec<_>>(),
+            "signals": self.signals.iter().map(|(name, f)| serde_json::json!({
+                "name": name, "expr": f.matlab,
+            })).collect::<Vec<_>>(),
+            "objectives": objectives,
+            "constraints": constraints,
+        });
+        for (key, value) in [
+            ("max_iterations", self.max_iterations),
+            ("max_evaluations", self.max_evaluations),
+        ] {
+            if let Some(value) = value {
+                json[key] = value.into();
+            }
+        }
+        json
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn solver_json_has_the_schema_matlab_reads() {
+        let problem = Problem::parse(VALID, Path::new("/base")).unwrap();
+        let json = problem.solver_json();
+        assert_eq!(json["models"]["pwt"], "/base/pwt.json");
+        assert_eq!(json["max_iterations"], 50);
+        assert!(json.get("max_evaluations").is_none());
+        assert_eq!(json["design"][0]["name"], "HP_L_Z");
+        let kinds: Vec<_> = json["objectives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| {
+                (
+                    o["kind"].as_str().unwrap(),
+                    o["limits"].as_array().unwrap().len(),
+                )
+            })
+            .collect();
+        assert!(kinds.contains(&("maximize", 0)));
+        assert!(kinds.contains(&("target", 1)));
+        assert!(
+            json["objectives"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|o| o["deduction_factor"].is_number())
+        );
+        assert_eq!(json["signals"].as_array().unwrap().len(), 3);
+    }
 
     const VALID: &str = r#"
 [models]
