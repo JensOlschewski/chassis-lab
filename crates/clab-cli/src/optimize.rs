@@ -123,7 +123,10 @@ fn midpoint_design(problem: &Problem, yes: bool) -> Result<tempfile::NamedTempFi
         .iter()
         .map(|d| (d.name.clone(), Value::from((d.lower + d.upper) / 2.0)))
         .collect();
-    let values: Vec<String> = start.iter().map(|(name, v)| format!("{name} = {v}")).collect();
+    let values: Vec<String> = start
+        .iter()
+        .map(|(name, v)| format!("{name} = {v}"))
+        .collect();
     convert::confirm(
         vec![format!(
             "no --design given; starting from the midpoint of the bounds: {}",
