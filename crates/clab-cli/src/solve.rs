@@ -11,8 +11,7 @@ use clap::{Args, Subcommand};
 use serde_json::Value;
 
 use crate::matlab::{
-    self, RUNTIME_RELEASE, file_path, find_runtime, find_solver, format_json, library_path,
-    user_runtime_dir,
+    self, RUNTIME_RELEASE, file_path, find_runtime, find_solver, format_json, user_runtime_dir,
 };
 use crate::{inspect, solution};
 
@@ -64,18 +63,7 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .map(|path| matlab::output_path(path.as_deref(), &args.input, "solution"))
         .transpose()?;
     if let Some(output) = &output {
-        if *output == model {
-            bail!("output is the model file: {}", output.display());
-        }
-        if output.exists() && !args.force {
-            bail!(
-                "output exists: {} (use --force to replace it)",
-                output.display()
-            );
-        }
-        if !output.parent().is_some_and(Path::is_dir) {
-            bail!("output directory does not exist: {}", output.display());
-        }
+        matlab::check_output(output, &[(&model, "model")], args.force)?;
     }
 
     let layout = args
@@ -85,34 +73,17 @@ pub(crate) fn solve(args: SolveArgs) -> Result<()> {
         .map(|path| clab_core::view::ViewLayout::load(path))
         .next()
         .transpose()?;
-    let solver = find_solver()?;
-    let runtime = find_runtime()?;
 
     let scratch = matlab::scratch_file(output.as_deref())?;
-    let mut command = Command::new(&solver);
-    command
-        .arg(&model)
-        .arg(scratch.path())
-        .current_dir(model.parent().unwrap_or(Path::new(".")));
+    let mut solver_args = vec![model.as_path(), scratch.path()];
     if let Some(design) = &design {
-        command.arg("--design").arg(design);
+        solver_args.extend([Path::new("--design"), design.as_path()]);
     }
-    if let Some(var) = library_path(&runtime)? {
-        command.env(var.0, var.1);
-    }
-    if args.progress {
-        command.env("MKS_PROGRESS", "1").stdout(std::io::stderr());
-    }
-    let result = command
-        .output()
-        .with_context(|| format!("cannot start {}", solver.display()))?;
-    if !result.status.success() {
-        bail!(
-            "solver failed ({}): {}",
-            result.status,
-            String::from_utf8_lossy(&result.stderr).trim()
-        );
-    }
+    matlab::run_solver(
+        &solver_args,
+        model.parent().unwrap_or(Path::new(".")),
+        args.progress,
+    )?;
 
     let written = std::fs::File::open(scratch.path())?;
     let solution: Value = serde_json::from_reader(std::io::BufReader::new(written))

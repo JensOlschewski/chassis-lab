@@ -5,9 +5,8 @@ function historyStruct = run_mks_solver(jsonFile, designDic)
 % Description:
 %   This function runs the MKS (Multibody Kinematic Solver) simulation
 %   based on the input JSON file and an optional design vector. The function
-%   returns a structured output containing the simulation results, including
-%   velocities, force gradients, and forces for primary and secondary joints,
-%   along with the simulation time.
+%   returns the solution in format 2: bodies and joints addressed by the names
+%   of the model JSON.
 %
 % Syntax:
 %   historyStruct = run_mks_solver(jsonFile, designVec)
@@ -23,35 +22,26 @@ function historyStruct = run_mks_solver(jsonFile, designDic)
 %                                 to influence the behavior of the system.
 %
 % Output:
-%   - historyStruct (struct) : A structure containing the results of the MKS
-%                              simulation with the following fields:
+%   - historyStruct (struct) : The solution, format 2. 3xn and 6xn blocks are
+%                              split by meaning, all over the n time steps:
 %
-%       - v_hat (nx3 double array) : Velocity vector of all bodies in the system,
-%                                    where n is the number of bodies.
-%
-%       - dfpi, dfpj (nx3 double arrays) : Force gradient for the primary joints
-%                                          or bushings on the i and j sides, respectively.
-%
-%       - dfspi, dfspj (nx3 double arrays) : Force gradient for the secondary joints
-%                                            or bushings on the i and j sides, respectively.
-%
-%       - fpi, fpj (nx3 double arrays) : Force applied at the primary joints or bushings
-%                                        on the i and j sides, respectively.
-%
-%       - fsi, fsj (nx3 double arrays) : Force applied at the secondary joints or bushings
-%                                        on the i and j sides, respectively.
-%
-%       - time (1xn double array) : Simulation time vector, representing the time steps
-%                                   at which the simulation results are recorded.
+%       - format (1x1)  : 2
+%       - time (1xn)    : Simulation time vector.
+%       - bodies.<name>.velocity.{linear,angular}         : Body velocity (3xn each).
+%       - bodies.<name>.cm.position                       : Center of mass (3xn).
+%       - bodies.<name>.points.<point>.{position,velocity.{linear,angular}}
+%       - joints.<name> : type, group ('primary' or 'secondary'), bushing
+%                         (true when an active bushing sits on the joint), and
+%                         the sides i and j with body, point, position,
+%                         velocity.{linear,angular},
+%                         reaction.{force,moment} and, in elastokinematic
+%                         mode, reaction_gradient.{force,moment}.
+%                         The reaction is the joint reaction plus the bushing force.
+%       - characteristics : Suspension characteristics.
 %
 % Example:
-%   jsonFile = 'input_config.json';
-%   designVec = [1.2, 0.8, 1.5, ...];  % Example design parameters
-%   history = run_mks_solver(jsonFile, designVec);
-%
-%   % Access the velocity vector and time
-%   velocities = history.v_hat;
-%   simulation_time = history.time;
+%   history = run_mks_solver('input_config.json', []);
+%   angular = history.bodies.B2_Wheelcarrier.velocity.angular;
 %
 % Notes:
 %   - The input JSON file must follow the correct format, including all
@@ -70,7 +60,6 @@ function historyStruct = run_mks_solver(jsonFile, designDic)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 if nargin >= 2 && ~isempty(designDic)
     % designDic is provided, JSON will be updated with the provided values
-    disp('Design dictionary provided. The JSON structure will be updated with the provided design parameters.');
 else
     designDic = [];
     % designDic is not provided, default values will be used

@@ -209,7 +209,8 @@ Solve a multibody kinematic or compliant model defined in JSON.
 
 - `--json [PATH]` write the solution as JSON. Without a path it writes
   `<model>-solution.json` in the current directory. A directory path receives
-  that file name.
+  that file name. The solution is format 2: `bodies` and `joints` are keyed by
+  the names in the model. Solutions from older versions need solving again.
 - `--design FILE` apply design variables from a flat JSON object, e.g.
   `{"HP_L_X": 3945.2}`
 - `--view [FILE]` step through the solution in a terminal viewer. An optional

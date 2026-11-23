@@ -9,8 +9,10 @@
 //! - [`support`] holds the generic TOML/JSON helpers and signal-mapping
 //!   resolution shared by both.
 
+pub mod expr;
 mod function_first;
 mod legacy;
+pub mod problem;
 mod support;
 
 use std::{

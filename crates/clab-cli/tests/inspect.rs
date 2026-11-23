@@ -301,7 +301,9 @@ fn summarizes_a_solver_solution() {
     let path = directory.path().join("solution.json");
     fs::write(
         &path,
-        r#"{"time": [0.0, 1.0], "v_hat": [[3.0, 0.0], [4.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]}"#,
+        r#"{"format": 2, "time": [0.0, 1.0], "bodies": {"Link": {"velocity": {
+            "linear": [[3.0, 0.0], [4.0, 0.0], [0.0, 0.0]],
+            "angular": [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]}}}}"#,
     )
     .unwrap();
     let output = inspect(&path, &[]);
@@ -319,13 +321,14 @@ fn solution_json_carries_frames_for_the_chosen_layout() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("solution.json");
     let row = "[[0.0, 1.0], [0.0, 0.0], [0.0, 0.0]]";
-    let v_hat = ["[0.0, 0.0]"; 6].join(",");
+    let zero = "[[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]";
     fs::write(
         &path,
-        format!(
-            r#"{{"time": [0.0, 1.0], "v_hat": [{v_hat}], "bodies": [{{"name": "Link", "bodyID": 1, "cm": {{"position": {row}}},
-            "points": {{"A": {{"position": {row}}}, "B": {{"position": {row}}}}}}}]}}"#
-        ),
+        r#"{"format": 2, "time": [0.0, 1.0], "bodies": {"Link": {
+            "velocity": {"linear": ZERO, "angular": ZERO}, "cm": {"position": ROW},
+            "points": {"A": {"position": ROW}, "B": {"position": ROW}}}}}"#
+            .replace("ZERO", zero)
+            .replace("ROW", row),
     )
     .unwrap();
     let value = inspect_json(&path, &[]);
@@ -360,11 +363,7 @@ fn solution_json_carries_frames_for_the_chosen_layout() {
 fn solution_json_is_tagged_and_signal_flags_are_refused() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("solution.json");
-    fs::write(
-        &path,
-        r#"{"time": [0.0], "v_hat": [[0.0],[0.0],[0.0],[0.0],[0.0],[0.0]]}"#,
-    )
-    .unwrap();
+    fs::write(&path, r#"{"format": 2, "time": [0.0], "bodies": {}}"#).unwrap();
     let value = inspect_json(&path, &[]);
     assert_eq!(value["kind"], "solution");
     assert!(value["summary"].as_str().unwrap().contains("steps: 1"));
@@ -374,9 +373,17 @@ fn solution_json_is_tagged_and_signal_flags_are_refused() {
         assert_eq!(output.status.code(), Some(2));
         assert!(String::from_utf8_lossy(&output.stderr).contains("not solver solutions"));
     }
-    let output = inspect(&path, &["--view"]);
+}
+
+#[test]
+fn solution_in_the_old_format_asks_to_solve_again() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("solution.json");
+    fs::write(&path, r#"{"time": [0.0], "v_hat": [[0.0]]}"#).unwrap();
+    let output = inspect(&path, &[]);
+    assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("no body data"),
+        String::from_utf8_lossy(&output.stderr).contains("format 1 is not supported"),
         "{output:?}"
     );
 }
