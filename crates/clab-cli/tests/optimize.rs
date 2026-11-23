@@ -112,19 +112,26 @@ fn writes_the_optimized_design_and_refuses_to_replace_it() {
 }
 
 #[test]
-fn json_before_the_problem_gets_a_clear_error() {
+fn needs_a_problem() {
     let setup = Setup::new("exit 0");
     let output = setup.run(&["--design", "start.json", "--json", "problem.toml"]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(stderr(&output).contains("give <PROBLEM> before --json"));
+    assert!(stderr(&output).contains("<PROBLEM>"), "{}", stderr(&output));
 }
 
 #[test]
-fn needs_a_start_design() {
-    let setup = Setup::new("exit 0");
+fn without_a_design_starts_at_the_bound_midpoint_after_confirmation() {
+    let setup = Setup::new(&format!("cp \"$5\" start-used.json && {}", writes_result()));
     let output = setup.run(&["problem.toml"]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(stderr(&output).contains("--design"));
+    assert_eq!(output.status.code(), Some(3));
+    assert!(stderr(&output).contains("midpoint of the bounds: A = 5"));
+    assert!(stderr(&output).contains("--yes"));
+
+    let output = setup.run(&["problem.toml", "--yes"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let start: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(setup.path("start-used.json")).unwrap()).unwrap();
+    assert_eq!(start, serde_json::json!({"A": 5.0}));
 }
 
 #[test]

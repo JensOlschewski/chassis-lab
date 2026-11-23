@@ -6,20 +6,22 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clab_core::config::problem::Problem;
 use clap::Args;
 use serde_json::Value;
 
+use crate::convert;
 use crate::matlab::{self, file_path};
 
 #[derive(Debug, Args)]
 pub(crate) struct OptimizeArgs {
     /// Optimization problem TOML.
-    problem: Option<PathBuf>,
+    problem: PathBuf,
     /// Start design JSON. Also sets the objective scales that are not given.
+    /// Without it, the start is the midpoint of the bounds.
     #[arg(long, value_name = "FILE")]
-    design: PathBuf,
+    design: Option<PathBuf>,
     /// Write the optimized design to PATH: a file, or a directory that receives
     /// `<problem>-optimized.json`. Without PATH, the file goes to the current
     /// directory. Give the problem before this flag.
@@ -34,35 +36,42 @@ pub(crate) struct OptimizeArgs {
     /// Show optimizer progress on stderr.
     #[arg(long)]
     progress: bool,
+    /// Proceed without prompting when --design is not given.
+    #[arg(short, long)]
+    yes: bool,
 }
 
 pub(crate) fn optimize(args: OptimizeArgs) -> Result<()> {
-    let Some(problem_path) = &args.problem else {
-        match &args.json {
-            Some(Some(path)) => bail!("give <PROBLEM> before --json (got {})", path.display()),
-            _ => bail!("missing <PROBLEM>"),
-        }
-    };
-    let problem_file = file_path(problem_path, "problem")?;
-    let design = file_path(&args.design, "design")?;
+    let problem_file = file_path(&args.problem, "problem")?;
+    let given_design = args
+        .design
+        .as_deref()
+        .map(|path| file_path(path, "design"))
+        .transpose()?;
     let problem = Problem::load(&problem_file)?;
     let output = args
         .json
         .as_ref()
-        .map(|path| matlab::output_path(path.as_deref(), problem_path, "optimized"))
+        .map(|path| matlab::output_path(path.as_deref(), &args.problem, "optimized"))
         .transpose()?;
     if let Some(output) = &output {
-        matlab::check_output(
-            output,
-            &[(&problem_file, "problem"), (&design, "design")],
-            args.force,
-        )?;
+        let mut inputs = vec![(problem_file.as_path(), "problem")];
+        if let Some(design) = &given_design {
+            inputs.push((design.as_path(), "design"));
+        }
+        matlab::check_output(output, &inputs, args.force)?;
     }
 
-    let mut problem_json = tempfile::Builder::new()
-        .suffix(".json")
-        .tempfile()
-        .context("cannot create a scratch file")?;
+    let midpoint_file;
+    let design = match given_design {
+        Some(design) => design,
+        None => {
+            midpoint_file = midpoint_design(&problem, args.yes)?;
+            midpoint_file.path().to_path_buf()
+        }
+    };
+
+    let mut problem_json = scratch_json()?;
     serde_json::to_writer(&mut problem_json, &problem.solver_json())?;
     let result_file = matlab::scratch_file(output.as_deref())?;
 
@@ -98,6 +107,33 @@ pub(crate) fn optimize(args: OptimizeArgs) -> Result<()> {
         println!("{}", output.display());
     }
     Ok(())
+}
+
+fn scratch_json() -> Result<tempfile::NamedTempFile> {
+    tempfile::Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .context("cannot create a scratch file")
+}
+
+/// A start design at the midpoint of each bound, after the user confirms it.
+fn midpoint_design(problem: &Problem, yes: bool) -> Result<tempfile::NamedTempFile> {
+    let start: serde_json::Map<String, Value> = problem
+        .design
+        .iter()
+        .map(|d| (d.name.clone(), Value::from((d.lower + d.upper) / 2.0)))
+        .collect();
+    let values: Vec<String> = start.iter().map(|(name, v)| format!("{name} = {v}")).collect();
+    convert::confirm(
+        vec![format!(
+            "no --design given; starting from the midpoint of the bounds: {}",
+            values.join(", ")
+        )],
+        yes,
+    )?;
+    let mut file = scratch_json()?;
+    serde_json::to_writer(&mut file, &start)?;
+    Ok(file)
 }
 
 /// MATLAB's `jsonencode` writes a one-element struct array as an object and an
