@@ -1,6 +1,6 @@
 function mks_solve_main(modelJson, outJson, varargin)
 % mks_solver <model.json> <out.json> [--design FILE]
-% mks_solver --optimize <problem.json> <out.json> --design FILE --dry-run
+% mks_solver --optimize <problem.json> <out.json> --design FILE [--dry-run]
 try
     if strcmp(modelJson, '--optimize')
         mks_optimize_main(outJson, varargin{:});

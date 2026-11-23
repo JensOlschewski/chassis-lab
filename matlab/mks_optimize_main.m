@@ -1,9 +1,9 @@
 function mks_optimize_main(problemJson, outJson, varargin)
-% mks_solver --optimize <problem.json> <out.json> --design FILE --dry-run
+% mks_solver --optimize <problem.json> <out.json> --design FILE [--dry-run]
 %
 % The problem JSON is written by clab from the problem TOML. --dry-run grades
-% the start design once, which is also the reference design of the goals. The
-% optimization itself is not available yet.
+% the start design once, which is also the reference design of the goals.
+% Otherwise the design is optimized from the start design.
 design = [];
 dryRun = false;
 k = 1;
@@ -22,18 +22,21 @@ end
 if isempty(design)
     error('mks:args', '--optimize needs --design with the start design');
 end
-if ~dryRun
-    error('mks:args', '--optimize supports only --dry-run so far');
-end
 
 problem = jsondecode(fileread(problemJson));
 start = startDesign(problem, design);
 
 % The reference design is the start design: models that use design variables
 % cannot be solved without one, and goals then mean "better than my baseline".
-reference = evaluateProblem(problem, design);
-result = gradeProblem(problem, reference, reference);
-result.design = start;
+if dryRun
+    reference = evaluateProblem(problem, design);
+    result = gradeProblem(problem, reference, reference);
+    result.design = start;
+    result.start_design = start;
+    result.start_grade = result.grade;
+else
+    result = run_mks_optimizer(problem, design, start);
+end
 
 fid = fopen(outJson, 'w');
 fwrite(fid, jsonencode(result, 'PrettyPrint', true));
