@@ -107,20 +107,19 @@ mod tests {
 
     fn solution() -> serde_json::Value {
         json!({
+            "format": 2,
             "time": [0.0, 1.0],
-            "bodies": [{
-                "name": "Link", "bodyID": 1,
+            "bodies": { "Link": {
                 "cm": { "position": [[0.0, 1.0], [0.0, 0.0], [0.0, 0.0]] },
                 "points": {
                     "A": { "position": [[0.0, 1.0], [0.0, 0.0], [0.0, 0.0]] },
                     "B": { "position": [[2.0, 3.0], [0.0, 0.0], [1.0, 1.0]] },
                 },
-            }],
-            "joints": { "primary": [{
-                "name": "J1",
+            } },
+            "joints": { "J1": {
                 "i": { "position": [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]] },
                 "j": { "position": [[1.0, 1.0], [0.0, 0.0], [0.0, 0.0]] },
-            }], "secondary": [] },
+            } },
         })
     }
 

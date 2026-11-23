@@ -145,7 +145,8 @@ enum Kind {
 }
 
 /// HDF5 is told by extension. A `.json` is a solver solution if it has the
-/// solver's `time` and `v_hat`/`bodies` fields, otherwise it is normalized SVC JSON
+/// solver's `time` and `v_hat`/`bodies` fields (`v_hat` marks the old format, which the
+/// readers reject with a clear message), otherwise it is normalized SVC JSON
 /// (whose reader reports any further problem).
 fn detect(path: &Path) -> Result<Kind> {
     match extension(path).as_deref() {

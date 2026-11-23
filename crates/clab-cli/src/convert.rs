@@ -169,7 +169,7 @@ impl std::fmt::Display for ConfirmationRequired {
 impl std::error::Error for ConfirmationRequired {}
 
 /// Print warnings; unless `--yes`, ask before proceeding.
-fn confirm(warnings: Vec<String>, yes: bool) -> Result<()> {
+pub(crate) fn confirm(warnings: Vec<String>, yes: bool) -> Result<()> {
     if warnings.is_empty() {
         return Ok(());
     }
