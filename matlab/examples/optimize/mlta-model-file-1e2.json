@@ -1,7 +1,7 @@
 {
     "Hardpoints": {
         "U": [4700.0, -568.02, 555.0],
-        "L": [3945.2, -539.68, 436.38],
+        "L": [3945.2, -539.68, "HP_L_Z"],
         "RU": [4297.39, -644.54, 578.95],
         "RUi": [4297.39, -606.67, 578.95],
         "RUo": [4297.39, -682.41, 578.95],
@@ -1000,7 +1000,7 @@
         "BS2": {
             "active": 0,
             "type": "spring",
-            "stiffness": "BushingCharacteristics/jounceBumper_MLTA_1E2_LB5C-5K570-A1A.json",
+            "stiffness": "../BushingCharacteristics/jounceBumper_MLTA_1E2_LB5C-5K570-A1A.json",
             "free_length": [502.4745],
 
             "preload": [0],
@@ -1022,7 +1022,7 @@
         "BS9": {
             "active": 0,
             "type": "spring",
-            "stiffness": "BushingCharacteristics/jounceBumper_MLTA_1E2_LB5C-5K570-A1A.json",
+            "stiffness": "../BushingCharacteristics/jounceBumper_MLTA_1E2_LB5C-5K570-A1A.json",
             "free_length": [502.4745],
 
             "preload": [0],
