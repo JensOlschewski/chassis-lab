@@ -1,13 +1,13 @@
 function result = run_mks_optimizer(problem, design, start)
-    % run_mks_optimizer minimizes J = 10 - grade over the design variables of the
-    % problem with fmincon (sqp).
+    % run_mks_optimizer minimizes the weighted objective J (see scoreProblem) over
+    % the design variables of the problem with fmincon (sqp).
     %
     %   problem  decoded problem JSON
     %   design   dictionary of the --design file; its other variables stay fixed
     %   start    struct with the start value of each design variable
     %
-    % fmincon works on variables scaled to [0, 1]. The start design is the
-    % reference of the goals. A design where a model fails to solve or a signal is
+    % fmincon works on variables scaled to [0, 1]. The start design sets the
+    % objective scales that are not given. A design where a model fails to solve or a signal is
     % not a finite number counts as NaN for J and Inf for the constraints, so sqp
     % steps back from it. MKS_PROGRESS=1 shows the fmincon iterations.
     progress = getenv('MKS_PROGRESS') == "1";
@@ -18,7 +18,7 @@ function result = run_mks_optimizer(problem, design, start)
     x0 = (cellfun(@(n) start.(n), cellstr(names))' - lower) ./ span;
 
     reference = evaluateProblem(problem, design);
-    startGrade = gradeProblem(problem, reference, reference).grade;
+    startJ = scoreProblem(problem, reference, reference).J;
 
     cache = struct('x', [], 'result', []);
     failures = struct('count', 0, 'message', '');
@@ -43,7 +43,7 @@ function result = run_mks_optimizer(problem, design, start)
     result = final;
     result.design = physical(x);
     result.start_design = start;
-    result.start_grade = startGrade;
+    result.start_J = startJ;
     result.fmincon = struct('exitflag', exitflag, 'message', output.message, ...
         'iterations', output.iterations, 'evaluations', output.funcCount, ...
         'failed_evaluations', failures.count, 'last_error', failures.message);
@@ -72,7 +72,7 @@ function result = run_mks_optimizer(problem, design, start)
             return
         end
         try
-            r = gradeProblem(problem, evaluateProblem(problem, dictionary(x)), reference);
+            r = scoreProblem(problem, evaluateProblem(problem, dictionary(x)), reference);
         catch err
             failures.count = failures.count + 1;
             failures.message = err.message;

@@ -10,10 +10,10 @@ m = "model.json"
 A = [0, 10]
 [objectives.o]
 value = "m.characteristics.x"
-goal = "minimize"
+scale = 4
 "#;
 
-const RESULT: &str = r#"{"design":{"A":5},"start_design":{"A":1},"objectives":{"name":"o","kind":"minimize","weight":1,"reference":3,"value":2,"d":-0.3,"grade":16,"rule":"reference"},"constraints":[],"grade":16,"start_grade":10,"fmincon":{"exitflag":1,"iterations":4,"evaluations":12,"failed_evaluations":0,"last_error":""}}"#;
+const RESULT: &str = r#"{"design":{"A":5},"start_design":{"A":1},"objectives":{"name":"o","weight":1,"scale":4,"start":3,"value":2,"loss":0.5},"constraints":[],"J":0.5,"start_J":0.75,"fmincon":{"exitflag":1,"iterations":4,"evaluations":12,"failed_evaluations":0,"last_error":""}}"#;
 
 struct Setup {
     dir: tempfile::TempDir,
@@ -66,10 +66,10 @@ fn passes_the_problem_json_and_design_to_the_solver() {
     let output = setup.run(&["problem.toml", "--design", "start.json"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let text = String::from_utf8(output.stdout).unwrap();
-    assert!(text.contains("grade 10.0000 -> 16.0000"), "{text}");
+    assert!(text.contains("J 0.7500 -> 0.5000"), "{text}");
     let problem: serde_json::Value =
         serde_json::from_slice(&std::fs::read(setup.path("args.json")).unwrap()).unwrap();
-    assert_eq!(problem["objectives"][0]["kind"], "minimize");
+    assert_eq!(problem["objectives"][0]["scale"], 4.0);
     assert_eq!(problem["design"][0]["name"], "A");
 }
 

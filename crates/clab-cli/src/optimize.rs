@@ -1,4 +1,4 @@
-//! `clab optimize`: grades or optimizes a design against a problem file.
+//! `clab optimize`: evaluates or optimizes a design against a problem file.
 //!
 //! The optimization runs inside the compiled MATLAB solver (`mks_solver
 //! --optimize`); this side validates the problem, starts the solver and reports.
@@ -17,7 +17,7 @@ use crate::matlab::{self, file_path};
 pub(crate) struct OptimizeArgs {
     /// Optimization problem TOML.
     problem: Option<PathBuf>,
-    /// Start design JSON. Also the reference of `goal` objectives.
+    /// Start design JSON. Also sets the objective scales that are not given.
     #[arg(long, value_name = "FILE")]
     design: PathBuf,
     /// Write the optimized design to PATH: a file, or a directory that receives
@@ -25,7 +25,7 @@ pub(crate) struct OptimizeArgs {
     /// directory. Give the problem before this flag.
     #[arg(long, value_name = "PATH", num_args = 0..=1, conflicts_with = "dry_run")]
     json: Option<Option<PathBuf>>,
-    /// Grade the start design and stop.
+    /// Evaluate the start design and stop.
     #[arg(long)]
     dry_run: bool,
     /// Replace an existing --json file.
@@ -165,18 +165,17 @@ fn report(result: &Value, problem: &Problem, dry_run: bool) -> Result<String> {
         .map(|o| {
             vec![
                 text(&o["name"]).to_owned(),
-                text(&o["kind"]).to_owned(),
                 format!("{}", number(&o["weight"])),
-                format!("{:.6}", number(&o["reference"])),
+                format!("{:.6}", number(&o["scale"])),
+                format!("{:.6}", number(&o["start"])),
                 format!("{:.6}", number(&o["value"])),
-                format!("{:.4}", number(&o["d"])),
-                format!("{:.3}", number(&o["grade"])),
+                format!("{:.4}", number(&o["loss"])),
             ]
         })
         .collect();
-    writeln!(out, "\nobjectives")?;
+    writeln!(out, "\nobjectives (minimized)")?;
     out += &table(
-        &["name", "kind", "weight", "start", "value", "d", "grade"],
+        &["name", "weight", "scale", "start", "value", "value/scale"],
         &rows,
     );
 
@@ -200,18 +199,13 @@ fn report(result: &Value, problem: &Problem, dry_run: bool) -> Result<String> {
 
     writeln!(out)?;
     if dry_run {
-        writeln!(out, "grade {:.4} (start design)", number(&result["grade"]))?;
-        let scales: std::collections::BTreeSet<&str> = items(&result["objectives"])
-            .iter()
-            .map(|o| text(&o["rule"]))
-            .collect();
-        writeln!(out, "scale rule: {}", Vec::from_iter(scales).join(", "))?;
+        writeln!(out, "J {:.4} (start design)", number(&result["J"]))?;
     } else {
         writeln!(
             out,
-            "grade {:.4} -> {:.4}",
-            number(&result["start_grade"]),
-            number(&result["grade"])
+            "J {:.4} -> {:.4}",
+            number(&result["start_J"]),
+            number(&result["J"])
         )?;
         let f = &result["fmincon"];
         writeln!(
@@ -242,7 +236,6 @@ m = "m.json"
 A = [0, 10]
 [objectives.o]
 value = "m.characteristics.x"
-goal = "minimize"
 "#,
             Path::new("/base"),
         )
@@ -253,10 +246,10 @@ goal = "minimize"
     fn reports_single_objective_object_and_no_constraints() {
         let result: Value = serde_json::json!({
             "design": {"A": 5.0}, "start_design": {"A": 1.0},
-            "objectives": {"name": "o", "kind": "minimize", "weight": 1, "reference": 3.0,
-                "value": 2.0, "d": -0.33, "grade": 16.6, "rule": "reference"},
+            "objectives": {"name": "o", "weight": 1, "scale": 3.0, "start": 3.0,
+                "value": 2.0, "loss": 0.6667},
             "constraints": [],
-            "grade": 16.6, "start_grade": 10.0,
+            "J": 0.6667, "start_J": 1.0,
             "fmincon": {"exitflag": 1, "iterations": 4, "evaluations": 12, "failed_evaluations": 0, "last_error": ""},
         });
         let text = report(&result, &problem(), false).unwrap();
@@ -264,9 +257,12 @@ goal = "minimize"
             text.contains("A         1.000000  5.000000   [0, 10]"),
             "{text}"
         );
-        assert!(text.contains("o     minimize"), "{text}");
+        assert!(
+            text.contains("o     1       3.000000  3.000000  2.000000  0.6667"),
+            "{text}"
+        );
         assert!(!text.contains("constraints"));
-        assert!(text.contains("grade 10.0000 -> 16.6000"));
+        assert!(text.contains("J 1.0000 -> 0.6667"));
         assert!(text.contains("12 evaluations (0 failed)"));
     }
 
@@ -274,11 +270,11 @@ goal = "minimize"
     fn flags_violated_constraints() {
         let result: Value = serde_json::json!({
             "design": {"A": 1.0}, "start_design": {"A": 1.0},
-            "objectives": [], "grade": 10.0,
+            "objectives": [], "J": 1.0,
             "constraints": {"name": "c", "value": 2.0, "relation": "<=", "limit": 1.0, "ok": false},
         });
         let text = report(&result, &problem(), true).unwrap();
         assert!(text.contains("VIOLATED"), "{text}");
-        assert!(text.contains("grade 10.0000 (start design)"));
+        assert!(text.contains("J 1.0000 (start design)"));
     }
 }

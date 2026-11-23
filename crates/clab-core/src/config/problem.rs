@@ -1,5 +1,5 @@
-//! The optimization problem file: models, design bounds, signals, graded
-//! objectives and hard constraints.
+//! The optimization problem file: models, design bounds, signals, weighted
+//! objectives to minimize and hard constraints.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -12,8 +12,6 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::expr::{self, Expr, is_identifier, is_reserved};
-
-const DEFAULT_DEDUCTION_FACTOR: f64 = 20.0;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,7 +33,6 @@ struct Raw {
 struct RawOptimizer {
     max_iterations: Option<u32>,
     max_evaluations: Option<u32>,
-    deduction_factor: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,27 +40,7 @@ struct RawOptimizer {
 struct RawObjective {
     value: String,
     weight: Option<f64>,
-    lower: Option<f64>,
-    upper: Option<f64>,
-    target: Option<f64>,
-    goal: Option<Goal>,
-    deduction_factor: Option<f64>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Goal {
-    Minimize,
-    Maximize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Kind {
-    Lower(f64),
-    Upper(f64),
-    Range(f64, f64),
-    Target(f64),
-    Goal(Goal),
+    scale: Option<f64>,
 }
 
 /// An expression: the user's text and the text the solver evaluates.
@@ -73,13 +50,14 @@ pub struct Formula {
     pub matlab: String,
 }
 
+/// A value to minimize. It counts as `value / scale`; without a scale the
+/// solver uses |value| of the start design.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Objective {
     pub name: String,
     pub value: Formula,
-    pub kind: Kind,
     pub weight: f64,
-    pub deduction_factor: f64,
+    pub scale: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -200,11 +178,6 @@ impl Problem {
     /// Checks everything that does not need the model files.
     pub fn parse(text: &str, base: &Path) -> Result<Self> {
         let raw: Raw = toml::from_str(text)?;
-        let factor = raw
-            .optimizer
-            .deduction_factor
-            .unwrap_or(DEFAULT_DEDUCTION_FACTOR);
-        positive(factor, "[optimizer] deduction_factor")?;
         for (key, value) in [
             ("max_iterations", raw.optimizer.max_iterations),
             ("max_evaluations", raw.optimizer.max_evaluations),
@@ -268,18 +241,17 @@ impl Problem {
         let mut objectives = Vec::new();
         for (name, o) in &raw.objectives {
             let what = format!("[objectives.{name}]");
-            let kind = objective_kind(o).with_context(|| what.clone())?;
             let weight = o.weight.unwrap_or(1.0);
             positive(weight, &format!("{what} weight"))?;
-            let deduction_factor = o.deduction_factor.unwrap_or(factor);
-            positive(deduction_factor, &format!("{what} deduction_factor"))?;
+            if let Some(scale) = o.scale {
+                positive(scale, &format!("{what} scale"))?;
+            }
             let (_, value) = formula(&format!("{what} value"), &o.value)?;
             objectives.push(Objective {
                 name: name.clone(),
                 value,
-                kind,
                 weight,
-                deduction_factor,
+                scale: o.scale,
             });
         }
         if objectives.is_empty() {
@@ -362,31 +334,6 @@ fn positive(value: f64, what: &str) -> Result<()> {
     } else {
         bail!("{what} must be positive")
     }
-}
-
-fn objective_kind(o: &RawObjective) -> Result<Kind> {
-    let kind = match (o.lower, o.upper, o.target, o.goal) {
-        (Some(lower), Some(upper), None, None) => {
-            if lower >= upper {
-                bail!("need lower < upper");
-            }
-            Kind::Range(lower, upper)
-        }
-        (Some(lower), None, None, None) => Kind::Lower(lower),
-        (None, Some(upper), None, None) => Kind::Upper(upper),
-        (None, None, Some(target), None) => Kind::Target(target),
-        (None, None, None, Some(goal)) => Kind::Goal(goal),
-        _ => bail!("give exactly one of `lower`, `upper`, `lower` + `upper`, `target` or `goal`"),
-    };
-    let finite = match kind {
-        Kind::Lower(a) | Kind::Upper(a) | Kind::Target(a) => a.is_finite(),
-        Kind::Range(a, b) => a.is_finite() && b.is_finite(),
-        Kind::Goal(_) => true,
-    };
-    if !finite {
-        bail!("bounds and targets must be finite");
-    }
-    Ok(kind)
 }
 
 /// Splits `lhs <= rhs` or `lhs >= rhs`. Exactly one such operator is allowed.
@@ -485,35 +432,19 @@ fn sorted_signals(
         .collect())
 }
 
-impl Kind {
-    fn solver_form(self) -> (&'static str, Vec<f64>) {
-        match self {
-            Kind::Lower(v) => ("lower", vec![v]),
-            Kind::Upper(v) => ("upper", vec![v]),
-            Kind::Range(lo, hi) => ("range", vec![lo, hi]),
-            Kind::Target(v) => ("target", vec![v]),
-            Kind::Goal(Goal::Minimize) => ("minimize", vec![]),
-            Kind::Goal(Goal::Maximize) => ("maximize", vec![]),
-        }
-    }
-}
-
 impl Problem {
     /// The problem as `mks_solver --optimize` reads it: rewritten expressions,
-    /// resolved deduction factors, absolute model paths.
+    /// absolute model paths. A missing scale is `null`.
     pub fn solver_json(&self) -> Value {
         let objectives: Vec<Value> = self
             .objectives
             .iter()
             .map(|o| {
-                let (kind, limits) = o.kind.solver_form();
                 serde_json::json!({
                     "name": o.name,
                     "expr": o.value.matlab,
-                    "kind": kind,
-                    "limits": limits,
                     "weight": o.weight,
-                    "deduction_factor": o.deduction_factor,
+                    "scale": o.scale,
                 })
             })
             .collect();
@@ -568,26 +499,11 @@ mod tests {
         assert_eq!(json["max_iterations"], 50);
         assert!(json.get("max_evaluations").is_none());
         assert_eq!(json["design"][0]["name"], "HP_L_Z");
-        let kinds: Vec<_> = json["objectives"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|o| {
-                (
-                    o["kind"].as_str().unwrap(),
-                    o["limits"].as_array().unwrap().len(),
-                )
-            })
-            .collect();
-        assert!(kinds.contains(&("maximize", 0)));
-        assert!(kinds.contains(&("target", 1)));
-        assert!(
-            json["objectives"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|o| o["deduction_factor"].is_number())
-        );
+        let objectives = json["objectives"].as_array().unwrap();
+        assert_eq!(objectives[0]["name"], "camber");
+        assert_eq!(objectives[0]["scale"], 2.0);
+        assert_eq!(objectives[1]["weight"], 2.0);
+        assert!(objectives[1]["scale"].is_null());
         assert_eq!(json["signals"].as_array().unwrap().len(), 3);
     }
 
@@ -608,14 +524,12 @@ v = "pwt.characteristics.wheel_velocities.l_wc"
 mid = "round(numel(v.z)/2)"
 
 [objectives.wheel_motion]
-value = "epsilon(mid)"
-goal = "maximize"
+value = "-epsilon(mid)"
 weight = 2
 
 [objectives.camber]
-value = "pwt.characteristics.toecamber.l_camber(end)"
-target = -20
-deduction_factor = 10
+value = "abs(pwt.characteristics.toecamber.l_camber(end) + 20)"
+scale = 2
 
 [constraints]
 c1 = "max(abs(gradient(epsilon))) <= 0.01"
@@ -654,18 +568,13 @@ c1 = "max(abs(gradient(epsilon))) <= 0.01"
             "rad2deg(atan((xyz(s.v,1)./xyz(s.v,3))))"
         );
         let camber = p.objectives.iter().find(|o| o.name == "camber").unwrap();
-        assert_eq!(camber.kind, Kind::Target(-20.0));
-        assert_eq!(camber.deduction_factor, 10.0);
-        assert_eq!(
-            camber.value.matlab,
-            "s.pwt.characteristics.toecamber.l_camber(end)"
-        );
+        assert_eq!((camber.weight, camber.scale), (1.0, Some(2.0)));
         let motion = p
             .objectives
             .iter()
             .find(|o| o.name == "wheel_motion")
             .unwrap();
-        assert_eq!((motion.weight, motion.deduction_factor), (2.0, 20.0));
+        assert_eq!((motion.weight, motion.scale), (2.0, None));
         assert_eq!(p.constraints[0].relation, Relation::AtMost);
         assert_eq!(p.constraints[0].rhs.matlab, "0.01");
     }
@@ -686,23 +595,9 @@ c1 = "max(abs(gradient(epsilon))) <= 0.01"
 
     #[test]
     fn rejects_bad_objectives() {
-        assert!(fail(&replace("goal = \"maximize\"", "")).contains("exactly one of"));
-        assert!(
-            fail(&replace(
-                "goal = \"maximize\"",
-                "goal = \"maximize\"\ntarget = 1"
-            ))
-            .contains("exactly one of")
-        );
-        assert!(
-            fail(&replace("goal = \"maximize\"", "lower = 3\nupper = 1")).contains("lower < upper")
-        );
         assert!(fail(&replace("weight = 2", "weight = 0")).contains("weight must be positive"));
-        assert!(
-            fail(&replace("deduction_factor = 10", "deduction_factor = -1"))
-                .contains("deduction_factor")
-        );
-        assert!(parse(&replace("goal = \"maximize\"", "lower = 1\nupper = 3")).is_ok());
+        assert!(fail(&replace("scale = 2", "scale = -1")).contains("scale must be positive"));
+        assert!(fail(&replace("scale = 2", "target = 1")).contains("unknown field"));
     }
 
     #[test]
@@ -736,7 +631,7 @@ c1 = "max(abs(gradient(epsilon))) <= 0.01"
         });
         let names = BTreeMap::from([("pwt".to_owned(), ModelNames::from_json(&model))]);
         let problem = |value: &str| {
-            parse(&replace("epsilon(mid)", value))
+            parse(&replace("-epsilon(mid)", value))
                 .unwrap()
                 .check_models(&names)
         };
