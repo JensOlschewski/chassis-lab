@@ -18,6 +18,7 @@ env:
 
 jobs:
   quality:
+    name: Rust
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -35,15 +36,15 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache Rust quality build
+      - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: quality
 
-      - name: Install Rust build tools
+      - name: Install CMake
         run: python -m pip install "cmake>=3.26,<4"
 
-      - name: Install Python package
+      - name: Install Python package and test dependencies
         run: python -m pip install "./py-chassislab[dev]"
 
       - name: Check Rust formatting
@@ -52,16 +53,40 @@ jobs:
       - name: Lint Rust
         run: cargo clippy --workspace --exclude clab-app --all-targets --all-features -- -D warnings
 
-      - name: Test Rust
+      - name: Run Rust tests
         run: cargo test --workspace --exclude clab-app --locked --features clab-cli/skip-license-gate
 
-      - name: Check Python
-        run: cd py-chassislab && ruff check . && ruff format --check .
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
 
-      - name: Test Python and integration
-        run: cd py-chassislab && pytest -q
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: py-chassislab/pyproject.toml
+
+      - name: Install Python package and test dependencies
+        run: python -m pip install "./py-chassislab[dev]"
+
+      - name: Lint Python
+        working-directory: py-chassislab
+        run: ruff check .
+
+      - name: Check Python formatting
+        working-directory: py-chassislab
+        run: ruff format --check .
+
+      - name: Run Python tests
+        working-directory: py-chassislab
+        run: pytest -q --durations=20
 
   linux-runtime:
+    name: Linux runtime
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -76,13 +101,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Cache Linux runtime build
+      - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux-runtime
           key: ${{ hashFiles('packaging/embedded-runtime-linux-x86_64.lock', 'packaging/build-embedded-runtime.sh') }}
 
-      - name: Install Rust build tools
+      - name: Install CMake
         run: python3 -m pip install "cmake>=3.26,<4"
 
       - name: Build Linux runtime archive
@@ -94,7 +119,7 @@ jobs:
       - name: Verify Linux runtime checksum
         run: sha256sum --check dist/clab-runtime-linux-x86_64.tar.gz.sha256
 
-      - name: Smoke test Linux runtime in clean Ubuntu container
+      - name: Test Linux runtime in clean container
         run: |
           smoke_input="$(mktemp)"
           trap 'rm -f "$smoke_input"' EXIT
