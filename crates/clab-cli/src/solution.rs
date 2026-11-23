@@ -11,8 +11,10 @@ const ZERO_THRESHOLD: f64 = 0.5e-12;
 /// A body velocity has 6 rows: 3 linear, then 3 angular.
 const DOF_PER_BODY: usize = 6;
 
+type BodyVelocities<'a> = Vec<(&'a str, Vec<Vec<f64>>)>;
+
 /// The time vector and the velocity of each body, in model order, as 6 rows over time.
-fn velocities(solution: &Value) -> Result<(Vec<f64>, Vec<(&str, Vec<Vec<f64>>)>)> {
+fn velocities(solution: &Value) -> Result<(Vec<f64>, BodyVelocities<'_>)> {
     let time = time(solution)?;
     let bodies = bodies(solution)?
         .iter()
