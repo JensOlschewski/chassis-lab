@@ -14,9 +14,9 @@ function outputStruct = initOutputStruct(jsonStruct)
     
     outputStruct = struct();
 
-    outputStruct.isBodyOutput = jsonStruct.include_body_data;
-    outputStruct.isConOutput = jsonStruct.include_connector_data;
-    outputStruct.isSuspensionParamOutput = jsonStruct.include_suspension_parameter; 
+    outputStruct.isBodyOutput = true;
+    outputStruct.isConOutput = true;
+    outputStruct.isSuspensionParamOutput = true;
 
     outputStruct.wheelLeft.wcName = jsonStruct.parameters.left_wheel.wc_name;
     outputStruct.wheelLeft.wnName = jsonStruct.parameters.left_wheel.wn_name;
