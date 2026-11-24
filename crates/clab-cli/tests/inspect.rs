@@ -332,7 +332,13 @@ fn solution_json_carries_frames_for_the_chosen_layout() {
     )
     .unwrap();
     let value = inspect_json(&path, &[]);
-    assert_eq!(value["signals"]["signals"][0]["name"], "Link.vx");
+    assert!(
+        value["signals"]["signals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["name"] == "bodies.Link.velocity.linear.x")
+    );
     assert_eq!(value["frames"].as_array().unwrap().len(), 2);
     assert_eq!(value["frames"][1]["bodies"][0]["label"], "Link");
     assert_eq!(value["frames"][1]["bodies"][0]["origin"][0], 1.0);
@@ -360,18 +366,31 @@ fn solution_json_carries_frames_for_the_chosen_layout() {
 }
 
 #[test]
-fn solution_json_is_tagged_and_signal_flags_are_refused() {
+fn solution_catalog_names_work_in_formulas_and_select_the_right_row() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("solution.json");
-    fs::write(&path, r#"{"format": 2, "time": [0.0], "bodies": {}}"#).unwrap();
-    let value = inspect_json(&path, &[]);
-    assert_eq!(value["kind"], "solution");
-    assert!(value["summary"].as_str().unwrap().contains("steps: 1"));
-    assert_eq!(inspect_json(&path, &["--list"])["kind"], "solution");
-    for flags in [&["--match", "x"][..], &["--signal", "x"]] {
-        let output = inspect(&path, flags);
-        assert_eq!(output.status.code(), Some(2));
-        assert!(String::from_utf8_lossy(&output.stderr).contains("not solver solutions"));
+    fs::write(&path, r#"{"format":2,"time":[0,1],"bodies":{},"characteristics":{"wheel_velocities":{"l_wc":[[1,null],[3,4],[5,6]]}}}"#).unwrap();
+    let base = "characteristics.wheel_velocities.l_wc";
+    let x = format!("{base}.x");
+    let list = inspect_json(&path, &["--match", "WHEEL_VEL"]);
+    assert_eq!(list["signals"].as_array().unwrap().len(), 4);
+    assert_eq!(list["signals"][0]["shape"], serde_json::json!([3, 2]));
+    assert_eq!(list["signals"][1]["name"], x);
+    let expr = clab_core::config::expr::parse(&format!("pwt.{x}")).unwrap();
+    assert_eq!(expr.rewrite(), format!("xyz(s.pwt.{base},1)"));
+    let data = inspect_json(&path, &["--signal", &x, "--signal", base]);
+    assert_eq!(data["signals"][0]["values"], serde_json::json!([1, null]));
+    assert_eq!(
+        data["signals"][1]["values"][0],
+        data["signals"][0]["values"]
+    );
+    assert_eq!(data["axis"], serde_json::json!([0, 1]));
+    for flags in [
+        &["--signal", "time"][..],
+        &["--json", "--signal", "unknown"],
+        &["--json", "--list", "--signal", "time"],
+    ] {
+        assert!(!inspect(&path, flags).status.success());
     }
 }
 

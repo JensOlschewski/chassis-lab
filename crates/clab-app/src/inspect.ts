@@ -126,8 +126,18 @@ export function setupInspect() {
   /** Tells the session that the curve rows changed; row selects report their own changes. */
   const changed = () => curvesRoot.dispatchEvent(new Event("change", { bubbles: true }));
 
-  const pick = (wanted: string | undefined, fallback: string) =>
-    choices.some((choice) => choice.value === wanted) ? wanted! : fallback;
+  const pick = (wanted: string | undefined, fallback: string) => {
+    if (!wanted) return fallback;
+    if (choices.some(c => c.value === wanted)) return wanted;
+    if (solution) {
+      // Saved sessions before #256 used short body and characteristic names.
+      const body = /^([^.]+)\.([vw])([xyz])$/.exec(wanted);
+      const paths = [`characteristics.${wanted}`];
+      if (body) paths.unshift(`bodies.${body[1]}.velocity.${body[2] === "v" ? "linear" : "angular"}.${body[3]}`);
+      return paths.find(path => choices.some(c => c.value === path)) ?? fallback;
+    }
+    return fallback;
+  };
 
   function addRow(saved?: SavedCurve): void {
     const row = document.createElement("div");

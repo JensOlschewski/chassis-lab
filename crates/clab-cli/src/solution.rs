@@ -2,14 +2,12 @@
 
 use std::fmt::Write;
 
-use anyhow::{Result, bail};
-use clab_core::solution::{bodies, matrix, matrix3, time};
+use anyhow::Result;
+use clab_core::solution::{bodies, matrix3, time};
 use serde::Serialize;
 use serde_json::{Value, json};
 
 const ZERO_THRESHOLD: f64 = 0.5e-12;
-/// A body velocity has 6 rows: 3 linear, then 3 angular.
-const DOF_PER_BODY: usize = 6;
 
 type BodyVelocities<'a> = Vec<(&'a str, Vec<Vec<f64>>)>;
 
@@ -48,55 +46,15 @@ fn signal(name: String, values: impl Serialize) -> Value {
 }
 
 /// The solution in the shape the app plots HDF5 signals in: the time axis plus one
-/// signal per body velocity component and one
-/// per suspension characteristic (`toecamber.l_toe`, `wheel_points.l_wc.x`, …).
+/// scalar signal per formula-addressable time series or vector component.
 /// The solver states no units.
 pub(crate) fn plot_signals(solution: &Value) -> Result<Value> {
-    const COMPONENTS: [&str; DOF_PER_BODY] = ["vx", "vy", "vz", "wx", "wy", "wz"];
-    let (time, bodies) = velocities(solution)?;
-    let mut signals: Vec<Value> = bodies
+    let signals: Vec<_> = clab_core::solution::catalog(solution)?
         .into_iter()
-        .flat_map(|(name, rows)| {
-            COMPONENTS
-                .iter()
-                .zip(rows)
-                .map(move |(component, values)| signal(format!("{name}.{component}"), values))
-        })
+        .filter(|(name, s)| name != "time" && s.rows == 1)
+        .map(|(name, s)| signal(name, s.values))
         .collect();
-    for (section, entries) in solution["characteristics"]
-        .as_object()
-        .into_iter()
-        .flatten()
-    {
-        for (key, value) in entries.as_object().into_iter().flatten() {
-            let name = format!("{section}.{key}");
-            // A vector over time, or x/y/z rows; a step the solver could not compute is null.
-            match value.as_array().map(|rows| rows.first()) {
-                Some(Some(Value::Array(_))) => {
-                    let rows = matrix(value, &name)?;
-                    if rows.len() != 3 || rows.iter().any(|row| row.len() != time.len()) {
-                        bail!("`{name}` is not 3 × {}", time.len());
-                    }
-                    signals.extend(
-                        rows.iter()
-                            .zip(["x", "y", "z"])
-                            .map(|(row, axis)| signal(format!("{name}.{axis}"), row)),
-                    );
-                }
-                Some(_) => {
-                    let values = value.as_array().unwrap();
-                    if values.len() != time.len()
-                        || values.iter().any(|n| !n.is_number() && !n.is_null())
-                    {
-                        bail!("`{name}` does not match `time`");
-                    }
-                    signals.push(signal(name, values));
-                }
-                None => {}
-            }
-        }
-    }
-    Ok(json!({ "axis": time, "signals": signals }))
+    Ok(json!({"axis": solution["time"], "signals": signals}))
 }
 
 /// Steps, time span, counts and the peak velocity of each body.
@@ -190,9 +148,13 @@ mod tests {
         let signals = plot_signals(&solution()).unwrap();
         assert_eq!(signals["axis"], json!([0.0, 0.5]));
         assert_eq!(signals["signals"].as_array().unwrap().len(), 6);
-        assert_eq!(signals["signals"][0]["name"], "Link.vx");
-        assert_eq!(signals["signals"][5]["name"], "Link.wz");
-        assert_eq!(signals["signals"][5]["values"], json!([0.0, 3.0]));
+        let spin = signals["signals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == "bodies.Link.velocity.angular.z")
+            .unwrap();
+        assert_eq!(spin["values"], json!([0.0, 3.0]));
     }
 
     #[test]
@@ -212,15 +174,15 @@ mod tests {
                 .find(|s| s["name"] == name)
         };
         assert_eq!(
-            named("toecamber.l_toe").unwrap()["values"],
+            named("characteristics.toecamber.l_toe").unwrap()["values"],
             json!([0.2, 0.3])
         );
         assert_eq!(
-            named("roll.roll_rate").unwrap()["values"],
+            named("characteristics.roll.roll_rate").unwrap()["values"],
             json!([null, 1.0])
         );
         assert_eq!(
-            named("wheel_points.l_wc.y").unwrap()["values"],
+            named("characteristics.wheel_points.l_wc.y").unwrap()["values"],
             json!([3.0, 4.0])
         );
 
