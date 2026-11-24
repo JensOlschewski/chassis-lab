@@ -295,8 +295,10 @@ fn is_chain(expr: &Expr) -> bool {
     }
 }
 
+pub(crate) const COMPONENTS: [&str; 3] = ["x", "y", "z"];
+
 fn component(name: &str) -> Option<usize> {
-    ["x", "y", "z"].iter().position(|c| *c == name)
+    COMPONENTS.iter().position(|c| *c == name)
 }
 
 impl Expr {

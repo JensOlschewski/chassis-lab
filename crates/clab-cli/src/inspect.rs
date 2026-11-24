@@ -17,7 +17,7 @@ enum Mapping {
 
 #[derive(Debug, Args)]
 pub(crate) struct InspectArgs {
-    /// Normalized SVC JSON or HDF5 simulation/measurement file.
+    /// Solver solution JSON, normalized SVC JSON or HDF5 simulation/measurement file.
     file: Option<PathBuf>,
     /// Show canonical mapping requirements instead of inspecting a file.
     #[arg(long, value_enum)]
@@ -37,7 +37,7 @@ pub(crate) struct InspectArgs {
     /// Read one signal by its listed name; repeatable. Requires --json.
     #[arg(long)]
     signal: Vec<String>,
-    /// Emit JSON for --list/--match or --signal (HDF5 only).
+    /// Emit JSON for --list/--match or --signal (HDF5 or solver solution).
     #[arg(long)]
     json: bool,
     /// Show a solver solution in the terminal. An optional view file (JSON)
@@ -74,8 +74,17 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
     }
     let kind = detect(&file)?;
     if let Kind::Solution(solution) = &kind {
-        if args.r#match.is_some() || !args.signal.is_empty() {
-            bail!("--match and --signal apply to HDF5 files, not solver solutions");
+        if args.view.is_some() && (args.r#match.is_some() || !args.signal.is_empty() || args.list) {
+            bail!("--view cannot be combined with signal catalog options");
+        }
+        if args.r#match.is_some() || args.list || !args.signal.is_empty() {
+            return inspect_solution_signals(
+                solution,
+                args.json,
+                args.list || args.r#match.is_some(),
+                args.r#match.as_deref(),
+                &args.signal,
+            );
         }
         return inspect_solution(solution, args.json, args.view);
     }
@@ -100,6 +109,52 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
         Kind::Hdf5 => inspect_hdf5(&file, signals, args.r#match.as_deref()),
         Kind::Solution(_) => unreachable!("handled above"),
     }
+}
+
+fn inspect_solution_signals(
+    solution: &Value,
+    json: bool,
+    listing: bool,
+    filter: Option<&str>,
+    names: &[String],
+) -> Result<()> {
+    if listing && !names.is_empty() {
+        bail!("choose --list/--match or --signal, not both");
+    }
+    if !names.is_empty() && !json {
+        bail!("--signal requires --json");
+    }
+    let catalog = clab_core::solution::catalog(solution)?;
+    let axis = &solution["time"];
+    if listing {
+        let n = axis.as_array().context("missing time axis")?.len();
+        let needle = filter.unwrap_or("").to_ascii_lowercase();
+        let rows = catalog
+            .iter()
+            .filter(|(name, _)| name.to_ascii_lowercase().contains(&needle));
+        if json {
+            let signals: Vec<_> = rows
+                .map(|(name, s)| json!({"name":name,"shape":[s.rows,n],"unit":""}))
+                .collect();
+            println!("{}", json!({"kind":"solution","signals":signals}));
+        } else {
+            for (name, s) in rows {
+                println!("{name}\t{}×{n}", s.rows);
+            }
+        }
+    } else {
+        let selected = names
+            .iter()
+            .map(|name| {
+                let s = catalog
+                    .get(name)
+                    .with_context(|| format!("unknown solution signal `{name}`; use --list"))?;
+                Ok(json!({"name": name,"unit":"","values":s.values}))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        println!("{}", json!({"axis":axis,"signals":selected}));
+    }
+    Ok(())
 }
 
 fn inspect_solution(solution: &Value, json: bool, view: Option<Option<PathBuf>>) -> Result<()> {
