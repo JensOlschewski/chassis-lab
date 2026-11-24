@@ -10,6 +10,8 @@ mod compare;
 mod convert;
 mod inspect;
 mod license;
+mod matlab;
+mod optimize;
 mod progress;
 mod report;
 mod signals;
@@ -36,6 +38,8 @@ enum Command {
     Convert(convert::ConvertArgs),
     /// Solve a multibody model with the MATLAB solver.
     Solve(solve::SolveArgs),
+    /// Optimize a design with the MATLAB solver.
+    Optimize(optimize::OptimizeArgs),
     /// Manage the MATLAB Runtime the solver needs.
     #[command(subcommand)]
     Runtime(solve::RuntimeCommand),
@@ -60,6 +64,7 @@ impl Command {
                 | Self::Inspect(_)
                 | Self::Convert(_)
                 | Self::Solve(_)
+                | Self::Optimize(_)
         )
     }
 }
@@ -111,6 +116,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Inspect(args) => inspect::inspect(args),
         Command::Convert(args) => convert::convert(args),
         Command::Solve(args) => solve::solve(args),
+        Command::Optimize(args) => optimize::optimize(args),
         Command::Runtime(command) => solve::runtime(command),
         Command::License(command) => license::run(command),
         Command::Completion { shell } => {

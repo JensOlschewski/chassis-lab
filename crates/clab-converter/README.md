@@ -51,10 +51,10 @@ The simulation axis is an ordinal sample index, not fabricated time. The ACD
 channel named exactly `time` is the measurement axis and remains a normal signal.
 Non-finite sample values are preserved.
 
-## Local test data
+## Local subtest data
 
 Only synthetic examples belong in Git. Put private or large `.res`, `.acd`,
-`.h5`, and `.hdf5` files under repository-root `local-test-data/`; it is
+`.h5`, and `.hdf5` files under repository-root `local-subtest-data/`; it is
 ignored. Tests generate their small RES fixture in temporary directories.
 `examples/input/raw-measurement/example-measurement-knc-vertical.acd` demonstrates the measurement
 schema without vehicle data; convert it to generate HDF5 output.
@@ -63,7 +63,7 @@ schema without vehicle data; convert it to generate HDF5 output.
 
 HDF5 is built from source, so a separate `libhdf5-dev` installation is not required. Install `hdf5-tools` only if you want to use the inspection commands below.
 
-Build and test:
+Build and subtest:
 
 ```bash
 cargo test
@@ -78,13 +78,13 @@ simulation HDF5; every `.acd` file becomes measurement HDF5.
 Convert a file next to the source file:
 
 ```bash
-target/release/clab convert BeFlex2upLoa_svc.res --domain svc
+target/release/clab convert BeFlex2upLoa_svc.res --test svc
 ```
 
-This creates `BeFlex2upLoa_svc.h5`. `--domain` (`svc` or `knc`) is required.
-`knc` also needs `--test` and `--setup b<0|1>e<0|1>f<0|1>r<0|1>` (brakes applied,
-steering engine on, front ARB connected, rear ARB connected). `--test lateral`
-also needs `--phase in|anti` and `--offset <mm>`. All are stored as HDF5
+This creates `BeFlex2upLoa_svc.h5`. `--test` (`svc` or `knc`) is required.
+`knc` also needs `--subtest` and `--setup b<0|1>e<0|1>f<0|1>r<0|1>` (brakes applied,
+steering engine on, front ARB connected, rear ARB connected). `--subtest lateral`
+also needs `--phase inphase|antiphase` and `--offset <mm>`. All are stored as HDF5
 attributes. Each declared value is compared with the data where the data shows
 it (ACD header, wheel forces, brake torque); a disagreement warns and asks to
 proceed, `--yes` skips the prompt. The status line after the run shows which
@@ -93,13 +93,13 @@ values the data confirmed and which are only declared.
 Choose another output path:
 
 ```bash
-target/release/clab convert BeFlex2upLoa_svc.res --domain svc --output results/BeFlex2upLoa_svc.h5
+target/release/clab convert BeFlex2upLoa_svc.res --test svc --output results/BeFlex2upLoa_svc.h5
 ```
 
 Replace an existing output file:
 
 ```bash
-target/release/clab convert BeFlex2upLoa_svc.res --domain svc --force
+target/release/clab convert BeFlex2upLoa_svc.res --test svc --force
 ```
 
 Inspect converted signals:

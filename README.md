@@ -1,9 +1,9 @@
 # ChassisLab
 
-ChassisLab, or Chassis Laboratory, analyzes and compares vehicle chassis
-simulation and measurement data. Rust owns `clab` workflow, input validation,
-reports, and output safety. Embedded Python provides scientific kernels and
-plotting.
+ChassisLab (Chassis Laboratory) converts, analyzes, and compares vehicle chassis
+simulation and measurement data. Rust manages data and workflows. Embedded
+Python provide scientific computing and plotting. The project also includes a
+small MATLAB multibody solver for research and prototyping.
 
 ## Workflow
 
@@ -11,17 +11,19 @@ plotting.
 convert → inspect → analyze → compare
 ```
 
-🔄 **Convert** raw Adams `.res` simulations or Lommel `.acd` measurements to
-canonical HDF5. \
-🔍 **Inspect** normalized files and available signals before configuring
-analysis. \
-📊 **Analyze** one normalized input or run manifest to calculate metrics and
-curves. \
-⚖️ **Compare** baseline with compatible candidates. Tolerances enable acceptance
-checks. \
-🧮 **Solve** multibody kinematic models defined in JSON and write the solution
-as JSON, or view it in a terminal viewer. Standalone, not part of the flow
-above.
+🔄 **Convert** Adams `.res` simulation results or Lommel `.acd` measurements to
+a common HDF5 format.
+
+🔍 **Inspect** the signals in an HDF5 file before configuring an analysis.
+
+📊 **Analyze** data from a single input or a run file to compute metrics and
+curves.
+
+⚖️ **Compare** candidates against a baseline.
+
+🧮 **Solve** the kinematics of a multibody model defined in JSON.
+
+🎯 **Optimize** a design against objectives defined in a TOML problem file.
 
 ## 👀 Preview
 
@@ -46,21 +48,18 @@ No Python, pip, virtual environment, or Rust toolchain needed.
 
 ## Configuration ⚙️
 
-`config.toml` defines reusable configuration file. One configuration can be
-shared across simulation and measurement runs.
+`config.toml` is the main configuration file. One configuration can be shared
+across simulation and measurement runs.
 
 Configuration is modular. `config.toml` references setup, mappings, and optional
 tolerance files.
 
-| File                                       | Purpose                                                                |
-| ------------------------------------------ | ---------------------------------------------------------------------- |
-| `config.toml`                              | Main configuration file                                                |
-| `setup.toml`                               | General test setup.                                                    |
-| `mappings/mappings-<source>-<domain>.toml` | Maps source signals to ChassisLab signals and units, one file per pair |
-| `tolerances.toml`                          | Optional absolute and relative tolerances used by (`--tolerances`).    |
-
-`<source>` is `simulation` or `measurement`, and `<domain>` is `svc` or `knc`,
-so there are four mapping files. Each is referenced from `config.toml`:
+| File                                       | Purpose                                                               |
+| ------------------------------------------ | --------------------------------------------------------------------- |
+| `config.toml`                              | Main configuration file                                               |
+| `setup.toml`                               | General subtest setup.                                                   |
+| `mappings/mappings-<source>-<test>.toml` | Maps source signals to ChassisLab signals and units                   |
+| `tolerances.toml`                          | Optional absolute and relative tolerances used with (`--tolerances`). |
 
 ```toml
 [physics]
@@ -69,6 +68,7 @@ gravity = 9.80665 # m/s²
 [setup]
 file = "setup.toml"
 
+# Example mapping: simulation source, SVC test
 [mappings.simulation.svc]
 file = "mappings/mappings-simulation-svc.toml"
 
@@ -76,48 +76,45 @@ file = "mappings/mappings-simulation-svc.toml"
 file = "tolerances.toml"
 ```
 
-`run.toml` defines input files and case metadata (`[meta]`, `[input.svc]`,
-`[input.knc.<test>]`) for each analysis or comparison. Input paths resolve
-relative to the run file.
-
 ## Commands `>_`
 
 ### 🔄 clab convert
 
-Convert raw simulation or measurement data to HDF5. Default output is `INPUT.h5`
+Convert raw simulation or measurement data to HDF5. By default, the output is
+written next to the input with its extension replaced by `.h5`.
 
 ```bash
-clab convert input.res --domain svc
+clab convert input.res --test svc
 ```
 
 ```bash
-clab convert input.acd --domain knc --test vertical --setup b1e1f1r1
+clab convert input.acd --test knc --subtest vertical --setup b1e1f1r1
 ```
 
 Lateral tests also need `--phase` and `--offset`:
 
 ```bash
-clab convert lat.res -d knc -t lateral --setup b1e0f1r1 --phase in --offset 30
+clab convert lat.res --test knc --subtest lateral --setup b1e0f1r1 --phase inphase --offset 30
 ```
 
-- `--output` (`-o`) for an explicit file, or a directory. A path ending in `/`
-  is a directory and is created if missing.
-- `--force` to replace an existing output.
-- `--domain` (`-d`) is required and defines the test domain > (`svc`|`knc`)
-- `--test` (`-t`) is required for `knc` and not allowed for `svc` >
-  (`vertical`|`roll`|`static`|`longitudinal`|`lateral`)
-- `--setup bXeXfXrX` is required for `knc` (brakes, steering engine, front ARB,
-  rear ARB; each 0 or 1)
-- `--phase in|anti` is required for `lateral`. It sets the lateral force phase
-  of the left and right wheels.
-- `--offset MM` is required for `lateral`. It sets the pneumatic trail offset in
-  mm.
-- `--yes` (`-y`) to proceed without prompting when motion data disagrees with
-  `--test`
+- `--output` (`-o`): Write to a specified file or directory. A path ending in
+  `/` is treated as a directory and created if missing.
+- `--force`: Replace an existing output file.
+- `--test`: Required. Use `svc` or `knc`.
+- `--subtest`: Required for `knc`; not allowed for `svc`. Use `vertical`,
+  `roll`, `static`, `longitudinal`, or `lateral`.
+- `--setup bXeXfXrX`: Required for `knc`. A `1` means brakes applied (`b`),
+  steering engine on (`e`), or the front (`f`) or rear (`r`) anti-roll bar
+  connected. A `0` means the opposite.
+- `--phase`: Required for `lateral`. Use `inphase` or `antiphase` for the
+  relationship between the left and right wheels' lateral forces.
+- `--offset MM`: Required for `lateral`. Sets the pneumatic trail offset in mm.
+- `--yes` (`-y`): Proceed without prompting when motion data disagrees with
+  `--subtest`.
 
 ### 🔍 clab inspect
 
-Inspect a measurement HDF5 file:
+Inspect a h5 or solver solution json file:
 
 ```bash
 clab inspect examples/input/raw-measurement/example-measurement-knc-vertical.h5 --list
@@ -126,14 +123,12 @@ clab inspect examples/input/raw-measurement/example-measurement-knc-vertical.h5 
 Create a mapping template for KnC vertical analysis:
 
 ```bash
-clab inspect --mapping knc --test vertical --template
+clab inspect --mapping knc --subtest vertical --template
 ```
 
-- `--list` to show all signals.
-- `--match TEXT` to filter them.
-- `--mapping svc|knc` displays mapping requirements without opening an input
-  file.
-- `--test TEST` restricts the KnC mapping output to one test.
+- `--mapping svc|knc` shows mapping requirements without opening an input file
+- `--subtest SUBTEST` filters KnC requirements, and `--template` emits a TOML
+  skeleton.
 
 A solver solution (from `clab solve --json`) prints a summary with the steps,
 time range, body and joint counts and the peak velocity per body:
@@ -143,17 +138,17 @@ clab inspect reports/solution.json
 clab inspect reports/solution.json --view [VIEW_FILE]
 ```
 
-- `--view [FILE]` show a tui solution viewer, matlab soltion file needed and
-  needs a solution made with `--include bodies` (`connectors` too if joints are
-  drawn).
-- `--json` prints `{"kind": "solution", "summary", "signals", "frames"}`: the
-  text summary, the body velocities as signals to plot, and the scene frames
-  (null without `--include bodies`). `--view FILE` picks the layout for the frames.
-- `--match` and `--signal` are for HDF5 only; `--list` just prints the summary.
-- `--signal NAME` to read one signal by its listed name. Repeatable, needs
-  `--json`.
-- `--json` to emit JSON for `--list`, `--match` or `--signal` (HDF5 only).
-- `--template` emits an editable TOML mapping skeleton.
+- For HDF5 files and solver solutions, `--list` lists available signals and
+  `--match TEXT` filters the list.
+- `--signal NAME --json` returns selected values and the time axis for HDF5
+  files or solver solutions. Repeat `--signal` to select multiple signals;
+  append `.x`, `.y`, or `.z` to select a vector component.
+- In `problem.toml`, prefix a listed solution path with its `[models]` alias,
+  e.g. `pwt.characteristics.wheel_velocities.l_wc.x`.
+- `--view [FILE]` opens the solution viewer; `FILE` optionally specifies a
+  layout.
+- `--json` returns JSON. For solutions, it includes the summary, signals, and
+  viewer frames; `--view FILE` selects the frame layout.
 
 ### 📊 clab analyze
 
@@ -211,9 +206,8 @@ Solve a multibody kinematic or compliant model defined in JSON.
 
 - `--json [PATH]` write the solution as JSON. Without a path it writes
   `<model>-solution.json` in the current directory. A directory path receives
-  that file name.
-- `--include LIST` choose `bodies`, `connectors` and `suspension` for the JSON
-  (needs `--json`). Without it all three are off.
+  that file name. The solution is format 2: `bodies` and `joints` are keyed by
+  the names in the model. Solutions from older versions need solving again.
 - `--design FILE` apply design variables from a flat JSON object, e.g.
   `{"HP_L_X": 3945.2}`
 - `--view [FILE]` step through the solution in a terminal viewer. An optional
@@ -224,33 +218,43 @@ Solve a multibody kinematic or compliant model defined in JSON.
 ```bash
 clab solve matlab/examples/mlta-model-file-1e2.json \
     --design matlab/examples/mlta-design-file-1e2.json \
-    --json reports/solution.json \
-    --include bodies,connectors
+    --json reports/solution.json
 ```
 
 Without `--json` or `--view` it prints the time and the body velocities as text.
 
+### 🎯 clab optimize
+
+Optimize a multibody model design against objectives and constraints defined in
+a TOML problem file.
+
+- `--design FILE` start from design variables in a JSON file. Without it,
+  optimization starts at the midpoint of the problem bounds.
+- `--dry-run` evaluate the starting design without optimization.
+- `--json [PATH]` write the optimized design as JSON. Without a path, it writes
+  `<problem>-optimized.json` in the current directory. A directory path receives
+  that file name.
+- `--force` replace an existing JSON output (requires `--json`).
+- `--progress` print optimizer progress to stderr.
+- `--yes` (`-y`) proceed without prompting when `--design` is not given.
+
+```bash
+clab optimize examples/problem.toml \
+    --design examples/design.json \
+    --json reports/optimized-design.json
+```
+
 #### `clab` on the command line
 
-The desktop installers also make `clab` available in a terminal. It uses the
-license the app activated.
-
-- Linux (`.deb`): `/usr/bin/clab` links to the bundled `clab`.
-- Windows (`.exe`): the install folder's `clab-runtime\bin` is added to your user
-  `PATH`. Open a new terminal afterwards.
-- macOS (`.dmg`): the app links `~/.local/bin/clab` when it starts. Add
-  `~/.local/bin` to your `PATH` if it is not there yet.
-
-An existing `clab` earlier on your `PATH` (for example `~/.cargo/bin/clab`) is used
-instead; `which clab` shows which one runs. The macOS link never replaces a `clab`
-you put in `~/.local/bin` yourself.
+The desktop app includes clab, which means no separate CLI installation is
+needed.
 
 #### MATLAB Runtime and `mks_solver`
 
-Desktop and `clab` archives ship `mks_solver` and a small installer for the Runtime.
-`clab runtime install` (or the **Install MATLAB Runtime…** button in the Solve pane)
-installs the Runtime for the current user. Environment variables (only needed for
-non-standard installs):
+Desktop and `clab` archives ship `mks_solver` and a small installer for the
+Runtime. `clab runtime install` (or the **Install MATLAB Runtime…** button in
+the Solve pane) installs the Runtime for the current user. Environment variables
+(only needed for non-standard installs):
 
 - `CLAB_MATLAB_RUNTIME` path to the MATLAB Runtime R2024b root. Without it
   `clab` checks the standard R2024b install locations.

@@ -35,7 +35,7 @@ const TOLERANCE_FAILURE = 1;
 /** Final status of a comparison that exited normally. */
 const COMPARISON_MESSAGES: Record<string, string> = {
   passed: "Compared: all metrics within tolerance",
-  incomplete: "Compared: some metrics or domains are missing",
+  incomplete: "Compared: some metrics or tests are missing",
   informational: "Compared: differences only, no tolerances applied",
 };
 
@@ -83,8 +83,8 @@ async function describeSaved(directory: string, subject: string, advice: string)
   return { message: `${subject}. Inputs changed since the run: ${list}. Run again to update.`, ok: false };
 }
 
-/** `showReport` opens a report folder in Inspect, at the plots of `test` if given. */
-export function setupAnalyze(showReport: (directory: string, test?: string) => void) {
+/** `showReport` opens a report folder in Inspect, at the plots of `subtest` if given. */
+export function setupAnalyze(showReport: (directory: string, subtest?: string) => void) {
   const form = document.querySelector<HTMLFormElement>("#analyze-form")!;
   const status = document.querySelector<HTMLElement>("#analyze-status")!;
   const sections = document.querySelector<HTMLElement>("#analyze-sections")!;
@@ -237,12 +237,12 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
   }
 
   /** Where a KnC section's plots land; analysis plots also open in Inspect. */
-  const kncStatus = (report: string, section: { test?: string | null }, badge: HTMLElement): ReportStatus => {
-    const test = String(section.test);
+  const kncStatus = (report: string, section: { subtest?: string | null }, badge: HTMLElement): ReportStatus => {
+    const subtest = String(section.subtest);
     return {
       badge,
-      plots: join(report, "plots", "knc", test),
-      open: () => showReport(report, test),
+      plots: join(report, "plots", "knc", subtest),
+      open: () => showReport(report, subtest),
     };
   };
 
@@ -276,7 +276,7 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         const parsed = parseLine(line);
         const { section, progress } = parsed;
         if (section) {
-          const knc = section.domain === "knc";
+          const knc = section.test === "knc";
           let status: ReportStatus | undefined;
           if (report) {
             const badge = createBadge("running");
@@ -370,8 +370,8 @@ export function setupAnalyze(showReport: (directory: string, test?: string) => v
         if (report.command !== "analyze") return;
         const cards = sectionsFromReport(report).map((section) => renderSection(section, {
           badge: createBadge("ok"),
-          plots: section.domain === "knc" ? join(directory, "plots", "knc", String(section.test)) : undefined,
-          open: section.domain === "knc" ? () => showReport(directory, String(section.test)) : undefined,
+          plots: section.test === "knc" ? join(directory, "plots", "knc", String(section.subtest)) : undefined,
+          open: section.test === "knc" ? () => showReport(directory, String(section.subtest)) : undefined,
         }));
         sections.replaceChildren(...cards);
         sections.classList.add("finished");

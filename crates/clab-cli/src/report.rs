@@ -13,7 +13,7 @@ struct Counts {
     failed: usize,
     missing: usize,
     informational: usize,
-    not_compared_domains: usize,
+    not_compared_tests: usize,
 }
 
 impl Counts {
@@ -33,11 +33,11 @@ impl Counts {
         self.failed += other.failed;
         self.missing += other.missing;
         self.informational += other.informational;
-        self.not_compared_domains += other.not_compared_domains;
+        self.not_compared_tests += other.not_compared_tests;
     }
 }
 
-/// Enrich the canonical JSON and add an index without changing domain details.
+/// Enrich the canonical JSON and add an index without changing test details.
 pub(crate) fn prepare(mut files: Vec<(&str, Vec<u8>)>) -> Result<Vec<(&str, Vec<u8>)>> {
     let report_file = files
         .iter_mut()
@@ -78,30 +78,30 @@ fn add_summary(report: &mut Value) {
             counts.add_metric(metric);
             groups
                 .entry((
-                    metric["domain"].as_str().unwrap_or_default().to_owned(),
-                    metric["test"].as_str().map(str::to_owned),
+                    metric["test"].as_str().unwrap_or_default().to_owned(),
+                    metric["subtest"].as_str().map(str::to_owned),
                 ))
                 .or_default()
                 .add_metric(metric);
         }
-        for domain in candidate["domains"].as_array().expect("comparison domains") {
-            if domain["status"] == "not compared" {
-                counts.not_compared_domains += 1;
+        for test in candidate["tests"].as_array().expect("comparison tests") {
+            if test["status"] == "not compared" {
+                counts.not_compared_tests += 1;
                 groups
                     .entry((
-                        domain["domain"].as_str().unwrap_or_default().to_owned(),
-                        domain["test"].as_str().map(str::to_owned),
+                        test["test"].as_str().unwrap_or_default().to_owned(),
+                        test["subtest"].as_str().map(str::to_owned),
                     ))
                     .or_default()
-                    .not_compared_domains += 1;
+                    .not_compared_tests += 1;
             }
         }
         overall.add(&counts);
-        let by_domain = groups
+        let by_test = groups
             .into_iter()
-            .map(|((domain, test), counts)| json!({"domain": domain, "test": test, "counts": counts}))
+            .map(|((test, subtest), counts)| json!({"test": test, "subtest": subtest, "counts": counts}))
             .collect::<Vec<_>>();
-        candidate["summary"] = json!({"counts": counts, "by_domain": by_domain});
+        candidate["summary"] = json!({"counts": counts, "by_test": by_test});
     }
     report["summary"] = json!({"overall": overall});
 }
@@ -147,7 +147,7 @@ fn overview(report: &Value, files: &[(&str, Vec<u8>)]) -> String {
                     .unwrap_or_default()
             ),
         ));
-        html.push_str("<section><h2>Results</h2><table><thead><tr><th>Candidate</th><th>Passed</th><th>Failed</th><th>Missing</th><th>Informational</th><th>Not compared domains</th></tr></thead><tbody>");
+        html.push_str("<section><h2>Results</h2><table><thead><tr><th>Candidate</th><th>Passed</th><th>Failed</th><th>Missing</th><th>Informational</th><th>Not compared tests</th></tr></thead><tbody>");
         for candidate in report["candidates"].as_array().unwrap() {
             let c = &candidate["summary"]["counts"];
             html.push_str(&format!(
@@ -157,12 +157,12 @@ fn overview(report: &Value, files: &[(&str, Vec<u8>)]) -> String {
                 c["failed"],
                 c["missing"],
                 c["informational"],
-                c["not_compared_domains"]
+                c["not_compared_tests"]
             ));
         }
         html.push_str(&format!(
-            "</tbody></table><p>Total: {} passed · {} failed · {} missing · {} informational · {} domains not compared</p></section>",
-            counts["passed"], counts["failed"], counts["missing"], counts["informational"], counts["not_compared_domains"]
+            "</tbody></table><p>Total: {} passed · {} failed · {} missing · {} informational · {} tests not compared</p></section>",
+            counts["passed"], counts["failed"], counts["missing"], counts["informational"], counts["not_compared_tests"]
         ));
     }
     html.push_str("<p>Data: <a href=\"report.json\">report.json</a> · <a href=\"metrics.csv\">metrics.csv</a></p>");
@@ -171,22 +171,22 @@ fn overview(report: &Value, files: &[(&str, Vec<u8>)]) -> String {
     for (name, _) in files {
         if let Some(rest) = name.strip_prefix("plots/knc/")
             && name.ends_with(".pdf")
-            && let Some(test) = rest.split('/').next()
+            && let Some(subtest) = rest.split('/').next()
         {
             plots
-                .entry((test, name.contains("/debug/")))
+                .entry((subtest, name.contains("/debug/")))
                 .or_default()
                 .push(name);
         }
     }
     if !plots.is_empty() {
         html.push_str("<section><h2>Plots</h2>");
-        for ((test, debug), paths) in plots {
+        for ((subtest, debug), paths) in plots {
             let title = if debug { " debug plots" } else { " plots" };
             html.push_str(&format!(
                 "<details{}><summary>{}{title} ({})</summary><ul>",
                 if debug { "" } else { " open" },
-                escape(test),
+                escape(subtest),
                 paths.len(),
             ));
             for path in paths {
@@ -216,19 +216,19 @@ mod tests {
     use serde_json::{Value, json};
 
     #[test]
-    fn summarizes_missing_domains_and_links_only_generated_plots() {
+    fn summarizes_missing_tests_and_links_only_generated_plots() {
         let report = json!({
             "command": "compare", "status": "incomplete", "baseline": {"case": {"name": "base"}},
             "candidates": [{
                 "case": {"name": "<candidate>"},
-                "metrics": [{"domain": "svc", "test": null, "status": "passed"},
-                            {"domain": "svc", "test": null, "status": "missing"}],
-                "domains": [{"domain": "svc", "test": null, "status": "compared"},
-                            {"domain": "knc", "test": "roll", "status": "not compared"}]
+                "metrics": [{"test": "svc", "subtest": null, "status": "passed"},
+                            {"test": "svc", "subtest": null, "status": "missing"}],
+                "tests": [{"test": "svc", "subtest": null, "status": "compared"},
+                            {"test": "knc", "subtest": "roll", "status": "not compared"}]
             }, {
                 "case": {"name": "second"},
-                "metrics": [{"domain": "svc", "test": null, "status": "failed"}],
-                "domains": [{"domain": "svc", "test": null, "status": "compared"}]
+                "metrics": [{"test": "svc", "subtest": null, "status": "failed"}],
+                "tests": [{"test": "svc", "subtest": null, "status": "compared"}]
             }]
         });
         let files = prepare(vec![
@@ -241,9 +241,9 @@ mod tests {
         assert_eq!(summary["summary"]["overall"]["total"], 3);
         assert_eq!(summary["summary"]["overall"]["missing"], 1);
         assert_eq!(summary["summary"]["overall"]["failed"], 1);
-        assert_eq!(summary["summary"]["overall"]["not_compared_domains"], 1);
+        assert_eq!(summary["summary"]["overall"]["not_compared_tests"], 1);
         assert_eq!(
-            summary["candidates"][0]["summary"]["by_domain"]
+            summary["candidates"][0]["summary"]["by_test"]
                 .as_array()
                 .unwrap()
                 .len(),

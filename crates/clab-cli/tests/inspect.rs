@@ -49,9 +49,9 @@ fn inspects_measurement_hdf5_and_lists_channels() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b0e0f1r1",
@@ -72,7 +72,7 @@ fn inspects_measurement_hdf5_and_lists_channels() {
     assert!(stdout.contains("example-measurement-knc-vertical.acd"));
     assert!(stdout.contains("schema version: 2"));
     assert!(
-        stdout.contains("source kind: measurement\ndomain: knc\ntest: vertical\nsetup: b0e0f1r1\nsamples: 4096\nsignals: 49\ntest metadata: 5")
+        stdout.contains("source kind: measurement\ntest: knc\nsubtest: vertical\nsetup: b0e0f1r1\nsamples: 4096\nsignals: 49\ntest metadata: 5")
     );
     assert!(stdout.contains("SIGNAL\tCOMPONENT\tUNIT\tSOURCE"));
     assert!(stdout.contains("lfwcx"));
@@ -134,7 +134,7 @@ fn rejects_raw_and_unsupported_extensions() {
 }
 
 #[test]
-fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
+fn inspect_warns_for_schema_version_1_and_rejects_v2_without_test() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/input");
     let source = examples.join("raw-measurement/example-measurement-knc-vertical.acd");
     let directory = tempdir().unwrap();
@@ -143,9 +143,9 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b0e0f1r1",
@@ -167,7 +167,7 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     assert!(String::from_utf8_lossy(&current.stdout).contains("schema version: 2"));
     assert!(!String::from_utf8_lossy(&current.stderr).contains("warning"));
 
-    // Version 1: no domain or test, still readable, with a warning.
+    // Version 1: no test or subtest, still readable, with a warning.
     let legacy_staging = directory.path().join("legacy-staging.h5");
     let legacy = directory.path().join("legacy.h5");
     fs::copy(&path, &legacy_staging).unwrap();
@@ -181,8 +181,8 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
         .unwrap()
         .write_scalar(&1_u32)
         .unwrap();
-    file.delete_attr("domain").unwrap();
     file.delete_attr("test").unwrap();
+    file.delete_attr("subtest").unwrap();
     file.close().unwrap();
     fs::copy(&legacy_staging, &legacy).unwrap();
     let result = inspect(&legacy);
@@ -193,7 +193,7 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
         "{stderr}"
     );
 
-    // Version 2 requires the domain.
+    // Version 2 requires the test.
     let broken_staging = directory.path().join("broken-staging.h5");
     let broken = directory.path().join("broken.h5");
     fs::copy(&path, &broken_staging).unwrap();
@@ -201,16 +201,13 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
         .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong))
         .open_rw(&broken_staging)
         .unwrap();
-    file.delete_attr("domain").unwrap();
+    file.delete_attr("test").unwrap();
     file.close().unwrap();
     fs::copy(&broken_staging, &broken).unwrap();
     let result = inspect(&broken);
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(!result.status.success(), "{stderr}");
-    assert!(
-        stderr.contains("missing HDF5 attribute: domain"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("missing HDF5 attribute: test"), "{stderr}");
 }
 
 fn convert_example_measurement(directory: &Path) -> PathBuf {
@@ -221,9 +218,9 @@ fn convert_example_measurement(directory: &Path) -> PathBuf {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b0e0f1r1",
@@ -301,7 +298,9 @@ fn summarizes_a_solver_solution() {
     let path = directory.path().join("solution.json");
     fs::write(
         &path,
-        r#"{"time": [0.0, 1.0], "v_hat": [[3.0, 0.0], [4.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]}"#,
+        r#"{"format": 2, "time": [0.0, 1.0], "bodies": {"Link": {"velocity": {
+            "linear": [[3.0, 0.0], [4.0, 0.0], [0.0, 0.0]],
+            "angular": [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]}}}}"#,
     )
     .unwrap();
     let output = inspect(&path, &[]);
@@ -311,7 +310,6 @@ fn summarizes_a_solver_solution() {
         text.contains("steps: 2\ntime: 0.0000 to 1.0000\nbodies: 1\n"),
         "{text}"
     );
-    assert!(text.contains("--include bodies"), "{text}");
     assert!(text.contains("5.0000"), "{text}");
 }
 
@@ -320,17 +318,24 @@ fn solution_json_carries_frames_for_the_chosen_layout() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("solution.json");
     let row = "[[0.0, 1.0], [0.0, 0.0], [0.0, 0.0]]";
-    let v_hat = ["[0.0, 0.0]"; 6].join(",");
+    let zero = "[[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]";
     fs::write(
         &path,
-        format!(
-            r#"{{"time": [0.0, 1.0], "v_hat": [{v_hat}], "bodies": [{{"name": "Link", "bodyID": 1, "cm": {{"position": {row}}},
-            "points": {{"A": {{"position": {row}}}, "B": {{"position": {row}}}}}}}]}}"#
-        ),
+        r#"{"format": 2, "time": [0.0, 1.0], "bodies": {"Link": {
+            "velocity": {"linear": ZERO, "angular": ZERO}, "cm": {"position": ROW},
+            "points": {"A": {"position": ROW}, "B": {"position": ROW}}}}}"#
+            .replace("ZERO", zero)
+            .replace("ROW", row),
     )
     .unwrap();
     let value = inspect_json(&path, &[]);
-    assert_eq!(value["signals"]["signals"][0]["name"], "Link.vx");
+    assert!(
+        value["signals"]["signals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["name"] == "bodies.Link.velocity.linear.x")
+    );
     assert_eq!(value["frames"].as_array().unwrap().len(), 2);
     assert_eq!(value["frames"][1]["bodies"][0]["label"], "Link");
     assert_eq!(value["frames"][1]["bodies"][0]["origin"][0], 1.0);
@@ -358,26 +363,43 @@ fn solution_json_carries_frames_for_the_chosen_layout() {
 }
 
 #[test]
-fn solution_json_is_tagged_and_signal_flags_are_refused() {
+fn solution_catalog_names_work_in_formulas_and_select_the_right_row() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("solution.json");
-    fs::write(
-        &path,
-        r#"{"time": [0.0], "v_hat": [[0.0],[0.0],[0.0],[0.0],[0.0],[0.0]]}"#,
-    )
-    .unwrap();
-    let value = inspect_json(&path, &[]);
-    assert_eq!(value["kind"], "solution");
-    assert!(value["summary"].as_str().unwrap().contains("steps: 1"));
-    assert_eq!(inspect_json(&path, &["--list"])["kind"], "solution");
-    for flags in [&["--match", "x"][..], &["--signal", "x"]] {
-        let output = inspect(&path, flags);
-        assert_eq!(output.status.code(), Some(2));
-        assert!(String::from_utf8_lossy(&output.stderr).contains("not solver solutions"));
+    fs::write(&path, r#"{"format":2,"time":[0,1],"bodies":{},"characteristics":{"wheel_velocities":{"l_wc":[[1,null],[3,4],[5,6]]}}}"#).unwrap();
+    let base = "characteristics.wheel_velocities.l_wc";
+    let x = format!("{base}.x");
+    let list = inspect_json(&path, &["--match", "WHEEL_VEL"]);
+    assert_eq!(list["signals"].as_array().unwrap().len(), 4);
+    assert_eq!(list["signals"][0]["shape"], serde_json::json!([3, 2]));
+    assert_eq!(list["signals"][1]["name"], x);
+    let expr = clab_core::config::expr::parse(&format!("pwt.{x}")).unwrap();
+    assert_eq!(expr.rewrite(), format!("xyz(s.pwt.{base},1)"));
+    let data = inspect_json(&path, &["--signal", &x, "--signal", base]);
+    assert_eq!(data["signals"][0]["values"], serde_json::json!([1, null]));
+    assert_eq!(
+        data["signals"][1]["values"][0],
+        data["signals"][0]["values"]
+    );
+    assert_eq!(data["axis"], serde_json::json!([0, 1]));
+    for flags in [
+        &["--signal", "time"][..],
+        &["--json", "--signal", "unknown"],
+        &["--json", "--list", "--signal", "time"],
+    ] {
+        assert!(!inspect(&path, flags).status.success());
     }
-    let output = inspect(&path, &["--view"]);
+}
+
+#[test]
+fn solution_in_the_old_format_asks_to_solve_again() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("solution.json");
+    fs::write(&path, r#"{"time": [0.0], "v_hat": [[0.0]]}"#).unwrap();
+    let output = inspect(&path, &[]);
+    assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("--include bodies"),
+        String::from_utf8_lossy(&output.stderr).contains("format 1 is not supported"),
         "{output:?}"
     );
 }

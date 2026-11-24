@@ -245,8 +245,8 @@ fn reports(
         .into_iter()
         .map(|metric| {
             serde_json::json!({
-                "domain": "svc",
-                "test": null,
+                "test": "svc",
+                "subtest": null,
                 "metric": metric.name,
                 "unit": metric.unit,
                 "value": metric.value,

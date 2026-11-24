@@ -9,24 +9,27 @@ use clab_core::{
 use clap::ValueEnum;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-pub(crate) enum Domain {
+pub(crate) enum Test {
     Svc,
     Knc,
 }
 
 type Conventions = std::collections::BTreeMap<String, SignalConvention>;
 
-pub(crate) fn mapping(domain: Option<Domain>, test: Option<&str>, template: bool) -> Result<()> {
-    if test.is_some_and(|test| !KNC_TESTS.contains(&test)) {
-        bail!("unsupported KnC test; expected {}", KNC_TESTS.join(" or "));
+pub(crate) fn mapping(test: Option<Test>, subtest: Option<&str>, template: bool) -> Result<()> {
+    if subtest.is_some_and(|subtest| !KNC_TESTS.contains(&subtest)) {
+        bail!(
+            "unsupported KnC subtest; expected {}",
+            KNC_TESTS.join(" or ")
+        );
     }
-    if test.is_some() && matches!(domain, Some(Domain::Svc)) {
-        bail!("--test requires --domain knc");
+    if subtest.is_some() && matches!(test, Some(Test::Svc)) {
+        bail!("--subtest requires --test knc");
     }
     let svc = svc_conventions();
     let knc: Vec<(&str, Conventions)> = KNC_TESTS
         .into_iter()
-        .filter(|name| test.is_none_or(|test| test == *name))
+        .filter(|name| subtest.is_none_or(|subtest| subtest == *name))
         .map(|name| {
             let conventions = match name {
                 "roll" => roll_conventions(),
@@ -37,37 +40,37 @@ pub(crate) fn mapping(domain: Option<Domain>, test: Option<&str>, template: bool
         })
         .collect();
     if template {
-        print_template(domain, test.is_some(), &svc, &knc);
+        print_template(test, subtest.is_some(), &svc, &knc);
     } else {
-        print_list(domain, test.is_some(), &svc, &knc);
+        print_list(test, subtest.is_some(), &svc, &knc);
     }
     Ok(())
 }
 
-/// Without `--test`, wheel travel is shared by every KnC test and listed once
-/// under `knc`; with it, all signals of that test are listed under the test.
+/// Without `--subtest`, wheel travel is shared by every KnC subtest and listed once
+/// under `knc`; with it, all signals of that subtest are listed under the subtest.
 fn print_list(
-    domain: Option<Domain>,
-    single_test: bool,
+    test: Option<Test>,
+    single_subtest: bool,
     svc: &Conventions,
     knc: &[(&str, Conventions)],
 ) {
-    if domain.is_none() || matches!(domain, Some(Domain::Svc)) {
+    if test.is_none() || matches!(test, Some(Test::Svc)) {
         println!("svc:");
         print_rows(2, svc.iter());
     }
-    if domain.is_none() || matches!(domain, Some(Domain::Knc)) {
+    if test.is_none() || matches!(test, Some(Test::Knc)) {
         println!("knc:");
-        if !single_test {
+        if !single_subtest {
             print_rows(2, knc[0].1.iter().filter(|(name, _)| !test_signal(name)));
         }
-        for (test, conventions) in knc {
-            println!("  {test}:");
+        for (subtest, conventions) in knc {
+            println!("  {subtest}:");
             print_rows(
                 4,
                 conventions
                     .iter()
-                    .filter(|(name, _)| single_test || test_signal(name)),
+                    .filter(|(name, _)| single_subtest || test_signal(name)),
             );
         }
     }
@@ -93,28 +96,28 @@ fn test_signal(name: &str) -> bool {
 }
 
 fn print_template(
-    domain: Option<Domain>,
-    single_test: bool,
+    test: Option<Test>,
+    single_subtest: bool,
     svc: &Conventions,
     knc: &[(&str, Conventions)],
 ) {
-    if domain.is_none() || matches!(domain, Some(Domain::Svc)) {
+    if test.is_none() || matches!(test, Some(Test::Svc)) {
         for (name, convention) in svc {
             signal_table("svc", name, convention);
         }
     }
-    if domain.is_none() || matches!(domain, Some(Domain::Knc)) {
-        if !single_test {
+    if test.is_none() || matches!(test, Some(Test::Knc)) {
+        if !single_subtest {
             for (name, convention) in &knc[0].1 {
                 if !test_signal(name) {
                     signal_table("knc", name, convention);
                 }
             }
         }
-        for (test, conventions) in knc {
+        for (subtest, conventions) in knc {
             for (name, convention) in conventions {
-                if single_test || test_signal(name) {
-                    signal_table(&format!("knc.{test}"), name, convention);
+                if single_subtest || test_signal(name) {
+                    signal_table(&format!("knc.{subtest}"), name, convention);
                 }
             }
         }

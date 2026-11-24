@@ -3,13 +3,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clab_converter::conditions::{Conditions, Finding, Phase, Setup, acd_findings, res_findings};
-use clab_converter::identity::{Identity, acd_warnings, res_domain_warnings, res_warnings};
+use clab_converter::identity::{Identity, acd_warnings, res_test_warnings, res_warnings};
 use clap::Args;
 
 #[derive(Debug, Args)]
 #[command(
-    override_usage = "clab convert --domain <DOMAIN> [--test <TEST>] [--setup <SETUP>] [OPTIONS] <INPUT>",
-    after_help = "Domains and tests:\n  svc            no test, no setup\n  knc            --test vertical|roll|static|longitudinal  --setup\n  knc            --test lateral  --setup --phase --offset\n\nSetup code b<0|1>e<0|1>f<0|1>r<0|1>: brakes applied, steering engine on,\nfront ARB connected, rear ARB connected.\n\nExamples:\n  clab convert run.res -d knc -t vertical --setup b1e0f1r1 -o converted/\n  clab convert lat.res -d knc -t lateral --setup b1e0f1r1 --phase in --offset 30"
+    override_usage = "clab convert --test <svc|knc> [--subtest <SUBTEST>] [--setup <SETUP>] [OPTIONS] <INPUT>"
 )]
 pub(crate) struct ConvertArgs {
     /// Adams RES simulation or Lommel ACD measurement input.
@@ -21,22 +20,22 @@ pub(crate) struct ConvertArgs {
     /// Replace an existing output file.
     #[arg(long)]
     force: bool,
-    /// Domain the data belongs to: svc or knc (required). Stored in the HDF5 file.
-    #[arg(short, long, value_name = "DOMAIN")]
-    domain: String,
-    /// Test within the domain: required for knc (vertical, roll, static, lateral, or longitudinal), not allowed for svc.
-    #[arg(short, long, value_name = "TEST", required_if_eq("domain", "knc"))]
-    test: Option<String>,
+    /// Test type: svc or knc (required). Stored in the HDF5 file.
+    #[arg(long, value_name = "TEST")]
+    test: String,
+    /// Subtest within knc: vertical, roll, static, longitudinal, or lateral. Required for knc.
+    #[arg(long, value_name = "SUBTEST", required_if_eq("test", "knc"))]
+    subtest: Option<String>,
     /// Test setup code b<0|1>e<0|1>f<0|1>r<0|1> (brakes, steering engine, front ARB, rear ARB). Required for knc.
-    #[arg(long, value_name = "SETUP", required_if_eq("domain", "knc"))]
+    #[arg(long, value_name = "SETUP", required_if_eq("test", "knc"))]
     setup: Option<Setup>,
-    /// Lateral force phase of the left and right wheels: in or anti. Required for lateral.
-    #[arg(long, value_name = "PHASE", required_if_eq("test", "lateral"))]
+    /// Lateral phase of the left and right wheels: inphase or antiphase. Required for lateral.
+    #[arg(long, value_name = "PHASE", required_if_eq("subtest", "lateral"))]
     phase: Option<Phase>,
     /// Pneumatic trail offset in mm. Required for lateral.
-    #[arg(long, value_name = "MM", required_if_eq("test", "lateral"))]
+    #[arg(long, value_name = "MM", required_if_eq("subtest", "lateral"))]
     offset: Option<f64>,
-    /// Proceed without prompting when motion data disagrees with --test.
+    /// Proceed without prompting when motion data disagrees with --test or --subtest.
     #[arg(short, long)]
     yes: bool,
 }
@@ -84,10 +83,10 @@ impl InputKind {
 
 pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     let kind = InputKind::from_path(&args.input)?;
-    let mut identity = Identity::new(&args.domain, args.test.as_deref())?;
+    let mut identity = Identity::new(&args.test, args.subtest.as_deref())?;
     identity.conditions = Conditions::declare(
-        &args.domain,
-        args.test.as_deref(),
+        &args.test,
+        args.subtest.as_deref(),
         args.setup,
         args.phase,
         args.offset,
@@ -101,7 +100,7 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
     }
     validate_output(&args.input, &output, args.force)?;
 
-    let declared = identity.test.clone();
+    let declared = identity.subtest.clone();
     let mut findings = Vec::new();
     match kind {
         InputKind::Res => clab_converter::convert_res_checked(
@@ -110,11 +109,11 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
             args.force,
             &identity,
             |result| {
-                let mut warnings = res_domain_warnings(result, &identity.domain);
-                if let Some(test) = &declared {
-                    warnings.extend(res_warnings(result, test));
+                let mut warnings = res_test_warnings(result, &identity.test);
+                if let Some(subtest) = &declared {
+                    warnings.extend(res_warnings(result, subtest));
                     if let Some(conditions) = &identity.conditions {
-                        findings = res_findings(result, test, conditions);
+                        findings = res_findings(result, subtest, conditions);
                     }
                 }
                 warnings.extend(finding_warnings(&findings));
@@ -127,10 +126,10 @@ pub(crate) fn convert(args: ConvertArgs) -> Result<()> {
             args.force,
             &identity,
             |measurement| match &declared {
-                Some(test) => {
-                    let mut warnings = acd_warnings(measurement, test);
+                Some(subtest) => {
+                    let mut warnings = acd_warnings(measurement, subtest);
                     if let Some(conditions) = &identity.conditions {
-                        findings = acd_findings(measurement, test, conditions);
+                        findings = acd_findings(measurement, subtest, conditions);
                     }
                     warnings.extend(finding_warnings(&findings));
                     confirm(warnings, args.yes)
@@ -169,7 +168,7 @@ impl std::fmt::Display for ConfirmationRequired {
 impl std::error::Error for ConfirmationRequired {}
 
 /// Print warnings; unless `--yes`, ask before proceeding.
-fn confirm(warnings: Vec<String>, yes: bool) -> Result<()> {
+pub(crate) fn confirm(warnings: Vec<String>, yes: bool) -> Result<()> {
     if warnings.is_empty() {
         return Ok(());
     }
@@ -257,9 +256,9 @@ mod tests {
             "clab",
             "convert",
             "input.res",
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b1e0f1r1",
@@ -268,8 +267,8 @@ mod tests {
         ])
         .unwrap();
         assert!(format!("{cli:?}").contains("Convert"));
-        // --domain is required, also for svc.
+        // --test is required, also for svc.
         assert!(Cli::try_parse_from(["clab", "convert", "input.res"]).is_err());
-        assert!(Cli::try_parse_from(["clab", "convert", "input.res", "--domain", "svc"]).is_ok());
+        assert!(Cli::try_parse_from(["clab", "convert", "input.res", "--test", "svc"]).is_ok());
     }
 }

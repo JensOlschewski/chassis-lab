@@ -11,9 +11,6 @@ use tempfile::NamedTempFile;
 
 use crate::worker::clean_path;
 
-/// `v_hat` holds 6 rows (3 linear, 3 angular velocity) per body.
-const DOF_PER_BODY: usize = 6;
-
 const BUSHING_GROUPS: [&str; 3] = [
     "primary_bushings",
     "secondary_bushings",
@@ -575,30 +572,11 @@ impl Prepared {
     }
 }
 
-#[derive(Deserialize, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
-enum Include {
-    Bodies,
-    Connectors,
-    Suspension,
-}
-
-impl Include {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Bodies => "bodies",
-            Self::Connectors => "connectors",
-            Self::Suspension => "suspension",
-        }
-    }
-}
-
 #[derive(Deserialize)]
 pub struct SolveRequest {
     #[serde(flatten)]
     case: Case,
     output: PathBuf,
-    include: Vec<Include>,
     force: bool,
 }
 
@@ -613,10 +591,6 @@ impl SolveRequest {
         args.extend(["--json".into(), clean_path(&self.output).into()]);
         if self.force {
             args.push("--force".into());
-        }
-        if !self.include.is_empty() {
-            let names: Vec<_> = self.include.iter().map(|include| include.name()).collect();
-            args.extend(["--include".into(), names.join(",").into()]);
         }
         args
     }
@@ -641,18 +615,25 @@ pub struct Summary {
 pub fn summarize(solution: &Path) -> Result<Summary, String> {
     #[derive(Deserialize)]
     struct Solution {
+        format: Option<u64>,
         time: Vec<f64>,
-        v_hat: Vec<Vec<f64>>,
+        bodies: serde_json::Map<String, Value>,
     }
     let solution = clean_path(solution);
     let text = std::fs::read_to_string(&solution)
         .map_err(|error| format!("{}: {error}", solution.display()))?;
-    let Solution { time, v_hat } =
-        serde_json::from_str(&text).map_err(|error| format!("not a solution file: {error}"))?;
+    let Solution {
+        format,
+        time,
+        bodies,
+    } = serde_json::from_str(&text).map_err(|error| format!("not a solution file: {error}"))?;
+    if format != Some(2) {
+        return Err("solution format is not supported: solve the model again".to_owned());
+    }
     Ok(Summary {
         steps: time.len(),
         end_time: time.last().copied().unwrap_or_default(),
-        bodies: v_hat.len() / DOF_PER_BODY,
+        bodies: bodies.len(),
     })
 }
 
@@ -808,7 +789,7 @@ mod tests {
     #[test]
     fn example_model_lists_every_table() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../matlab/examples/mlta-model-file-1e2.json");
+            .join("../../../matlab/examples/solve/mlta-model-file-1e2.json");
         let model = read_model(&path).unwrap();
         let sections = parameters(&model).unwrap();
         let ids: Vec<_> = sections.iter().map(|section| section.id).collect();
@@ -977,7 +958,6 @@ mod tests {
         let request = SolveRequest {
             case: case(design(), &[]),
             output: PathBuf::from("/data/out.json"),
-            include: vec![Include::Bodies, Include::Suspension],
             force: true,
         };
         let prepared = request.case.prepare().unwrap();
@@ -992,8 +972,6 @@ mod tests {
             "--json".into(),
             "/data/out.json".into(),
             "--force".into(),
-            "--include".into(),
-            "bodies,suspension".into(),
         ];
         assert_eq!(args, expected);
     }
@@ -1012,7 +990,11 @@ mod tests {
     #[test]
     fn summary_counts_steps_and_bodies() {
         let file = NamedTempFile::new().unwrap();
-        std::fs::write(file.path(), r#"{"time": [0.0, 0.5, 1.0], "v_hat": [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]]}"#).unwrap();
+        std::fs::write(
+            file.path(),
+            r#"{"format": 2, "time": [0.0, 0.5, 1.0], "bodies": {"Link": {}}}"#,
+        )
+        .unwrap();
         assert_eq!(
             summarize(file.path()).unwrap(),
             Summary {

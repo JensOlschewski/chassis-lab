@@ -20,6 +20,7 @@ from chassis_lab.knc_roll_kernel import (
     metrics,
     plot,
     plot_compare,
+    plot_jobs,
     roll_center,
 )
 
@@ -307,7 +308,18 @@ def test_axle_suspension_axis_requires_both_angles() -> None:
     assert "plots/knc/roll/knc_roll_roll_moment_vs_roll_angle.pdf" in reports
 
 
-def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
+def test_roll_rate_debug_uses_body_roll_sweeps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from matplotlib.text import Text
+
+    def capture_labels(figure, plt, footer, logo):
+        # Check every figure's labels without serializing dozens of PDFs.
+        text = "\n".join(item.get_text() for item in figure.findobj(Text))
+        plt.close(figure)
+        return text.encode()
+
+    monkeypatch.setattr("chassis_lab.knc_plot_kernel._save_pdf", capture_labels)
     curves = _plot_fixture()
     info = json.dumps(
         {
@@ -321,11 +333,17 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
         json.dumps(curves),
         branch=json.dumps({"measurement": True}),
         debug=info,
+        selected=[
+            job
+            for job in plot_jobs(True)
+            if job.startswith(("debug:", "center:"))
+        ],
     )
+    assert all("/debug/" in path for path in reports)
     for name in ("suspension_rate", "ride_rate"):
         path = f"plots/knc/roll/debug/measurement_knc_roll_{name}.pdf"
         assert path in reports
-        text = _pdf_text(reports[path])
+        text = reports[path].decode()
         assert "roll_angle [deg]" in text
         assert "roll.h5" in text
     secants = [
@@ -340,7 +358,7 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
     for name in secants:
         path = f"plots/knc/roll/debug/measurement_{name}.pdf"
         assert path in reports
-        assert "roll_angle [deg]" in _pdf_text(reports[path])
+        assert "roll_angle [deg]" in reports[path].decode()
     assert (
         "plots/knc/roll/debug/measurement_knc_roll_wheel_load.pdf"
         not in reports
@@ -349,7 +367,7 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
         path = (
             f"plots/knc/roll/debug/measurement_knc_roll_roll_center_{axle}.pdf"
         )
-        text = _pdf_text(reports[path])
+        text = reports[path].decode()
         assert "branch detection" in text
         assert "Second derivative" in text
         assert "Final contact slope (both paths)" in text
@@ -370,6 +388,14 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
         debug=json.dumps(
             {**json.loads(info), "inputs": ["baseline.h5", "candidate.h5"]}
         ),
+        selected=[
+            "plot:knc_roll_ride_rate",
+            *(
+                job
+                for job in plot_jobs(True, series_count=2)
+                if job.startswith(("debug:", "center:"))
+            ),
+        ],
     )
     for index in (0, 1):
         assert f"debug/series_{index}_knc_roll_ride_rate.pdf" in compared
@@ -391,6 +417,75 @@ def test_roll_rate_debug_uses_body_roll_sweeps() -> None:
         for index in range(2)
         for name in debug_names
     }
+    for job, name in (
+        ("debug:1:knc_roll_ride_rate", "knc_roll_ride_rate"),
+        ("debug:1:knc_roll_toe", "knc_roll_toe"),
+        ("center:1:rear", "knc_roll_roll_center_rear"),
+    ):
+        selected = plot_compare(
+            json.dumps(curves),
+            json.dumps([{"label": "Candidate", "curves": curves}]),
+            "Baseline",
+            "",
+            None,
+            branches_json=json.dumps([{"measurement": True}] * 2),
+            debug=json.dumps(
+                {**json.loads(info), "inputs": ["baseline.h5", "candidate.h5"]}
+            ),
+            selected=[job],
+        )
+        path = f"debug/series_1_{name}.pdf"
+        assert set(selected) == {path}
+        assert "candidate.h5" in selected[path].decode()
+
+
+@pytest.mark.parametrize(
+    ("job", "name", "labels"),
+    [
+        (
+            "debug:0:knc_roll_ride_rate",
+            "knc_roll_ride_rate",
+            ["roll_angle [deg]"],
+        ),
+        (
+            "debug:0:knc_roll_toe",
+            "knc_roll_toe",
+            ["roll_angle [deg]"],
+        ),
+        (
+            "center:0:front",
+            "knc_roll_roll_center_front",
+            [
+                "branch detection",
+                "Second derivative",
+                "Final contact slope (both paths)",
+                "roll_angle [deg]",
+                "wheel_pad_z [mm]",
+            ],
+        ),
+    ],
+)
+def test_selected_roll_debug_pdf(job, name, labels) -> None:
+    reports = plot(
+        json.dumps(_plot_fixture()),
+        branch=json.dumps({"measurement": True}),
+        debug=json.dumps(
+            {
+                "config": "fixture.toml",
+                "creator": "test",
+                "version": "0",
+                "inputs": ["roll.h5"],
+            }
+        ),
+        selected=[job],
+    )
+    path = f"plots/knc/roll/debug/measurement_{name}.pdf"
+    assert set(reports) == {path}
+    assert reports[path].startswith(b"%PDF-")
+    text = _pdf_text(reports[path])
+    assert "roll.h5" in text
+    for label in labels:
+        assert label in text
 
 
 def test_roll_local_rates_differentiate_within_body_roll_sweeps() -> None:

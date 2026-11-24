@@ -4,7 +4,7 @@
 //! `parse_legacy` (oldest flat `[case]`/`[inputs]` schema) and `parse_unified`
 //! (`[svc]`/`[vertical]` schema) are reachable only through those older root
 //! shapes. `parse_vertical` builds a `VerticalConfig` from a normalized
-//! `[vertical]`-shaped table; `function_first::function_knc_test` reuses it
+//! `[vertical]`-shaped table; `function_first::function_knc_subtest` reuses it
 //! by synthesizing an equivalent table rather than duplicating this logic.
 
 use std::{collections::BTreeMap, path::Path};
@@ -312,8 +312,8 @@ pub(crate) fn parse_legacy(
             .ok_or_else(|| ConfigError("missing required [inputs] table".into()))?,
         "[inputs]",
     )?;
-    keys(case, &["name", "domain", "loadcase"], "[case]")?;
-    for k in ["name", "domain", "loadcase"] {
+    keys(case, &["name", "test", "loadcase"], "[case]")?;
+    for k in ["name", "test", "loadcase"] {
         require(case, k, "[case]")?
     }
     keys(
@@ -461,8 +461,8 @@ pub(crate) fn parse_unified(
 /// Build a `VerticalConfig` from a normalized `[vertical]`-shaped table.
 ///
 /// Reached directly from `parse_unified`'s raw `[vertical]` table, and from
-/// `function_first::function_knc_test`, which synthesizes the same shape
-/// from `[input.knc.<test>]` + `[setup.knc.<test>]` for both `vertical` and
+/// `function_first::function_knc_subtest`, which synthesizes the same shape
+/// from `[input.knc.<subtest>]` + `[setup.knc.<subtest>]` for both `vertical` and
 /// `roll` rather than duplicating this parser.
 pub(crate) const REMOVED_SETUP_KEYS: [&str; 4] = [
     "brakes_applied",
@@ -506,7 +506,7 @@ pub(crate) fn parse_vertical(
     for key in REMOVED_SETUP_KEYS {
         if s.contains_key(key) {
             return Err(ConfigError(format!(
-                "[vertical.setup].{key} was removed; the test setup is stored in the HDF5 by `clab convert --setup`"
+                "[vertical.setup].{key} was removed; the subtest setup is stored in the HDF5 by `clab convert --setup`"
             ))
             .into());
         }

@@ -1,39 +1,26 @@
 function mks_solve_main(modelJson, outJson, varargin)
-% mks_solver <model.json> <out.json> [--design FILE] [--include a,b,c]
-% --include lists the optional outputs (bodies, connectors, suspension).
-% Outputs not listed are off, whatever the model JSON says.
+% mks_solver <model.json> <out.json> [--design FILE]
+% mks_solver --optimize <problem.json> <out.json> --design FILE [--dry-run]
 try
+    if strcmp(modelJson, '--optimize')
+        mks_optimize_main(outJson, varargin{:});
+        return
+    end
     design = [];
-    include = strings(0);
     for k = 1:2:numel(varargin)
         switch varargin{k}
             case '--design'
                 design = readDesign(varargin{k+1});
-            case '--include'
-                include = split(string(varargin{k+1}), ',');
             otherwise
                 error('mks:args', 'Unknown option %s', varargin{k});
         end
     end
-    history = run_mks_solver(modelJson, design, include);
+    history = run_mks_solver(modelJson, design);
     fid = fopen(outJson, 'w');
     fwrite(fid, jsonencode(history));
     fclose(fid);
 catch err
     fprintf(2, '%s\n%s\n', err.identifier, err.message);
     exit(1);
-end
-end
-
-function design = readDesign(file)
-s = jsondecode(fileread(file));
-names = string(fieldnames(s));
-design = configureDictionary("string", "cell");
-for n = names'
-    value = s.(n);
-    if ~ischar(value)
-        value = double(value);
-    end
-    design(n) = {value};
 end
 end

@@ -17,7 +17,11 @@ pub struct InspectRequest {
 impl InspectRequest {
     pub fn args(&self) -> Vec<OsString> {
         let mut args: Vec<OsString> = vec!["inspect".into(), "--json".into()];
-        if self.signals.is_empty() {
+        let file = clean_path(&self.file);
+        let solution_json = file
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
+        if self.signals.is_empty() && !solution_json {
             args.push("--list".into());
         }
         for signal in &self.signals {
@@ -30,7 +34,7 @@ impl InspectRequest {
         {
             args.extend(["--view".into(), clean_path(view).into()]);
         }
-        args.push(clean_path(&self.file).into());
+        args.push(file.into());
         args
     }
 }
@@ -50,14 +54,14 @@ mod tests {
     #[test]
     fn passes_the_view_layout_before_the_file() {
         let mut request = request(&[]);
+        request.file = "/data/solution.json".into();
         request.view = Some(PathBuf::from("/data/layout.json"));
         let expected = [
             "inspect",
             "--json",
-            "--list",
             "--view",
             "/data/layout.json",
-            "/data/run.h5",
+            "/data/solution.json",
         ];
         assert_eq!(request.args(), expected.map(OsString::from));
     }

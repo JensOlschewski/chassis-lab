@@ -1,10 +1,10 @@
 # Run manifest. Input paths resolve relative to this file.
 #
 # Convert raw results first (run from the repository root):
-# clab convert examples/input/raw-simulation/example-simulation-svc.res -d svc -o examples/input/generated-simulation-svc.h5
-# clab convert examples/input/raw-simulation/example-simulation-knc-vertical.res -d knc -t vertical -o examples/input/generated-simulation-knc-vertical.h5
-# clab convert examples/input/raw-simulation/example-simulation-knc-static.res -d knc -t static -o examples/input/generated-simulation-knc-static.h5
-# clab convert examples/input/raw-simulation/example-simulation-knc-roll.res -d knc -t roll -o examples/input/generated-simulation-knc-roll.h5
+# clab convert examples/input/raw-simulation/example-simulation-svc.res --test svc -o examples/input/generated-simulation-svc.h5
+# clab convert examples/input/raw-simulation/example-simulation-knc-vertical.res --test knc --subtest vertical -o examples/input/generated-simulation-knc-vertical.h5
+# clab convert examples/input/raw-simulation/example-simulation-knc-static.res --test knc --subtest static -o examples/input/generated-simulation-knc-static.h5
+# clab convert examples/input/raw-simulation/example-simulation-knc-roll.res --test knc --subtest roll -o examples/input/generated-simulation-knc-roll.h5
 
 [meta]
 name = "example_run_simulation"

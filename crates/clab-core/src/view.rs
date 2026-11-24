@@ -120,11 +120,7 @@ struct Track(Vec<Vec<f64>>);
 
 impl Track {
     fn parse(value: &Value, steps: usize, what: &str) -> Result<Self> {
-        let rows = solution::matrix(value, what)?;
-        if rows.len() != 3 || rows.iter().any(|row| row.len() != steps) {
-            bail!("`{what}` is not 3 × {steps}");
-        }
-        Ok(Self(rows))
+        solution::matrix3(value, steps, what).map(Self)
     }
 
     fn at(&self, step: usize) -> Vec3 {
@@ -146,7 +142,7 @@ struct JointTracks {
 }
 
 /// Builds one frame per time step from the `bodies` and `joints` of a solution
-/// that was solved with `--include bodies,connectors`.
+/// with body data.
 pub fn frames_from_solution(
     solution: &Value,
     layout: Option<&ViewLayout>,
@@ -154,16 +150,11 @@ pub fn frames_from_solution(
     let time = solution::time(solution)?;
     let steps = time.len();
 
-    let bodies = solution["bodies"]
-        .as_array()
-        .context("solution has no body data: solve with `--include bodies,connectors`")?;
+    let bodies = solution::bodies(solution)?;
     let mut tracks = Vec::new();
-    // Ground never moves; its joint ends are drawn with the joints.
-    for body in bodies
-        .iter()
-        .filter(|body| body["bodyID"].as_i64() != Some(0))
-    {
-        let label = body["name"].as_str().unwrap_or("body").to_owned();
+    // Ground is not a body entry; its joint ends are drawn with the joints.
+    for (label, body) in bodies {
+        let label = label.clone();
         let spec = match layout {
             None => None,
             Some(layout) => match layout.bodies.get(&label) {
@@ -210,34 +201,24 @@ pub fn frames_from_solution(
             .keys()
             .find(|name| !tracks.iter().any(|body| &body.label == *name))
     {
-        let known: Vec<_> = bodies
-            .iter()
-            .filter_map(|body| body["name"].as_str())
-            .collect();
+        let known: Vec<_> = bodies.keys().collect();
         bail!("view file: no body `{unknown}`; available: {known:?}");
     }
     let bodies = tracks;
 
     let mut joints = Vec::new();
     let show_joints = layout.is_none_or(ViewLayout::shows_joints);
-    for kind in ["primary", "secondary"] {
-        for joint in solution["joints"][kind]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|_| show_joints)
-        {
-            let label = joint["name"].as_str().unwrap_or("joint").to_owned();
-            let (i, j) = (&joint["i"]["position"], &joint["j"]["position"]);
-            if i.is_null() || j.is_null() {
-                continue;
-            }
-            joints.push(JointTracks {
-                i: Track::parse(i, steps, &format!("{label}.i"))?,
-                j: Track::parse(j, steps, &format!("{label}.j"))?,
-                label,
-            });
-        }
+    for (label, joint) in solution["joints"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|_| show_joints)
+    {
+        joints.push(JointTracks {
+            i: Track::parse(&joint["i"]["position"], steps, &format!("{label}.i"))?,
+            j: Track::parse(&joint["j"]["position"], steps, &format!("{label}.j"))?,
+            label: label.clone(),
+        });
     }
 
     Ok(time
@@ -286,20 +267,19 @@ mod tests {
 
     fn solution() -> Value {
         json!({
+            "format": 2,
             "time": [0.0, 1.0],
-            "bodies": [{
-                "name": "Link", "bodyID": 1,
+            "bodies": { "Link": {
                 "cm": { "position": [[0.0, 1.0], [0.0, 0.0], [0.0, 0.0]] },
                 "points": {
                     "A": { "position": [[0.0, 1.0], [0.0, 0.0], [0.0, 0.0]] },
                     "B": { "position": [[2.0, 3.0], [0.0, 0.0], [1.0, 1.0]] },
                 },
-            }],
-            "joints": { "primary": [{
-                "name": "J1",
+            } },
+            "joints": { "J1": {
                 "i": { "position": [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]] },
                 "j": { "position": [[1.0, 1.0], [0.0, 0.0], [0.0, 0.0]] },
-            }], "secondary": [] },
+            } },
         })
     }
 
@@ -355,8 +335,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_the_old_solution_format() {
+        let error = frames_from_solution(&json!({ "time": [0.0], "v_hat": [] }), None).unwrap_err();
+        assert!(
+            error.to_string().contains("format 1 is not supported"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn asks_for_body_data() {
-        let error = frames_from_solution(&json!({ "time": [0.0] }), None).unwrap_err();
-        assert!(error.to_string().contains("--include bodies,connectors"));
+        let error = frames_from_solution(&json!({ "format": 2, "time": [0.0] }), None).unwrap_err();
+        assert!(error.to_string().contains("solution has no body data"));
     }
 }

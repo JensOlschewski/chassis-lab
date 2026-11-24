@@ -58,15 +58,15 @@
 
           <div class="row">
             <label>
-              Domain
-              <select name="domain">
+              Test
+              <select name="test">
                 <option value="svc">svc</option>
                 <option value="knc">knc</option>
               </select>
             </label>
-            <label id="test-field" hidden>
+            <label id="subtest-field" hidden>
               Test
-              <select name="test">
+              <select name="subtest">
                 <option value="vertical">vertical</option>
                 <option value="roll">roll</option>
                 <option value="static">static</option>
@@ -101,7 +101,7 @@
       </section>
       <section id="inspect" class="pane wide" hidden>
         <h2>Inspect</h2>
-        <p class="hint">Plot raw signals from a converted file or velocities from a solver solution, or open a report folder to browse its metrics and plots.</p>
+        <p class="hint">Plot signals from a converted file or solver solution, or open a report folder to browse its metrics and plots.</p>
         <form id="inspect-form">
           <label>
             Input file or report folder
@@ -222,12 +222,6 @@
           <label class="check"><input type="checkbox" name="force" /> Replace existing solution file</label>
 
           <label class="check"><input type="checkbox" id="solve-adjust" /> Adjust model parameters</label>
-          <div id="solve-include" class="inline" role="group" hidden aria-labelledby="solve-include-label">
-            <span id="solve-include-label" class="group-label">Include in solution file</span>
-            <label class="check"><input type="checkbox" name="include" value="bodies" checked /> Bodies</label>
-            <label class="check"><input type="checkbox" name="include" value="connectors" checked /> Connectors</label>
-            <label class="check"><input type="checkbox" name="include" value="suspension" checked /> Suspension</label>
-          </div>
 
           <fieldset id="solve-design" hidden>
             <div class="path-row">

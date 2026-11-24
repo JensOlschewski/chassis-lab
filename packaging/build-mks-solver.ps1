@@ -1,6 +1,6 @@
 # Compiles matlab/mks_solve_main.m into mks_solver.exe and builds the small
 # MATLAB Runtime installer (mks_runtime.exe) that installs only what it needs.
-# Needs MATLAB with MATLAB Compiler and the Curve Fitting Toolbox on PATH.
+# Needs MATLAB with MATLAB Compiler and the Curve Fitting and Optimization Toolboxes on PATH.
 param([string]$Output, [string]$Installer)
 $ErrorActionPreference = "Stop"
 

@@ -1,7 +1,7 @@
 //! Today's canonical configuration schema: an `[input]` table selects each
-//! domain's source, `[setup]`/`[signals]`/`[mappings]`/`[validation]` may be
+//! test's source, `[setup]`/`[signals]`/`[mappings]`/`[validation]` may be
 //! external role files, and KnC tests are built by translating
-//! `[input.knc.<test>]` + `[setup.knc.<test>]` into the shape
+//! `[input.knc.<subtest>]` + `[setup.knc.<subtest>]` into the shape
 //! [`legacy::parse_vertical`] already knows how to parse.
 
 use std::{collections::BTreeMap, fs, path::Path};
@@ -14,7 +14,7 @@ use super::support::{
     parse_tolerance_table, positive, resolve, string_value, table, value,
 };
 use super::{
-    CaseConfig, ConfigError, Domain, KNC_TESTS, MeasurementSignalRef, SignalRef, SourceKind,
+    CaseConfig, ConfigError, KNC_TESTS, MeasurementSignalRef, SignalRef, SourceKind, Test,
     ValidationConfig, ValidationTolerances,
 };
 
@@ -52,7 +52,7 @@ pub(crate) fn parse_function_first(
         )
     } else if let Some(case) = root.get("case") {
         let case = table(case, "[case]")?;
-        keys(case, &["name", "domain", "loadcase"], "[case]")?;
+        keys(case, &["name", "test", "loadcase"], "[case]")?;
         (
             super::support::string(case, "name", "[case]")?,
             super::support::string(case, "loadcase", "[case]")?,
@@ -80,18 +80,19 @@ pub(crate) fn parse_function_first(
             &["vertical", "roll", "longitudinal", "static"],
             "[input.knc]",
         )?;
-        if knc.contains_key("static") && !KNC_TESTS.iter().any(|test| knc.contains_key(*test)) {
+        if knc.contains_key("static") && !KNC_TESTS.iter().any(|subtest| knc.contains_key(*subtest))
+        {
             return Err(ConfigError(
-                "[input.knc.static] requires a KnC test such as [input.knc.vertical]".into(),
+                "[input.knc.static] requires a KnC subtest such as [input.knc.vertical]".into(),
             )
             .into());
         }
     }
-    let vertical = function_knc_test(&root, input, path, "vertical")?.pop();
-    let roll = function_knc_test(&root, input, path, "roll")?.pop();
-    let longitudinal = function_knc_test(&root, input, path, "longitudinal")?;
+    let vertical = function_knc_subtest(&root, input, path, "vertical")?.pop();
+    let roll = function_knc_subtest(&root, input, path, "roll")?.pop();
+    let longitudinal = function_knc_subtest(&root, input, path, "longitudinal")?;
     if svc.is_none() && vertical.is_none() && roll.is_none() && longitudinal.is_empty() {
-        return Err(ConfigError("[input] must define at least one domain".into()).into());
+        return Err(ConfigError("[input] must define at least one test".into()).into());
     }
     let source_kinds: Vec<SourceKind> = svc
         .iter()
@@ -101,7 +102,7 @@ pub(crate) fn parse_function_first(
                 .iter()
                 .chain(&roll)
                 .chain(&longitudinal)
-                .map(|test| test.source_kind),
+                .map(|subtest| subtest.source_kind),
         )
         .collect();
     if let Some(first) = source_kinds.first()
@@ -307,7 +308,7 @@ fn function_svc(
             );
         }
         let source = resolve(file, path, "[input.svc].file")?;
-        let kind = source_kind(&source, Domain::Svc, None)?;
+        let kind = source_kind(&source, Test::Svc, None)?;
         (source, kind)
     } else {
         let simulation = function_input(svc, "simulation", "[input.svc]")?
@@ -355,13 +356,13 @@ fn function_svc(
     )))
 }
 
-/// Parse one KnC test (`vertical`, `roll` or `longitudinal`) from `[input.knc.<test>]`,
-/// `[setup.knc]` merged with `[setup.knc.<test>]`, and `<test>` mappings.
+/// Parse one KnC subtest (`vertical`, `roll` or `longitudinal`) from `[input.knc.<subtest>]`,
+/// `[setup.knc]` merged with `[setup.knc.<subtest>]`, and `<subtest>` mappings.
 /// `[input.knc.static]` is the shared static simulation baseline.
 ///
 /// Only `longitudinal` accepts a list (`[[input.knc.longitudinal]]`), one
-/// entry per stored setup; every other test yields at most one entry.
-fn function_knc_test(
+/// entry per stored setup; every other subtest yields at most one entry.
+fn function_knc_subtest(
     root: &toml::map::Map<String, Value>,
     input: &toml::map::Map<String, Value>,
     path: &Path,
@@ -390,7 +391,7 @@ fn function_knc_test(
     };
     tests
         .into_iter()
-        .map(|test| function_knc_input(root, knc, path, name, test))
+        .map(|subtest| function_knc_input(root, knc, path, name, subtest))
         .collect()
 }
 
@@ -399,11 +400,11 @@ fn function_knc_input(
     knc: &toml::map::Map<String, Value>,
     path: &Path,
     name: &str,
-    test: &toml::map::Map<String, Value>,
+    subtest: &toml::map::Map<String, Value>,
 ) -> Result<VerticalConfig, Box<dyn std::error::Error>> {
     let scope = format!("[input.knc.{name}]");
     keys(
-        test,
+        subtest,
         &[
             "file",
             "input_file",
@@ -414,7 +415,7 @@ fn function_knc_input(
         ],
         &scope,
     )?;
-    let direct = test.get("file").or_else(|| test.get("input_file"));
+    let direct = subtest.get("file").or_else(|| subtest.get("input_file"));
     let static_baseline = knc
         .get("static")
         .map(|raw| function_input_table(raw, "[input.knc.static]"))
@@ -429,7 +430,7 @@ fn function_knc_input(
         })
         .transpose()?;
     if let Some(static_baseline) = &static_baseline
-        && source_kind(static_baseline, Domain::Knc, Some("static"))? != SourceKind::Simulation
+        && source_kind(static_baseline, Test::Knc, Some("static"))? != SourceKind::Simulation
     {
         return Err(ConfigError(format!(
             "[input.knc.static] '{}' source_kind must be simulation",
@@ -439,7 +440,7 @@ fn function_knc_input(
     }
     let has_static_baseline = static_baseline.is_some();
     let (source_kind, source, static_simulation) = if let Some(file) = direct {
-        if test.keys().any(|key| {
+        if subtest.keys().any(|key| {
             !matches!(
                 key.as_str(),
                 "file" | "input_file" | "static_file" | "static_simulation"
@@ -450,12 +451,12 @@ fn function_knc_input(
             );
         }
         let source = resolve(file, path, &format!("{scope}.file"))?;
-        let input_kind = source_kind(&source, Domain::Knc, Some(name))?;
-        let static_file = test
+        let input_kind = source_kind(&source, Test::Knc, Some(name))?;
+        let static_file = subtest
             .get("static_file")
             .map(|file| resolve(file, path, &format!("{scope}.static_file")))
             .transpose()?;
-        let static_simulation = function_input(test, "static_simulation", &scope)?;
+        let static_simulation = function_input(subtest, "static_simulation", &scope)?;
         if static_file.is_some() && static_simulation.is_some() {
             return Err(ConfigError(format!(
                 "{scope}.static_file cannot be combined with static_simulation"
@@ -470,7 +471,7 @@ fn function_knc_input(
         }
         let static_file = static_baseline.or(static_file).or(static_simulation);
         if let Some(static_file) = &static_file
-            && source_kind(static_file, Domain::Knc, Some("static"))? != SourceKind::Simulation
+            && source_kind(static_file, Test::Knc, Some("static"))? != SourceKind::Simulation
         {
             return Err(ConfigError(format!(
                 "{name} static_file '{}' source_kind must be simulation",
@@ -480,9 +481,9 @@ fn function_knc_input(
         }
         (input_kind, source, static_file)
     } else {
-        let measurement = function_input(test, "measurement", &scope)?;
-        let simulation = function_input(test, "simulation", &scope)?;
-        let static_simulation = function_input(test, "static_simulation", &scope)?;
+        let measurement = function_input(subtest, "measurement", &scope)?;
+        let simulation = function_input(subtest, "simulation", &scope)?;
+        let static_simulation = function_input(subtest, "static_simulation", &scope)?;
         let (source, source_kind) = match (simulation, measurement) {
             (Some(_), Some(_)) => {
                 return Err(ConfigError(format!(
@@ -536,9 +537,9 @@ fn function_knc_input(
     let setup = if let Some(knc) = setup_root.get("knc") {
         let mut setup = table(knc, "[setup.knc]")?.clone();
         let mut overrides = None;
-        for test in KNC_TESTS {
-            if let Some(raw) = setup.remove(test)
-                && test == name
+        for subtest in KNC_TESTS {
+            if let Some(raw) = setup.remove(subtest)
+                && subtest == name
             {
                 overrides = Some(raw);
             }
@@ -598,7 +599,7 @@ fn function_knc_input(
     let mut setup_copy = setup.clone();
     if setup_copy.contains_key("meta") {
         return Err(ConfigError(
-            "[setup.knc.meta] was removed; the test setup is stored in the HDF5 by `clab convert --setup`"
+            "[setup.knc.meta] was removed; the subtest setup is stored in the HDF5 by `clab convert --setup`"
                 .into(),
         )
         .into());
@@ -632,7 +633,7 @@ fn function_knc_input(
     parse_vertical(&Value::Table(vertical), path)
 }
 
-/// Settings written directly in `[setup.knc]` or `[setup.knc.<test>]`; they are
+/// Settings written directly in `[setup.knc]` or `[setup.knc.<subtest>]`; they are
 /// moved into the `metric` table so each level keeps its own precedence.
 const FLAT_METRIC_KEYS: [&str; 12] = [
     "metric_window_mm",
@@ -695,13 +696,13 @@ fn knc_validation(
         .transpose()?
         .cloned()
         .unwrap_or_default();
-    if let Some(test) = knc.get(name) {
-        let test = table(test, &format!("[validation.knc.{name}]"))?;
-        if let Some(tolerances) = test.get("tolerances") {
+    if let Some(subtest) = knc.get(name) {
+        let subtest = table(subtest, &format!("[validation.knc.{name}]"))?;
+        if let Some(tolerances) = subtest.get("tolerances") {
             let mut override_ = Map::new();
             override_.insert("tolerances".into(), tolerances.clone());
             merge_map(&mut validation, &override_);
-        } else if let Some(override_) = test.get("validation") {
+        } else if let Some(override_) = subtest.get("validation") {
             merge_map(
                 &mut validation,
                 table(override_, &format!("[validation.knc.{name}.validation]"))?,
@@ -749,7 +750,7 @@ fn validate_vertical_hdf5_source(
     path: &Path,
     expected: SourceKind,
     role: &str,
-    expected_test: Option<&str>,
+    expected_subtest: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Config templates may name future conversion outputs. Validate metadata once present.
     if !path.exists() {
@@ -807,23 +808,23 @@ fn validate_vertical_hdf5_source(
         ))
         .into());
     }
-    check_hdf5_identity(path, Domain::Knc, expected_test)
+    check_hdf5_identity(path, Test::Knc, expected_subtest)
 }
 
 fn source_kind(
     path: &Path,
-    domain: Domain,
-    expected_test: Option<&str>,
+    test: Test,
+    expected_subtest: Option<&str>,
 ) -> Result<SourceKind, Box<dyn std::error::Error>> {
     match path.extension().and_then(|extension| extension.to_str()) {
         // Config templates may name a normalized simulation output before conversion.
         Some("h5" | "hdf5") if !path.exists() => Ok(SourceKind::Simulation),
         Some("h5" | "hdf5") => {
             let kind = hdf5_source_kind(path, "input")?;
-            check_hdf5_identity(path, domain, expected_test)?;
+            check_hdf5_identity(path, test, expected_subtest)?;
             Ok(kind)
         }
-        Some("json") if domain == Domain::Svc => {
+        Some("json") if test == Test::Svc => {
             let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)
                 .map_err(|error| {
                     ConfigError(format!("invalid SVC JSON '{}': {error}", path.display()))
@@ -846,7 +847,7 @@ fn source_kind(
         _ => Err(ConfigError(format!(
             "input '{}' must be {}",
             path.display(),
-            if domain == Domain::Svc {
+            if test == Test::Svc {
                 "SVC JSON or HDF5"
             } else {
                 "HDF5"
@@ -856,13 +857,13 @@ fn source_kind(
     }
 }
 
-/// Reject an HDF5 file whose declared domain or test differs from the one the
-/// config expects. Files converted before `domain` and `test` were stored carry
+/// Reject an HDF5 file whose declared test or subtest differs from the one the
+/// config expects. Files converted before `test` and `subtest` were stored carry
 /// neither and are accepted.
 fn check_hdf5_identity(
     path: &Path,
-    domain: Domain,
-    expected_test: Option<&str>,
+    test: Test,
+    expected_subtest: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = hdf5::File::open(path).map_err(|error| {
         ConfigError(format!(
@@ -881,25 +882,25 @@ fn check_hdf5_identity(
             .map_err(|_| ConfigError(format!("input '{}' has invalid {name}", path.display())))?;
         Ok(Some(value.as_str().to_owned()))
     };
-    let (found_domain, found_test) = (optional("domain")?, optional("test")?);
-    let expected_domain = match domain {
-        Domain::Svc => "svc",
-        Domain::Knc => "knc",
+    let (found_test, found_subtest) = (optional("test")?, optional("subtest")?);
+    let expected_test = match test {
+        Test::Svc => "svc",
+        Test::Knc => "knc",
     };
-    if let Some(found) = found_domain.as_deref()
-        && found != expected_domain
+    if let Some(found) = found_test.as_deref()
+        && found != expected_test
     {
         return Err(ConfigError(format!(
-            "input '{}' has domain '{found}', expected '{expected_domain}'",
+            "input '{}' has test '{found}', expected '{expected_test}'",
             path.display()
         ))
         .into());
     }
-    if let (Some(found), Some(expected)) = (found_test.as_deref(), expected_test)
+    if let (Some(found), Some(expected)) = (found_subtest.as_deref(), expected_subtest)
         && found != expected
     {
         return Err(ConfigError(format!(
-            "input '{}' has test '{found}', expected '{expected}'",
+            "input '{}' has subtest '{found}', expected '{expected}'",
             path.display()
         ))
         .into());

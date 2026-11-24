@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Compiles matlab/mks_solve_main.m into a standalone mks_solver for this OS and
 # builds the small MATLAB Runtime installer that installs only what it needs.
-# Needs MATLAB with MATLAB Compiler and the Curve Fitting Toolbox on PATH.
+# Needs MATLAB with MATLAB Compiler and the Curve Fitting and Optimization Toolboxes on PATH.
 # The output is OS-specific.
 set -euo pipefail
 
