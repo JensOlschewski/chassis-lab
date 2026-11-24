@@ -3,10 +3,6 @@
 *.hdf5
 *.py[cod]
 *.res
-!examples/input/raw-simulation/example-simulation-svc.res
-!examples/input/raw-simulation/example-simulation-knc-static.res
-!examples/input/raw-simulation/example-simulation-knc-vertical.res
-!examples/input/raw-simulation/example-simulation-knc-roll.res
 .coverage
 .pytest_cache/
 .ruff_cache/
@@ -24,6 +20,9 @@ target/
 .DS_Store
 /report/
 
-# License server state
-signing.key
-licenses.db*
+# Microsoft Office temporary lock files
+~$*
+
+# macOS metadata & temp files
+._*
+.DS_Store
