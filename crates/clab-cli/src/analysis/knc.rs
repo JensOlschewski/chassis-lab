@@ -29,10 +29,10 @@ const DEFAULT_GRADIENT_POINTS_DEG: f64 = 2.0;
 pub(crate) const DEBUG_RATE_WARNING: &str =
     "debug rate plots require measurement input; skipped for simulation data";
 
-/// KnC test analyzed through the shared four-corner pipeline.
+/// KnC subtest analyzed through the shared four-corner pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum KncTest {
+pub(crate) enum KncSubtest {
     Vertical,
     Roll,
     Longitudinal,
@@ -40,7 +40,7 @@ pub(crate) enum KncTest {
 
 #[derive(Serialize, Deserialize)]
 struct RenderRequest {
-    test: KncTest,
+    subtest: KncSubtest,
     curves: String,
     candidates: Option<String>,
     label: String,
@@ -70,8 +70,8 @@ fn render_parallel(
     workers: usize,
     progress: &ReportProgress,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
-    let test = request.test;
-    let jobs: Vec<String> = with_kernel(test, |_, module| {
+    let subtest = request.subtest;
+    let jobs: Vec<String> = with_kernel(subtest, |_, module| {
         module
             .getattr("plot_jobs")?
             .call1((request.debug.is_some(), series_count))?
@@ -128,12 +128,12 @@ fn render_parallel(
         let (output, result) =
             finished.map_err(|_| anyhow::anyhow!("KnC plot worker thread panicked"))?;
         let result =
-            result.with_context(|| format!("failed to launch {} plot worker", test.name()))?;
+            result.with_context(|| format!("failed to launch {} plot worker", subtest.name()))?;
         let stderr = String::from_utf8_lossy(&result.stderr);
         anyhow::ensure!(
             result.status.success(),
             "{} plot worker failed: {stderr}",
-            test.name()
+            subtest.name()
         );
         for line in stderr.lines() {
             progress.println(line);
@@ -166,17 +166,17 @@ fn valid_plot_path(path: &Path) -> bool {
 
 pub(crate) fn render_worker(input: &Path, output: &Path) -> Result<()> {
     let request: RenderRequest = serde_json::from_slice(&fs::read(input)?)?;
-    let reports: BTreeMap<String, Vec<u8>> = with_kernel(request.test, |py, module| {
+    let reports: BTreeMap<String, Vec<u8>> = with_kernel(request.subtest, |py, module| {
         let kwargs = PyDict::new(py);
         kwargs.set_item("footer", &request.footer)?;
         kwargs.set_item("logo", logo(py))?;
         kwargs.set_item("gradient_points_mm", request.gradient_mm)?;
         kwargs.set_item("debug", &request.debug)?;
         kwargs.set_item("selected", &request.selected)?;
-        match request.test {
-            KncTest::Vertical => kwargs.set_item("corner_mass_kg", &request.mass)?,
-            KncTest::Roll => kwargs.set_item("gradient_points_deg", request.gradient_deg)?,
-            KncTest::Longitudinal => {
+        match request.subtest {
+            KncSubtest::Vertical => kwargs.set_item("corner_mass_kg", &request.mass)?,
+            KncSubtest::Roll => kwargs.set_item("gradient_points_deg", request.gradient_deg)?,
+            KncSubtest::Longitudinal => {
                 kwargs.set_item("brakes", request.brakes)?;
                 kwargs.set_item("gradient_points_n", request.gradient_n)?;
             }
@@ -211,8 +211,8 @@ pub(crate) fn render_worker(input: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
-impl KncTest {
-    /// Every KnC test `analyze` supports, in console order.
+impl KncSubtest {
+    /// Every KnC subtest `analyze` supports, in console order.
     pub(crate) const ALL: [Self; 3] = [Self::Vertical, Self::Roll, Self::Longitudinal];
 
     pub(crate) fn from_name(name: &str) -> Option<Self> {
@@ -250,7 +250,7 @@ impl KncTest {
         }
     }
 
-    /// File stem of this test's detail documents (`knc-<stem>.json`). Longitudinal
+    /// File stem of this subtest's detail documents (`knc-<stem>.json`). Longitudinal
     /// inputs of one run differ by stored setup, so it names the setup.
     pub(crate) fn report_stem(self, brakes: bool) -> String {
         match self {
@@ -347,7 +347,7 @@ impl KncTest {
         }
     }
 
-    /// Embedded Python modules in load order; the last one is the test kernel.
+    /// Embedded Python modules in load order; the last one is the subtest kernel.
     fn kernels(self) -> &'static [Kernel] {
         match self {
             Self::Vertical => &[CORE_KERNEL, PLOT_KERNEL, VERTICAL_KERNEL],
@@ -456,7 +456,7 @@ impl Conditions {
         let summary = file.summary();
         let code = summary.setup.as_deref().ok_or_else(|| {
             anyhow::anyhow!(
-                "'{}' has no test setup; convert it again with `clab convert --setup`",
+                "'{}' has no subtest setup; convert it again with `clab convert --setup`",
                 summary.path.display()
             )
         })?;
@@ -470,12 +470,12 @@ impl Conditions {
             .map_err(parse_error)?;
         let conditions = clab_converter::conditions::Conditions::declare(
             "knc",
-            summary.test.as_deref(),
+            summary.subtest.as_deref(),
             Some(setup),
             phase,
             summary.offset_mm,
         )
-        .with_context(|| format!("invalid test conditions in '{}'", summary.path.display()))?
+        .with_context(|| format!("invalid subtest conditions in '{}'", summary.path.display()))?
         .expect("KnC declaration has conditions");
         Ok(Self {
             setup: conditions.setup,
@@ -492,10 +492,10 @@ impl Conditions {
         self.setup.to_string()
     }
 
-    /// Short form for report footers: `B1E0F1R1 | in-phase | 30 mm`.
+    /// Short form for report footers: `B1E0F1R1 | inphase | 30 mm`.
     pub(crate) fn summary(&self) -> String {
         let mut parts = vec![self.setup.to_string()];
-        parts.extend(self.phase.iter().map(|phase| format!("{phase}-phase")));
+        parts.extend(self.phase.iter().cloned());
         parts.extend(self.offset_mm.iter().map(|offset| format!("{offset} mm")));
         parts.join(" | ")
     }
@@ -548,13 +548,13 @@ impl Serialize for Conditions {
     }
 }
 
-/// Calculate KnC curves, metrics, and warnings for one test. Does not render
+/// Calculate KnC curves, metrics, and warnings for one subtest. Does not render
 /// plots: call `curve_plots` separately once the caller is ready for them
 /// (e.g. after printing the console metrics table), so slow PDF rendering
 /// never delays display.
 pub(crate) fn analyze_input(
     config: &CaseConfig,
-    test: KncTest,
+    subtest: KncSubtest,
     path: &Path,
     svc_corner_mass_kg: Option<&BTreeMap<String, f64>>,
     debug: Option<&str>,
@@ -566,14 +566,14 @@ pub(crate) fn analyze_input(
     let conditions = Conditions::from_file(&file)?;
     let (curves, mut warnings, normalization) = match file.summary().source_kind {
         SourceKind::Simulation => {
-            let (mut curves, mut warnings) = simulation_curves(config, test, &file)?;
-            if let Some(static_path) = test
+            let (mut curves, mut warnings) = simulation_curves(config, subtest, &file)?;
+            if let Some(static_path) = subtest
                 .config(config)
                 .and_then(|v| v.static_simulation_hdf5.as_ref())
             {
                 warnings.extend(subtract_static(
                     config,
-                    test,
+                    subtest,
                     &mut curves,
                     &*files.open(static_path)?,
                 )?);
@@ -596,9 +596,9 @@ pub(crate) fn analyze_input(
             }
         }
         SourceKind::Measurement => {
-            let knc = test.required_config(config)?;
+            let knc = subtest.required_config(config)?;
             (
-                measurement_curves(test, knc, &file)?,
+                measurement_curves(subtest, knc, &file)?,
                 Vec::new(),
                 serde_json::json!({"method": "measurement_native"}),
             )
@@ -609,15 +609,15 @@ pub(crate) fn analyze_input(
         warnings.push(DEBUG_RATE_WARNING.into());
     }
     let relative_travel = normalization["method"] != "none";
-    let (corner_mass_kg, corner_mass_source) = test
+    let (corner_mass_kg, corner_mass_source) = subtest
         .config(config)
         .map(|knc| corner_mass(&knc.window, svc_corner_mass_kg))
         .unwrap_or_default();
-    let knc = test.required_config(config)?;
-    warnings.extend(default_warnings(test, knc, measurement));
+    let knc = subtest.required_config(config)?;
+    warnings.extend(default_warnings(subtest, knc, measurement));
 
     let metrics = gradient_metrics(
-        test,
+        subtest,
         knc,
         &curves,
         relative_travel,
@@ -629,12 +629,12 @@ pub(crate) fn analyze_input(
 
     warnings.sort();
     warnings.dedup();
-    let warnings = tag_warnings("knc", Some(test.name()), warnings);
+    let warnings = tag_warnings("knc", Some(subtest.name()), warnings);
     let detail = serde_json::json!({
         "schema_version": 1,
         "command": "analyze",
-        "domain": "knc",
-        "test": test.name(),
+        "test": "knc",
+        "subtest": subtest.name(),
         "conditions": conditions.json(),
         "metrics": metrics,
         "curves": curves,
@@ -664,15 +664,15 @@ pub(crate) fn analyze_input(
     })
 }
 
-/// One analysis unit per configured KnC input: its test, a configuration
+/// One analysis unit per configured KnC input: its subtest, a configuration
 /// holding only that input, and its file. Longitudinal yields one per listed file.
-pub(crate) fn knc_units(config: &CaseConfig) -> Vec<(KncTest, CaseConfig, PathBuf)> {
+pub(crate) fn knc_units(config: &CaseConfig) -> Vec<(KncSubtest, CaseConfig, PathBuf)> {
     let mut units = Vec::new();
-    for test in KncTest::ALL {
-        let inputs: Vec<_> = match test {
-            KncTest::Vertical => config.vertical.iter().collect(),
-            KncTest::Roll => config.roll.iter().collect(),
-            KncTest::Longitudinal => config.longitudinal.iter().collect(),
+    for subtest in KncSubtest::ALL {
+        let inputs: Vec<_> = match subtest {
+            KncSubtest::Vertical => config.vertical.iter().collect(),
+            KncSubtest::Roll => config.roll.iter().collect(),
+            KncSubtest::Longitudinal => config.longitudinal.iter().collect(),
         };
         for knc in inputs {
             let path = match knc.source_kind {
@@ -680,10 +680,10 @@ pub(crate) fn knc_units(config: &CaseConfig) -> Vec<(KncTest, CaseConfig, PathBu
                 clab_core::config::SourceKind::Measurement => knc.measurement_hdf5.clone(),
             };
             let mut unit = config.clone();
-            if test == KncTest::Longitudinal {
+            if subtest == KncSubtest::Longitudinal {
                 unit.longitudinal = vec![knc.clone()];
             }
-            units.push((test, unit, path));
+            units.push((subtest, unit, path));
         }
     }
     units
@@ -692,11 +692,11 @@ pub(crate) fn knc_units(config: &CaseConfig) -> Vec<(KncTest, CaseConfig, PathBu
 /// Two longitudinal inputs with the same brake state would report the same
 /// metrics twice; refuse instead of picking one.
 pub(crate) fn ensure_distinct_setups<'a>(
-    inputs: impl Iterator<Item = (KncTest, &'a Path, &'a Reports)>,
+    inputs: impl Iterator<Item = (KncSubtest, &'a Path, &'a Reports)>,
 ) -> Result<()> {
     let mut seen: Vec<(bool, &Path)> = Vec::new();
-    for (test, path, report) in inputs {
-        if test != KncTest::Longitudinal {
+    for (subtest, path, report) in inputs {
+        if subtest != KncSubtest::Longitudinal {
             continue;
         }
         let brakes = report.conditions.brakes();
@@ -746,22 +746,22 @@ pub(crate) fn source_label(measurement: bool) -> &'static str {
 }
 
 /// Warn about every optional metric setting the configuration leaves unset.
-fn default_warnings(test: KncTest, knc: &VerticalConfig, measurement: bool) -> Vec<String> {
+fn default_warnings(subtest: KncSubtest, knc: &VerticalConfig, measurement: bool) -> Vec<String> {
     let branch = knc.branch.for_measurement(measurement);
     let mut warnings = Vec::new();
-    let table = format!("setup.knc.{}", test.name());
+    let table = format!("setup.knc.{}", subtest.name());
     let mut warn = |key: &str, default: String| {
         warnings.push(format!(
             "config key '{key}' missing in [{table}]; using default {default}"
         ));
     };
-    if test != KncTest::Longitudinal && knc.window.metric_window_mm.is_none() {
+    if subtest != KncSubtest::Longitudinal && knc.window.metric_window_mm.is_none() {
         warn(
             "metric_window_mm",
             format!("{DEFAULT_GRADIENT_POINTS_MM} mm"),
         );
     }
-    if test == KncTest::Roll && knc.window.metric_window_deg.is_none() {
+    if subtest == KncSubtest::Roll && knc.window.metric_window_deg.is_none() {
         warn(
             "metric_window_deg",
             format!("{DEFAULT_GRADIENT_POINTS_DEG} deg"),
@@ -786,20 +786,20 @@ fn vertical_branch(config: &CaseConfig, measurement: bool) -> &VerticalBranch {
         .for_measurement(measurement)
 }
 
-/// Rust/Python interface for test-specific scalar metrics.
+/// Rust/Python interface for subtest-specific scalar metrics.
 ///
 /// Wheel-travel points default to 10 mm; roll
 /// angle points default to 1 deg. Wheel-center Z must be relative travel:
 /// measurement offsets or a static simulation baseline. Unavailable metrics
 /// keep `value: null` and add one warning with reason. Rust serializes canonical
 /// curves (including offsets), branch options, secant half-widths and optional
-/// test inputs into a PyDict. `with_kernel` loads the shared Python
-/// `knc_kernel.py` and the test module; it calls that module's `metrics(request)`.
-/// Python returns a JSON string of metric rows and warnings. Rust adds domain
-/// and test, tags warnings, and leaves report writing to the caller.
+/// subtest inputs into a PyDict. `with_kernel` loads the shared Python
+/// `knc_kernel.py` and the subtest module; it calls that module's `metrics(request)`.
+/// Python returns a JSON string of metric rows and warnings. Rust adds test
+/// and subtest, tags warnings, and leaves report writing to the caller.
 #[allow(clippy::too_many_arguments)]
 fn gradient_metrics(
-    test: KncTest,
+    subtest: KncSubtest,
     knc: &VerticalConfig,
     curves: &[Curve],
     relative_travel: bool,
@@ -816,28 +816,28 @@ fn gradient_metrics(
     }
     let curves = serde_json::to_string(curves)?;
     let branch = serde_json::to_string(knc.branch.for_measurement(measurement))?;
-    let extras: Vec<(&str, String)> = match test {
-        KncTest::Vertical => vec![
+    let extras: Vec<(&str, String)> = match subtest {
+        KncSubtest::Vertical => vec![
             ("corner_mass_kg", serde_json::to_string(corner_mass_kg)?),
             (
                 "corner_mass_source",
                 serde_json::to_string(corner_mass_source)?,
             ),
         ],
-        KncTest::Roll => vec![(
+        KncSubtest::Roll => vec![(
             "gradient_deg",
             window
                 .metric_window_deg
                 .unwrap_or(DEFAULT_GRADIENT_POINTS_DEG)
                 .to_string(),
         )],
-        KncTest::Longitudinal => window
+        KncSubtest::Longitudinal => window
             .metric_window_n
             .map(|half| vec![("gradient_n", half.to_string())])
             .unwrap_or_default(),
     };
 
-    let response: String = with_kernel(test, |py, module| {
+    let response: String = with_kernel(subtest, |py, module| {
         let request = PyDict::new(py);
         request.set_item("gradient_mm", gradient)?;
         request.set_item("curves", &curves)?;
@@ -851,15 +851,19 @@ fn gradient_metrics(
     .with_context(|| {
         format!(
             "failed to calculate {} metrics with embedded Python",
-            test.name()
+            subtest.name()
         )
     })?;
-    let response: serde_json::Value = serde_json::from_str(&response)
-        .with_context(|| format!("embedded Python returned invalid {} metrics", test.name()))?;
+    let response: serde_json::Value = serde_json::from_str(&response).with_context(|| {
+        format!(
+            "embedded Python returned invalid {} metrics",
+            subtest.name()
+        )
+    })?;
     let metrics = response["metrics"].as_array().ok_or_else(|| {
         anyhow::anyhow!(
             "embedded Python returned incomplete {} metrics",
-            test.name()
+            subtest.name()
         )
     })?;
 
@@ -884,7 +888,7 @@ fn gradient_metrics(
             // (`interval_mm`/`interval_deg`), endpoints and any calc-input
             // fields (e.g. ride_frequency's corner mass); only the location
             // and reason stay internal.
-            let mut row = serde_json::json!({"domain": "knc", "test": test.name()});
+            let mut row = serde_json::json!({"test": "knc", "subtest": subtest.name()});
             for (key, value) in metric.as_object().into_iter().flatten() {
                 if !matches!(key.as_str(), "corner" | "reason") {
                     row[key] = value.clone();
@@ -932,7 +936,7 @@ fn effective_gradient_points(window: &clab_core::config::VerticalWindow) -> f64 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compare_plots(
     config: &CaseConfig,
-    test: KncTest,
+    subtest: KncSubtest,
     (baseline, baseline_branch, baseline_mass): (
         &serde_json::Value,
         &VerticalBranch,
@@ -968,20 +972,20 @@ pub(crate) fn compare_plots(
     )?;
     let mut reports = render_parallel(
         RenderRequest {
-            test,
+            subtest,
             curves: baseline_json,
             candidates: Some(candidates_json),
             label: baseline_label.into(),
             footer: options.footer.into(),
-            gradient_mm: test
+            gradient_mm: subtest
                 .config(config)
                 .map(|knc| effective_gradient_points(&knc.window)),
             branch,
-            gradient_deg: test
+            gradient_deg: subtest
                 .config(config)
                 .and_then(|knc| knc.window.metric_window_deg)
                 .or(Some(DEFAULT_GRADIENT_POINTS_DEG)),
-            gradient_n: test
+            gradient_n: subtest
                 .config(config)
                 .and_then(|knc| knc.window.metric_window_n),
             debug: options.debug.map(str::to_owned),
@@ -997,15 +1001,15 @@ pub(crate) fn compare_plots(
     .with_context(|| {
         format!(
             "failed to generate {} comparison PDF reports with embedded Python",
-            test.name()
+            subtest.name()
         )
     })?;
     if let Some(setup) = options.setup {
         reports = suffix_plot_names(reports, setup);
     }
-    if let Some(series) = merge_plot_series("compare", test, &mut reports)? {
+    if let Some(series) = merge_plot_series("compare", subtest, &mut reports)? {
         reports.insert(
-            format!("knc-{}.plots.json", test.report_stem(brakes)),
+            format!("knc-{}.plots.json", subtest.report_stem(brakes)),
             series,
         );
     }
@@ -1014,12 +1018,12 @@ pub(crate) fn compare_plots(
 
 fn subtract_static(
     config: &CaseConfig,
-    test: KncTest,
+    subtest: KncSubtest,
     curves: &mut [Curve],
     static_file: &CanonicalFile,
 ) -> Result<Vec<String>> {
-    let knc = test.required_config(config)?;
-    let conventions = test.conventions();
+    let knc = subtest.required_config(config)?;
+    let conventions = subtest.conventions();
     let mut warnings = Vec::new();
     for curve in curves {
         let name = format!("{}_{}", curve.corner, curve.signal);
@@ -1027,7 +1031,7 @@ fn subtract_static(
         if convention.baseline != BaselinePolicy::StaticSimulation {
             continue;
         }
-        let reference = mapping(test, knc, &name)?;
+        let reference = mapping(subtest, knc, &name)?;
         convention.source_unit = reference.unit.clone();
         let signal = static_file.read_signal(
             &reference.entity,
@@ -1062,19 +1066,19 @@ fn subtract_static(
 
 fn simulation_curves(
     config: &CaseConfig,
-    test: KncTest,
+    subtest: KncSubtest,
     simulation: &CanonicalFile,
 ) -> Result<(Vec<Curve>, Vec<String>)> {
-    let knc = test.required_config(config)?;
-    let conventions = test.conventions();
+    let knc = subtest.required_config(config)?;
+    let conventions = subtest.conventions();
     let mut curves = Vec::new();
     let mut warnings = Vec::new();
     for corner in CORNERS {
-        let travel = if test == KncTest::Longitudinal {
+        let travel = if subtest == KncSubtest::Longitudinal {
             None
         } else {
             let travel_name = format!("{corner}_travel");
-            let travel_reference = mapping(test, knc, &travel_name)?;
+            let travel_reference = mapping(subtest, knc, &travel_name)?;
             let mut travel_convention = convention(&conventions, &travel_name)?;
             travel_convention.source_unit = travel_reference.unit.clone();
             let travel_signal = simulation.read_signal(
@@ -1092,9 +1096,9 @@ fn simulation_curves(
             .values;
             Some(drop_initial_sample(travel))
         };
-        for suffix in test.required_signals() {
+        for suffix in subtest.required_signals() {
             let name = format!("{corner}_{suffix}");
-            let reference = mapping(test, knc, &name)?;
+            let reference = mapping(subtest, knc, &name)?;
             let (values, unit) = simulation_signal(
                 config,
                 simulation,
@@ -1115,18 +1119,18 @@ fn simulation_curves(
         optional_simulation_curves(
             config,
             simulation,
-            (test, knc),
+            (subtest, knc),
             &conventions,
             corner,
             &mut curves,
             &mut warnings,
         )?;
     }
-    for (location, signal, required) in test.axle_signals() {
+    for (location, signal, required) in subtest.axle_signals() {
         let name = format!("{location}_{signal}");
         let Some(reference) = knc.signals.get(&name) else {
             if required {
-                anyhow::bail!(mapping_missing(test.name(), &name));
+                anyhow::bail!(mapping_missing(subtest.name(), &name));
             }
             continue;
         };
@@ -1151,18 +1155,18 @@ fn simulation_curves(
 }
 
 fn measurement_curves(
-    test: KncTest,
+    subtest: KncSubtest,
     knc: &VerticalConfig,
     measurement: &CanonicalFile,
 ) -> Result<Vec<Curve>> {
     let mut curves = Vec::new();
     for corner in CORNERS {
-        for suffix in test.required_signals() {
+        for suffix in subtest.required_signals() {
             let name = format!("{corner}_{suffix}");
-            let reference = measurement_mapping(test, knc, &name)?;
+            let reference = measurement_mapping(subtest, knc, &name)?;
             let channel =
                 measurement.read_signal(&reference.entity, None, Some(&reference.unit))?;
-            let offset = if test.measurement_relative(suffix) {
+            let offset = if subtest.measurement_relative(suffix) {
                 channel.info.offset.unwrap_or_default()
             } else {
                 0.0
@@ -1177,12 +1181,12 @@ fn measurement_curves(
                     .collect(),
                 unit: reference.unit.clone(),
                 travel: None,
-                offset: test.measurement_relative(suffix).then_some(offset),
+                offset: subtest.measurement_relative(suffix).then_some(offset),
             });
         }
-        optional_measurement_curves(test, knc, measurement, corner, &mut curves)?;
+        optional_measurement_curves(subtest, knc, measurement, corner, &mut curves)?;
     }
-    for (location, signal, required) in test.axle_signals() {
+    for (location, signal, required) in subtest.axle_signals() {
         let name = format!("{location}_{signal}");
         let channel = knc
             .measurement_signals
@@ -1193,7 +1197,7 @@ fn measurement_curves(
         let Some((values, unit)) = channel else {
             if required {
                 anyhow::bail!(mapping_missing(
-                    &format!("{} measurement", test.name()),
+                    &format!("{} measurement", subtest.name()),
                     &name
                 ));
             }
@@ -1231,13 +1235,13 @@ fn measurement_channel(
 fn optional_simulation_curves(
     config: &CaseConfig,
     simulation: &CanonicalFile,
-    (test, knc): (KncTest, &VerticalConfig),
+    (subtest, knc): (KncSubtest, &VerticalConfig),
     conventions: &BTreeMap<String, SignalConvention>,
     corner: &str,
     curves: &mut Vec<Curve>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
-    for suffix in test.corner_signals() {
+    for suffix in subtest.corner_signals() {
         // Simulation pad travel is derived in the kernel from wheel-center
         // travel and tire deflection.
         if *suffix == "wheel_pad_z" {
@@ -1310,13 +1314,13 @@ fn drop_initial_sample(values: Vec<f64>) -> Vec<f64> {
 /// that curve (same leniency `optional_simulation_curves` gives a canonical
 /// name absent from `vertical.signals`).
 fn optional_measurement_curves(
-    test: KncTest,
+    subtest: KncSubtest,
     knc: &VerticalConfig,
     measurement: &CanonicalFile,
     corner: &str,
     curves: &mut Vec<Curve>,
 ) -> Result<()> {
-    for suffix in test.corner_signals() {
+    for suffix in subtest.corner_signals() {
         let suffix = *suffix;
         let name = format!("{corner}_{suffix}");
         let Some(reference) = knc.measurement_signals.get(&name) else {
@@ -1330,7 +1334,7 @@ fn optional_measurement_curves(
             continue;
         }
         let channel = measurement.read_signal(&reference.entity, None, Some(&reference.unit))?;
-        let relative = test.measurement_relative(suffix);
+        let relative = subtest.measurement_relative(suffix);
         let sign = if suffix == "toe" && matches!(corner, "front_right" | "rear_right") {
             -1.0
         } else {
@@ -1357,20 +1361,20 @@ fn optional_measurement_curves(
     Ok(())
 }
 
-fn mapping<'a>(test: KncTest, knc: &'a VerticalConfig, name: &str) -> Result<&'a SignalRef> {
+fn mapping<'a>(subtest: KncSubtest, knc: &'a VerticalConfig, name: &str) -> Result<&'a SignalRef> {
     knc.signals
         .get(name)
-        .ok_or_else(|| anyhow::anyhow!(mapping_missing(test.name(), name)))
+        .ok_or_else(|| anyhow::anyhow!(mapping_missing(subtest.name(), name)))
 }
 
 fn measurement_mapping<'a>(
-    test: KncTest,
+    subtest: KncSubtest,
     knc: &'a VerticalConfig,
     name: &str,
 ) -> Result<&'a clab_core::config::MeasurementSignalRef> {
     knc.measurement_signals.get(name).ok_or_else(|| {
         anyhow::anyhow!(mapping_missing(
-            &format!("{} measurement", test.name()),
+            &format!("{} measurement", subtest.name()),
             name
         ))
     })
@@ -1424,7 +1428,7 @@ fn suffix_plot_name(name: &str, setup: &str) -> String {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn curve_plots(
     config: &CaseConfig,
-    test: KncTest,
+    subtest: KncSubtest,
     curves: &serde_json::Value,
     measurement: bool,
     corner_mass_kg: &BTreeMap<String, f64>,
@@ -1434,7 +1438,7 @@ pub(crate) fn curve_plots(
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let source_label = options.label.unwrap_or_else(|| source_label(measurement));
     let curves = serde_json::to_string(curves)?;
-    let knc = test.config(config);
+    let knc = subtest.config(config);
     let gradient = knc.map(|config| effective_gradient_points(&config.window));
     let branch = serde_json::to_string(knc.map_or_else(
         || vertical_branch(config, measurement),
@@ -1442,7 +1446,7 @@ pub(crate) fn curve_plots(
     ))?;
     let corner_mass_kg = serde_json::to_string(corner_mass_kg)?;
     let request = RenderRequest {
-        test,
+        subtest,
         curves,
         candidates: None,
         label: source_label.into(),
@@ -1462,15 +1466,15 @@ pub(crate) fn curve_plots(
     let mut files = render_parallel(request, "", 1, options.workers, progress).with_context(|| {
         format!(
             "failed to generate {} PDF reports with embedded Python; install Python dependencies with '.venv/bin/python -m pip install -e ./py-chassislab'",
-            test.name()
+            subtest.name()
         )
     })?;
     if let Some(setup) = options.setup {
         files = suffix_plot_names(files, setup);
     }
-    if let Some(series) = merge_plot_series("analyze", test, &mut files)? {
+    if let Some(series) = merge_plot_series("analyze", subtest, &mut files)? {
         files.insert(
-            format!("knc-{}.plots.json", test.report_stem(brakes)),
+            format!("knc-{}.plots.json", subtest.report_stem(brakes)),
             series,
         );
     }
@@ -1481,7 +1485,7 @@ pub(crate) fn curve_plots(
 /// ordered by plot path so the bundle stays deterministic.
 fn merge_plot_series(
     command: &str,
-    test: KncTest,
+    subtest: KncSubtest,
     files: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<Option<Vec<u8>>> {
     let names: Vec<String> = files
@@ -1499,23 +1503,23 @@ fn merge_plot_series(
     let document = serde_json::json!({
         "schema_version": 1,
         "command": command,
-        "domain": "knc",
-        "test": test.name(),
+        "test": "knc",
+        "subtest": subtest.name(),
         "plots": plots,
     });
     Ok(Some(serde_json::to_vec(&document)?))
 }
 
-/// Load the embedded kernels of `test` and run `call` with its test kernel.
+/// Load the embedded kernels of `subtest` and run `call` with its subtest kernel.
 ///
-/// Within one process, `analyze`/`compare` call this at least twice per test
-/// (once for metrics, once for plot rendering), and the test kernels import
+/// Within one process, `analyze`/`compare` call this at least twice per subtest
+/// (once for metrics, once for plot rendering), and the subtest kernels import
 /// `knc_plot_kernel` unconditionally, so `CORE_KERNEL`/`PLOT_KERNEL` would
 /// otherwise be recompiled from source several times per run. `sys.modules`
 /// doubles as the load-once cache: reuse an already-loaded module instead of
 /// recompiling it.
 fn with_kernel<T>(
-    test: KncTest,
+    subtest: KncSubtest,
     call: impl FnOnce(Python<'_>, &Bound<'_, PyModule>) -> PyResult<T>,
 ) -> Result<T> {
     // Module creation and `site.addsitedir` can release the GIL while imports
@@ -1531,7 +1535,7 @@ fn with_kernel<T>(
             .downcast_into::<PyDict>()
             .expect("sys.modules is a dict");
         let mut module = None;
-        for Kernel(source, file, name) in test.kernels() {
+        for Kernel(source, file, name) in subtest.kernels() {
             let name_str = name.to_str().expect("module name is UTF-8");
             let loaded = match modules.get_item(name_str)? {
                 Some(cached) => cached
@@ -1547,7 +1551,7 @@ fn with_kernel<T>(
             };
             module = Some(loaded);
         }
-        call(py, &module.expect("every test has a kernel"))
+        call(py, &module.expect("every subtest has a kernel"))
     })?)
 }
 
@@ -1599,12 +1603,12 @@ mod tests {
             ),
             ("plots/knc/roll/a.pdf".to_owned(), b"%PDF".to_vec()),
         ]);
-        let merged = merge_plot_series("analyze", KncTest::Roll, &mut files)
+        let merged = merge_plot_series("analyze", KncSubtest::Roll, &mut files)
             .unwrap()
             .unwrap();
         let merged: serde_json::Value = serde_json::from_slice(&merged).unwrap();
         assert_eq!(merged["command"], "analyze");
-        assert_eq!(merged["test"], "roll");
+        assert_eq!(merged["subtest"], "roll");
         assert_eq!(merged["plots"][0]["name"], "a");
         assert_eq!(merged["plots"][1]["name"], "b");
         assert_eq!(files.keys().collect::<Vec<_>>(), ["plots/knc/roll/a.pdf"]);
@@ -1614,7 +1618,7 @@ mod tests {
     fn no_series_files_means_no_document() {
         let mut files = BTreeMap::from([("a.pdf".to_owned(), vec![])]);
         assert!(
-            merge_plot_series("analyze", KncTest::Vertical, &mut files)
+            merge_plot_series("analyze", KncSubtest::Vertical, &mut files)
                 .unwrap()
                 .is_none()
         );
@@ -1623,23 +1627,23 @@ mod tests {
     fn condition_formats_and_differences_preserve_lateral_cases() {
         let base = super::Conditions {
             setup: "b1e0f1r1".parse().unwrap(),
-            phase: Some("in".into()),
+            phase: Some("inphase".into()),
             offset_mm: Some(0.0),
         };
         assert!(base.differences(&base).is_empty());
-        assert_eq!(base.summary(), "b1e0f1r1 | in-phase | 0 mm");
-        assert_eq!(base.csv_cells(), ["b1e0f1r1", "in", "0"]);
+        assert_eq!(base.summary(), "b1e0f1r1 | inphase | 0 mm");
+        assert_eq!(base.csv_cells(), ["b1e0f1r1", "inphase", "0"]);
         assert_eq!(
             base.json(),
-            serde_json::json!({"setup": "b1e0f1r1", "phase": "in", "offset_mm": 0.0})
+            serde_json::json!({"setup": "b1e0f1r1", "phase": "inphase", "offset_mm": 0.0})
         );
         let other = super::Conditions {
-            phase: Some("anti".into()),
+            phase: Some("antiphase".into()),
             offset_mm: Some(30.0),
             ..base.clone()
         };
         assert_eq!(base.differences(&other), ["phase", "offset"]);
-        assert_eq!(other.summary(), "b1e0f1r1 | anti-phase | 30 mm");
+        assert_eq!(other.summary(), "b1e0f1r1 | antiphase | 30 mm");
         let unknown = super::Conditions {
             phase: None,
             offset_mm: None,

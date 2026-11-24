@@ -1,7 +1,7 @@
 # ChassisLab Roadmap
 
 The rewrite is incremental. Existing MATLAB output remains the historical
-reference until a domain reaches reviewed parity. Version `0.3.1` is the
+reference until a test reaches reviewed parity. Version `0.3.1` is the
 behavioral baseline for the Rust-owned application migration. Known MATLAB
 corner mapping errors are corrected rather than copied into golden data.
 
@@ -15,7 +15,7 @@ Issues:
 2. Implement a robust Lommel `.acd` parser with offsets, names, and units.
 3. Define TOML case configuration and path resolution.
 4. Centralize units, corner mapping, signs, and baseline policies.
-5. Stabilize and test the external KnC ADM/ACF generation script.
+5. Stabilize and subtest the external KnC ADM/ACF generation script.
 6. Add run manifests, checksums, and isolated artifact directories.
 
 Exit criteria:
@@ -26,7 +26,7 @@ Exit criteria:
 
 ## M2 SVC parity
 
-Goal: replace `Validierung/KnC/SVC/evalSVC.m` as the first end-to-end domain.
+Goal: replace `Validierung/KnC/SVC/evalSVC.m` as the first end-to-end test.
 
 Issues:
 
@@ -53,7 +53,7 @@ Migration order:
 1. Freeze the Rust/Python ownership and `0.3.1` parity contract.
 2. Prove relocatable embedded CPython, NumPy, and Matplotlib packaging.
 3. Add staged runner checks without disabling current CI or releases.
-4. Port configuration, domain types, units, conventions, HDF5, and ACD handling
+4. Port configuration, test types, units, conventions, HDF5, and ACD handling
    to Rust.
 5. Replace Python CLI entry points with the unified Rust `clab` command hierarchy.
 6. Port stable SVC computation and reporting to Rust.
@@ -148,7 +148,7 @@ Issues:
 4. Define synchronized Python/Rust semantic versions and HDF5 compatibility.
 5. Publish tagged Python and Rust release artifacts with checksums.
 6. Publish operator documentation and migration status.
-7. Mark MATLAB evaluators legacy only after domain sign-off.
+7. Mark MATLAB evaluators legacy only after test sign-off.
 
 ## M10 Desktop workspace (Tauri + web UI)
 
@@ -216,7 +216,7 @@ Small tasks, in implementation order (each suitable for a separate issue/PR):
    Acceptance: missing or changed dependencies are flagged, historical results are
    not presented as current, and unfinished jobs reopen as interrupted, not running.
 10. **Validate and package the first desktop release.** Add a synthetic end-to-end
-    test covering configure, save, analyze, compare, close, and reopen; document
+    subtest covering configure, save, analyze, compare, close, and reopen; document
     the workflow and validate packaging on each declared desktop target.
     Acceptance: keyboard-accessible controls and labeled validation errors work;
     desktop bundles include the required runtime and do not regress CLI releases.
@@ -258,5 +258,5 @@ Exit criteria:
 - Existing runner checks remain active during migration. Bundled-runtime and
   parity jobs are added before superseded Python CLI jobs are removed.
 - Stable states are tagged as `v0.x.y` during migration and `v1.0.0` after all
-  supported domains reach sign-off.
+  supported tests reach sign-off.
 - `v*` tags are protected; only trusted maintainers can trigger release jobs.

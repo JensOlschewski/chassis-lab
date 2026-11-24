@@ -7,8 +7,8 @@ use crate::worker::clean_path;
 #[derive(Deserialize)]
 pub struct ConvertRequest {
     input: PathBuf,
-    domain: String,
-    test: Option<String>,
+    test: String,
+    subtest: Option<String>,
     /// Setup code `b<0|1>e<0|1>f<0|1>r<0|1>`; clab requires it for knc.
     #[serde(default)]
     setup: Option<String>,
@@ -20,16 +20,13 @@ pub struct ConvertRequest {
 }
 
 impl ConvertRequest {
-    /// Builds the `clab convert` arguments. Domain/test combinations are
+    /// Builds the `clab convert` arguments. Test/subtest combinations are
     /// validated by clab itself.
     pub fn args(&self) -> Vec<OsString> {
-        let mut args: Vec<OsString> = vec![
-            "convert".into(),
-            "--domain".into(),
-            self.domain.clone().into(),
-        ];
-        if let Some(test) = &self.test {
-            args.extend(["--test".into(), test.clone().into()]);
+        let mut args: Vec<OsString> =
+            vec!["convert".into(), "--test".into(), self.test.clone().into()];
+        if let Some(subtest) = &self.subtest {
+            args.extend(["--subtest".into(), subtest.clone().into()]);
         }
         if let Some(setup) = &self.setup {
             args.extend(["--setup".into(), setup.clone().into()]);
@@ -55,8 +52,8 @@ mod tests {
     fn request() -> ConvertRequest {
         ConvertRequest {
             input: PathBuf::from("\"/data/run.res\" "),
-            domain: "knc".into(),
-            test: Some("vertical".into()),
+            test: "knc".into(),
+            subtest: Some("vertical".into()),
             setup: Some("b1e0f1r1".into()),
             output: Some(PathBuf::from("/out")),
             force: true,
@@ -78,9 +75,9 @@ mod tests {
     fn builds_full_argument_list_with_cleaned_paths() {
         let expected = [
             "convert",
-            "--domain",
-            "knc",
             "--test",
+            "knc",
+            "--subtest",
             "vertical",
             "--setup",
             "b1e0f1r1",
@@ -95,14 +92,14 @@ mod tests {
     #[test]
     fn omits_unset_options() {
         let request = ConvertRequest {
-            test: None,
+            subtest: None,
             setup: None,
             output: None,
             force: false,
-            domain: "svc".into(),
+            test: "svc".into(),
             ..request()
         };
-        let expected = ["convert", "--domain", "svc", "/data/run.res"];
+        let expected = ["convert", "--test", "svc", "/data/run.res"];
         assert_eq!(request.args(), expected.map(OsString::from));
     }
 }

@@ -90,7 +90,7 @@ export function buildChart(data: Signals, curves: Curve[], text: string) {
     const linked = sharedX && !last;
     axes[`yaxis${s}`] = {
       ...frame,
-      domain: [top - height, top],
+      test: [top - height, top],
       anchor: `x${s}`,
       title: { text: common(members, (curve) => curve.y) },
     };

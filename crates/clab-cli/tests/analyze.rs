@@ -13,7 +13,7 @@ fn clab() -> Command {
 /// matching the synthetic SVC inputs these tests build. Read from a file
 /// (not duplicated inline) so it has one definition shared with
 /// `compare.rs`, and renaming or restructuring `examples/` never breaks a
-/// test whose only need was "some valid SVC mapping".
+/// subtest whose only need was "some valid SVC mapping".
 fn svc_simulation_mapping_toml() -> String {
     fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -55,7 +55,7 @@ fn analyzes_svc_with_report_bundle() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "svc",
             "-o",
             input.to_str().unwrap(),
@@ -116,7 +116,7 @@ fn warns_when_run_manifest_uses_schema_version_one() {
                 .join("input/raw-simulation/example-simulation-svc.res")
                 .to_str()
                 .unwrap(),
-            "-d",
+            "--test",
             "svc",
             "-o",
             input.to_str().unwrap(),
@@ -129,7 +129,7 @@ fn warns_when_run_manifest_uses_schema_version_one() {
         .unwrap()
         .write_scalar(&1_u32)
         .unwrap();
-    file.delete_attr("domain").unwrap();
+    file.delete_attr("test").unwrap();
     file.close().unwrap();
 
     let config = directory.path().join("config.toml");
@@ -174,7 +174,7 @@ fn analyze_json_prints_one_line_per_section() {
     assert_eq!(lines.len(), 1);
     let section = &lines[0]["section"];
     assert_eq!(section["title"], "SVC");
-    assert_eq!(section["domain"], "svc");
+    assert_eq!(section["test"], "svc");
     let metric = &section["metrics"][0];
     assert_eq!(metric["name"], "svc::front_left_mass_kg");
     assert_eq!(metric["unit"], "kg");
@@ -459,9 +459,9 @@ fn analyzes_knc_measurement_hdf5_when_config_also_defines_svc() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b0e0f1r1",
@@ -480,7 +480,7 @@ fn analyzes_knc_measurement_hdf5_when_config_also_defines_svc() {
         .args(["analyze", config.to_str().unwrap(), input.to_str().unwrap()])
         .output()
         .unwrap();
-    // The converted ACD is KnC data and the config defines a KnC vertical test,
+    // The converted ACD is KnC data and the config defines a KnC vertical subtest,
     // so it is not mistaken for an unsupported SVC measurement HDF5.
     assert!(
         result.status.success(),
@@ -520,7 +520,7 @@ fn analyzes_svc_hdf5_with_report_bundle() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "svc",
             "-o",
             input.to_str().unwrap(),
@@ -576,7 +576,7 @@ fn analyzes_svc_hdf5_run_with_hdf5_analyzer() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "svc",
             "-o",
             input.to_str().unwrap(),
@@ -622,7 +622,7 @@ fn analyzes_svc_hdf5_with_missing_units_and_warns() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "svc",
             "-o",
             input.to_str().unwrap(),
@@ -697,7 +697,7 @@ fn analyze_force_rejects_output_containing_input() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "svc",
             "-o",
             simulation.to_str().unwrap(),
@@ -742,9 +742,9 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
             "convert",
             "--yes",
             vertical.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b0e0f1r1",
@@ -764,9 +764,9 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
             "convert",
             "--yes",
             static_input.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "static",
             "--setup",
             "b0e0f1r1",
@@ -785,7 +785,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         .args([
             "convert",
             svc.to_str().unwrap(),
-            "-d",
+            "--test",
             "svc",
             "-o",
             svc_simulation.to_str().unwrap(),
@@ -824,7 +824,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(stdout.contains("\nSVC\nrunning 29 metrics\n"));
-    // Both domains render through the same `domain[::test]::metric ... value unit` row shape.
+    // Both tests render through the same `test[::subtest]::metric ... value unit` row shape.
     assert!(stdout.contains("  svc::total_mass_kg ... "));
     assert!(stdout.contains("  knc::vertical::suspension_rate_front_left_n_per_mm ... "));
     let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
@@ -850,7 +850,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         serde_json::from_str(&fs::read_to_string(output.join("knc-vertical.plots.json")).unwrap())
             .unwrap();
     assert_eq!(series["schema_version"], 1);
-    assert_eq!(series["test"], "vertical");
+    assert_eq!(series["subtest"], "vertical");
     assert!(!series["plots"].as_array().unwrap().is_empty());
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
@@ -864,7 +864,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|metric| metric["domain"] == "knc")
+        .find(|metric| metric["test"] == "knc")
         .unwrap();
     assert_eq!(first_knc["metric"], "bump_camber_front_left_deg_per_mm");
     let named: Vec<&str> = series["plots"]
@@ -890,7 +890,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
     assert!(pdf.starts_with(b"%PDF"));
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["domains"].as_array().unwrap().len(), 2);
+    assert_eq!(report["tests"].as_array().unwrap().len(), 2);
     assert_eq!(report["case"]["name"], "two-up run");
     assert_eq!(report["case"]["loadcase"], "two-up");
     for name in ["svc.json", "knc-vertical.json"] {
@@ -937,7 +937,7 @@ fn analyzes_run_with_svc_and_vertical_in_one_bundle() {
 }
 
 #[test]
-fn analyze_routes_hdf5_by_declared_domain() {
+fn analyze_routes_hdf5_by_declared_test() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let config = examples.join("config.toml");
     let source = examples.join("input/raw-measurement/example-measurement-knc-vertical.acd");
@@ -947,9 +947,9 @@ fn analyze_routes_hdf5_by_declared_domain() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b0e0f1r1",
@@ -978,10 +978,10 @@ fn analyze_routes_hdf5_by_declared_domain() {
     assert!(!String::from_utf8_lossy(&result.stderr).contains("schema version"));
 
     // The same data declared as svc now fails at convert time: the testtype
-    // contradicts the declared domain, so nothing is written.
+    // contradicts the declared test, so nothing is written.
     let wrong = directory.path().join("wrong.h5");
     let converted = clab()
-        .args(["convert", source.to_str().unwrap(), "-d", "svc", "-o"])
+        .args(["convert", source.to_str().unwrap(), "--test", "svc", "-o"])
         .arg(&wrong)
         .output()
         .unwrap();
@@ -999,7 +999,13 @@ fn analyze_routes_hdf5_by_declared_domain() {
     )
     .unwrap();
     let converted = clab()
-        .args(["convert", no_testtype.to_str().unwrap(), "-d", "svc", "-o"])
+        .args([
+            "convert",
+            no_testtype.to_str().unwrap(),
+            "--test",
+            "svc",
+            "-o",
+        ])
         .arg(&wrong)
         .output()
         .unwrap();

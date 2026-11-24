@@ -28,15 +28,15 @@ fn simulation(path: &std::path::Path) {
 fn static_simulation(path: &std::path::Path) {
     simulation_with_test(path, "static");
 }
-fn simulation_with_test(path: &std::path::Path, test: &str) {
+fn simulation_with_test(path: &std::path::Path, subtest: &str) {
     let file = File::create(path).unwrap();
     scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", 5_u64);
     scalar(&file, "signal_count", 24_u64);
     string(&file, "source_kind", "simulation");
-    string(&file, "domain", "knc");
+    string(&file, "test", "knc");
     string(&file, "setup", "b1e0f1r1");
-    string(&file, "test", test);
+    string(&file, "subtest", subtest);
     string(&file, "source_file", "fixture.res");
     let axis = file.create_group("axis").unwrap();
     string(&axis, "kind", "sample_index");
@@ -137,11 +137,11 @@ fn measurement_channels(path: &std::path::Path, front_left_wcx_name: &str, setup
     scalar(&file, "sample_count", 21_u64);
     scalar(&file, "signal_count", 48_u64);
     string(&file, "source_kind", "measurement");
-    string(&file, "domain", "knc");
+    string(&file, "test", "knc");
     if let Some(setup) = setup {
         string(&file, "setup", setup);
     }
-    string(&file, "test", "vertical");
+    string(&file, "subtest", "vertical");
     string(&file, "source_file", "fixture.acd");
     let axis = file.create_group("axis").unwrap();
     string(&axis, "kind", "time");
@@ -338,7 +338,7 @@ fn config(path: &std::path::Path, omit: bool) {
 }
 
 /// Real reverse-engineered VARB corner masses; ride_frequency's fallback when
-/// no SVC domain runs alongside KnC vertical in the same analyze/compare.
+/// no SVC test runs alongside KnC vertical in the same analyze/compare.
 const SPRUNG_MASS_KG: &str = "sprung_mass_front_left_kg=449.0\nsprung_mass_front_right_kg=427.0\nsprung_mass_rear_left_kg=384.0\nsprung_mass_rear_right_kg=383.0\n";
 
 #[test]
@@ -552,7 +552,7 @@ fn assert_measurement_metrics(
     close(value("ride_rate_rear_right_n_per_mm"), 30.0 / 1.1);
     close(value("tire_rate_rear_right_n_per_mm"), 300.0);
     let csv = fs::read_to_string(output.join("metrics.csv")).unwrap();
-    assert!(csv.starts_with("run,domain,test,metric,unit,value,setup,phase,offset_mm\n"));
+    assert!(csv.starts_with("run,test,subtest,metric,unit,value,setup,phase,offset_mm\n"));
     let mut rows = csv::Reader::from_reader(csv.as_bytes());
     for row in rows.records() {
         let row = row.unwrap();
@@ -570,9 +570,9 @@ fn assert_measurement_metrics(
     close(rate[5].parse().unwrap(), 30.0);
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["domains"][0]["metric_count"], 36);
+    assert_eq!(report["tests"][0]["metric_count"], 36);
     assert_eq!(
-        report["domains"][0]["conditions"],
+        report["tests"][0]["conditions"],
         serde_json::json!({"setup": "b1e0f1r1"})
     );
 }
@@ -581,13 +581,21 @@ fn assert_measurement_metrics(
 fn committed_examples_convert_and_produce_vertical_metrics() {
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let directory = tempdir().unwrap();
-    let convert = |source: &str, output: &str, test: &str| {
+    let convert = |source: &str, output: &str, subtest: &str| {
         let destination = directory.path().join(output);
         let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
         command
             .args(["convert", "--yes"])
             .arg(examples.join("input").join(source))
-            .args(["-d", "knc", "-t", test, "--setup", "b1e0f1r1", "-o"])
+            .args([
+                "--test",
+                "knc",
+                "--subtest",
+                subtest,
+                "--setup",
+                "b1e0f1r1",
+                "-o",
+            ])
             .arg(&destination);
         let result = command.output().unwrap();
         assert!(
@@ -990,22 +998,22 @@ fn compares_only_gradient_metrics_with_overlays() {
     );
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["candidates"][0]["domains"][0]["domain"], "knc");
-    assert_eq!(report["candidates"][0]["domains"][0]["status"], "compared");
-    assert_eq!(report["domains"][0]["conditions"]["setup"], "b1e0f1r1");
+    assert_eq!(report["candidates"][0]["tests"][0]["test"], "knc");
+    assert_eq!(report["candidates"][0]["tests"][0]["status"], "compared");
+    assert_eq!(report["tests"][0]["conditions"]["setup"], "b1e0f1r1");
     assert_eq!(
-        report["candidates"][0]["domains"][0]["conditions"]["setup"],
+        report["candidates"][0]["tests"][0]["conditions"]["setup"],
         "b1e1f1r1"
     );
     assert!(
         report["warnings"][0]
             .as_str()
             .unwrap()
-            .contains("test conditions differ (engine)")
+            .contains("subtest conditions differ (engine)")
     );
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(
-        stderr.contains("test conditions differ (engine)"),
+        stderr.contains("subtest conditions differ (engine)"),
         "{stderr}"
     );
     assert!(
@@ -1064,7 +1072,7 @@ fn compares_only_gradient_metrics_with_overlays() {
         assert!(footer.contains("b1e0f1r1"), "{footer}");
         assert!(footer.contains("b1e1f1r1"), "{footer}");
         assert!(
-            footer.contains("WARNING: knc::vertical: test conditions differ (engine)"),
+            footer.contains("WARNING: knc::vertical: subtest conditions differ (engine)"),
             "{footer}"
         );
         for panel in plot["panels"].as_array().unwrap() {
@@ -1103,7 +1111,7 @@ fn compares_direct_vertical_inputs_without_output() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert!(!directory.path().join("plots").exists());
-    assert!(!String::from_utf8_lossy(&result.stderr).contains("test conditions differ"));
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("subtest conditions differ"));
 }
 
 #[test]

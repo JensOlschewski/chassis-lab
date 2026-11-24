@@ -86,8 +86,8 @@ pub enum Phase {
 impl Phase {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::In => "in",
-            Self::Anti => "anti",
+            Self::In => "inphase",
+            Self::Anti => "antiphase",
         }
     }
 }
@@ -97,9 +97,11 @@ impl FromStr for Phase {
 
     fn from_str(value: &str) -> Result<Self, String> {
         match value.to_ascii_lowercase().as_str() {
-            "in" => Ok(Self::In),
-            "anti" => Ok(Self::Anti),
-            _ => Err(format!("invalid phase '{value}'; expected in or anti")),
+            "inphase" => Ok(Self::In),
+            "antiphase" => Ok(Self::Anti),
+            _ => Err(format!(
+                "invalid phase '{value}'; expected inphase or antiphase"
+            )),
         }
     }
 }
@@ -115,23 +117,23 @@ pub struct Conditions {
 }
 
 impl Conditions {
-    /// Validate the declared flags against the domain and test.
+    /// Validate the declared flags against the test and subtest.
     pub fn declare(
-        domain: &str,
-        test: Option<&str>,
+        test: &str,
+        subtest: Option<&str>,
         setup: Option<Setup>,
         phase: Option<Phase>,
         offset_mm: Option<f64>,
     ) -> Result<Option<Self>> {
-        let lateral = test == Some("lateral");
-        match (domain, setup) {
-            ("knc", None) => anyhow::bail!("domain 'knc' requires --setup, e.g. b1e0f1r1"),
+        let lateral = subtest == Some("lateral");
+        match (test, setup) {
+            ("knc", None) => anyhow::bail!("test 'knc' requires --setup, e.g. b1e0f1r1"),
             ("knc", Some(setup)) => {
                 if lateral && (phase.is_none() || offset_mm.is_none()) {
-                    anyhow::bail!("test 'lateral' requires --phase and --offset");
+                    anyhow::bail!("subtest 'lateral' requires --phase and --offset");
                 }
                 if !lateral && (phase.is_some() || offset_mm.is_some()) {
-                    anyhow::bail!("--phase and --offset only apply to test 'lateral'");
+                    anyhow::bail!("--phase and --offset only apply to subtest 'lateral'");
                 }
                 if offset_mm.is_some_and(|mm| !mm.is_finite() || mm < 0.0) {
                     anyhow::bail!("--offset must be a non-negative number of mm");
@@ -144,7 +146,7 @@ impl Conditions {
             }
             (_, None) if phase.is_none() && offset_mm.is_none() => Ok(None),
             _ => anyhow::bail!(
-                "domain '{domain}' takes no --setup, --phase or --offset; they only apply to knc"
+                "test '{test}' takes no --setup, --phase or --offset; they only apply to knc"
             ),
         }
     }
@@ -304,7 +306,7 @@ fn phase_finding(declared: Phase, header: Option<Phase>, signal: Option<Phase>) 
 
 /// Findings for an ACD measurement: setup flags and wheel mode from the header,
 /// lateral phase and offset from the header and the front wheel forces.
-pub fn acd_findings(measurement: &AcdMeasurement, test: &str, c: &Conditions) -> Vec<Finding> {
+pub fn acd_findings(measurement: &AcdMeasurement, subtest: &str, c: &Conditions) -> Vec<Finding> {
     let channel = |name: &str| {
         measurement
             .channels
@@ -313,7 +315,7 @@ pub fn acd_findings(measurement: &AcdMeasurement, test: &str, c: &Conditions) ->
     };
     let mut brakes = Finding::new("B", bit(c.setup.brakes));
     brakes.compare("header", header_flag(measurement, "brakeson"));
-    if test == "longitudinal" {
+    if subtest == "longitudinal" {
         // Strapped wheels are the unbraked acceleration run.
         brakes.compare(
             "wheel mode",
@@ -367,9 +369,9 @@ fn res_component<'a>(result: &'a AdamsResult, entity: &str, component: &str) -> 
 /// Findings for a RES result: only what the signals show is compared. Brakes
 /// show in the brake torque of a longitudinal run; phase and offset in the front wheel forces.
 /// Everything else stays declared.
-pub fn res_findings(result: &AdamsResult, test: &str, c: &Conditions) -> Vec<Finding> {
+pub fn res_findings(result: &AdamsResult, subtest: &str, c: &Conditions) -> Vec<Finding> {
     let mut brakes = Finding::new("B", bit(c.setup.brakes));
-    if test == "longitudinal" {
+    if subtest == "longitudinal" {
         let peak = result
             .entities
             .iter()
@@ -432,7 +434,9 @@ mod tests {
     #[test]
     fn declares_conditions_per_test() {
         let setup = Some("b1e0f1r1".parse().unwrap());
-        let ok = |test, phase, offset| Conditions::declare("knc", Some(test), setup, phase, offset);
+        let ok = |subtest, phase, offset| {
+            Conditions::declare("knc", Some(subtest), setup, phase, offset)
+        };
         assert!(ok("roll", None, None).unwrap().is_some());
         assert!(ok("lateral", Some(Phase::In), Some(30.0)).is_ok());
         assert!(ok("lateral", Some(Phase::In), None).is_err());
@@ -521,7 +525,7 @@ mod tests {
                 "E=0 [header]",
                 "F=1 [header]",
                 "R=1 [declared]",
-                "phase=in [header, Fy]",
+                "phase=inphase [header, Fy]",
                 "offset_mm=30 [header, Tz/Fy]"
             ]
         );
@@ -536,8 +540,8 @@ mod tests {
             found,
             [
                 "B=0 declared, but header indicates 1",
-                "phase=anti declared, but header indicates in",
-                "phase=anti declared, but Fy indicates in",
+                "phase=antiphase declared, but header indicates inphase",
+                "phase=antiphase declared, but Fy indicates inphase",
                 "offset_mm=0 declared, but header indicates 30",
                 "offset_mm=0 declared, but Tz/Fy indicates 30"
             ]
@@ -585,7 +589,7 @@ mod tests {
         ]);
         let findings = res_findings(&lateral, "lateral", &lateral_conditions(Phase::Anti, 30.0));
         assert!(warnings(&findings).is_empty());
-        assert_eq!(findings[4].to_string(), "phase=anti [Fy]");
+        assert_eq!(findings[4].to_string(), "phase=antiphase [Fy]");
         assert_eq!(findings[5].to_string(), "offset_mm=30 [Tz/Fy]");
         let wrong = res_findings(&lateral, "lateral", &lateral_conditions(Phase::In, 0.0));
         assert_eq!(warnings(&wrong).len(), 2);

@@ -76,9 +76,9 @@ fn measurement_with_toe(path: &Path, setup: &str, toe_gain: f64) {
     scalar(&file, "schema_version", 2_u32);
     scalar(&file, "sample_count", force.len() as u64);
     string(&file, "source_kind", "measurement");
-    string(&file, "domain", "knc");
+    string(&file, "test", "knc");
     string(&file, "setup", setup);
-    string(&file, "test", "longitudinal");
+    string(&file, "subtest", "longitudinal");
     string(&file, "source_file", "fixture");
     let axis = file.create_group("axis").unwrap();
     string(&axis, "kind", "time");
@@ -295,7 +295,7 @@ fn b0_and_b1_files_in_one_run_cover_every_metric() {
     }
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["domains"].as_array().unwrap().len(), 2);
+    assert_eq!(report["tests"].as_array().unwrap().len(), 2);
     assert_eq!(report["summary"]["not_covered_count"], 0);
     assert_eq!(report["summary"]["metric_count"], 12);
 }
@@ -328,8 +328,8 @@ fn writes_report_with_all_six_plots_and_conditions() {
     }
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    assert_eq!(report["domains"][0]["test"], "longitudinal");
-    assert_eq!(report["domains"][0]["conditions"]["setup"], "b1e0f1r1");
+    assert_eq!(report["tests"][0]["subtest"], "longitudinal");
+    assert_eq!(report["tests"][0]["conditions"]["setup"], "b1e0f1r1");
     let series: Value = serde_json::from_str(
         &fs::read_to_string(output.join("knc-longitudinal-b1.plots.json")).unwrap(),
     )
@@ -507,7 +507,7 @@ fn compare_warns_when_longitudinal_conditions_differ() {
     );
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(
-        stderr.contains("test conditions differ (engine)"),
+        stderr.contains("subtest conditions differ (engine)"),
         "{stderr}"
     );
     assert!(stderr.contains("knc::longitudinal"), "{stderr}");
@@ -528,7 +528,7 @@ fn compare_report_carries_longitudinal_conditions_in_json_csv_and_footer() {
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
     assert_eq!(
-        report["candidates"][0]["domains"][0]["conditions"]["setup"],
+        report["candidates"][0]["tests"][0]["conditions"]["setup"],
         "b1e1f1r1"
     );
     let mut csv = csv::Reader::from_path(output.join("metrics.csv")).unwrap();
@@ -551,7 +551,7 @@ fn compare_report_carries_longitudinal_conditions_in_json_csv_and_footer() {
         assert!(footer.contains("b1e0f1r1"), "{footer}");
         assert!(footer.contains("b1e1f1r1"), "{footer}");
         assert!(
-            footer.contains("test conditions differ (engine)"),
+            footer.contains("subtest conditions differ (engine)"),
             "{footer}"
         );
     }

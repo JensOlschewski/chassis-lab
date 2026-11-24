@@ -57,8 +57,8 @@ struct AnalyzeState {
 #[serde(deny_unknown_fields)]
 struct ConvertState {
     input: Option<PathBuf>,
-    domain: String,
-    test: Option<String>,
+    test: String,
+    subtest: Option<String>,
     setup: Option<String>,
     output: Option<PathBuf>,
     force: bool,
@@ -423,8 +423,8 @@ mod tests {
             embed,
             convert: ConvertState {
                 input: Some(dir.join("data/run.res")),
-                domain: "knc".into(),
-                test: Some("vertical".into()),
+                test: "knc".into(),
+                subtest: Some("vertical".into()),
                 setup: Some("b1e0f1r1".into()),
                 output: Some(PathBuf::from("/elsewhere/out")),
                 force: true,

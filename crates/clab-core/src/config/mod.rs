@@ -4,7 +4,7 @@
 //! - [`function_first`] parses today's canonical `[input]`-table schema.
 //! - [`legacy`] parses the older unified (`[svc]`/`[vertical]`) and flat
 //!   schemas, and owns `VerticalConfig` construction — `function_first`
-//!   builds an equivalent `[vertical]`-shaped table for each KnC test and
+//!   builds an equivalent `[vertical]`-shaped table for each KnC subtest and
 //!   delegates to `legacy::parse_vertical` rather than duplicating it.
 //! - [`support`] holds the generic TOML/JSON helpers and signal-mapping
 //!   resolution shared by both.
@@ -62,7 +62,7 @@ pub struct ValidationConfig {
 pub const KNC_TESTS: [&str; 3] = ["vertical", "roll", "longitudinal"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Domain {
+pub enum Test {
     Svc,
     Knc,
 }
@@ -82,7 +82,7 @@ pub struct CaseConfig {
     pub signals: BTreeMap<String, SignalRef>,
     pub validation: Option<ValidationConfig>,
     pub vertical: Option<VerticalConfig>,
-    /// KnC roll test; shares the vertical test's configuration shape.
+    /// KnC roll subtest; shares the vertical subtest's configuration shape.
     pub roll: Option<VerticalConfig>,
     /// KnC longitudinal inputs, one per stored setup (`[[input.knc.longitudinal]]`);
     /// same shape as vertical, the travel window is unused.
@@ -95,15 +95,15 @@ pub struct CaseConfig {
     pub svc_measurement_signals: BTreeMap<String, MeasurementSignalRef>,
 }
 impl CaseConfig {
-    pub fn configured_domains(&self) -> Vec<Domain> {
-        let mut domains = Vec::new();
+    pub fn configured_tests(&self) -> Vec<Test> {
+        let mut tests = Vec::new();
         if !self.simulation_json.as_os_str().is_empty() {
-            domains.push(Domain::Svc);
+            tests.push(Test::Svc);
         }
         if self.vertical.is_some() || self.roll.is_some() || !self.longitudinal.is_empty() {
-            domains.push(Domain::Knc);
+            tests.push(Test::Knc);
         }
-        domains
+        tests
     }
 }
 /// Signal-map file path (if external) plus the parsed signal mapping,
@@ -177,8 +177,8 @@ fn validate_run_input_tables(
         validate_run_input_table(svc, run)?;
     }
     if let Some(knc) = input.get("knc").and_then(Value::as_table) {
-        for test in KNC_TESTS {
-            match knc.get(test) {
+        for subtest in KNC_TESTS {
+            match knc.get(subtest) {
                 Some(Value::Table(input)) => validate_run_input_table(input, run)?,
                 Some(Value::Array(inputs)) => {
                     for input in inputs.iter().filter_map(Value::as_table) {
@@ -223,7 +223,7 @@ fn validate_run_input_table(
 
 /// Load shared analysis configuration for a direct normalized input.
 ///
-/// `knc_test` names the KnC test the input belongs to, `None` for SVC. A KnC
+/// `knc_subtest` names the KnC subtest the input belongs to, `None` for SVC. A KnC
 /// input supplies the same file in both roles solely to build its typed
 /// mapping/setup configuration. The caller must only read its actual source.
 /// Direct input has no run manifest, so absent `[meta]` name and loadcase are
@@ -231,30 +231,30 @@ fn validate_run_input_table(
 pub fn load_config_with_input(
     config: impl AsRef<Path>,
     input: impl AsRef<Path>,
-    knc_test: Option<&str>,
+    knc_subtest: Option<&str>,
 ) -> Result<CaseConfig, Box<dyn std::error::Error>> {
     let (path, raw) = load_toml(config.as_ref())?;
     let mut root = function_first::load_function_role_files(&raw, &path)?;
     let input = absolute(&expand(input.as_ref())?)?.display().to_string();
     let mut role = toml::map::Map::new();
-    if let Some(test) = knc_test {
+    if let Some(subtest) = knc_subtest {
         let mut test_role = toml::map::Map::new();
         test_role.insert("file".into(), Value::String(input.clone()));
         let mut knc = toml::map::Map::new();
-        knc.insert(test.into(), Value::Table(test_role));
+        knc.insert(subtest.into(), Value::Table(test_role));
         role.insert("knc".into(), Value::Table(knc));
     } else {
         let mut svc = toml::map::Map::new();
         svc.insert("file".into(), Value::String(input));
         role.insert("svc".into(), Value::Table(svc));
     }
-    if let Some(test) = knc_test
+    if let Some(subtest) = knc_subtest
         && let Some(existing) = root
             .get_mut("input")
             .and_then(Value::as_table_mut)
             .and_then(|input| input.get_mut("knc"))
             .and_then(Value::as_table_mut)
-            .and_then(|knc| knc.get_mut(test))
+            .and_then(|knc| knc.get_mut(subtest))
             .and_then(Value::as_table_mut)
     {
         // Direct input replaces active source, but keeps configured static input.
@@ -343,7 +343,7 @@ mod tests {
     fn parses_legacy_inline() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nloadcase='l'\n[inputs]\nsimulation_json='x.json'\n[physics]\ngravity=9.8\n[signals.x]\nentity='e'\ncomponent='c'\nunit='u'\n").unwrap();
+        fs::write(&p,"[case]\nname='n'\ntest='svc'\nloadcase='l'\n[inputs]\nsimulation_json='x.json'\n[physics]\ngravity=9.8\n[signals.x]\nentity='e'\ncomponent='c'\nunit='u'\n").unwrap();
         let c = load_config(&p).unwrap();
         assert_eq!(c.signals["x"].entity, "e");
         assert_eq!(c.simulation_json, d.path().join("x.json"));
@@ -372,7 +372,7 @@ mod tests {
     fn rejects_unknown_and_bad_tolerance() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
-        fs::write(&p,"[case]\nname='n'\ndomain='svc'\nloadcase='l'\nextra=1\n[inputs]\nsimulation_json='x.json'\n[physics]\ngravity=9.8\n").unwrap();
+        fs::write(&p,"[case]\nname='n'\ntest='svc'\nloadcase='l'\nextra=1\n[inputs]\nsimulation_json='x.json'\n[physics]\ngravity=9.8\n").unwrap();
         assert!(load_config(&p).unwrap_err().to_string().contains("unknown"));
     }
 
@@ -427,7 +427,7 @@ mod tests {
         let p = d.path().join("case.toml");
         fs::write(&p, "[case]\nname='n'\nloadcase='l'\n[vertical.inputs]\nmeasurement_hdf5='measurement.h5'\nsimulation_hdf5='simulation.h5'\n[vertical.window]\nminimum_mm=-1\nmaximum_mm=1\nstep_mm=1\n[vertical.signals.x]\nentity='e'\ncomponent='c'\nunit='mm'\n[vertical.measurement_signals.x]\nentity='e'\nunit='mm'\n").unwrap();
         let config = load_config(&p).unwrap();
-        assert_eq!(config.configured_domains(), vec![Domain::Knc]);
+        assert_eq!(config.configured_tests(), vec![Test::Knc]);
     }
 
     #[test]
@@ -583,15 +583,15 @@ mod tests {
     }
 
     #[test]
-    fn splits_knc_domain_shared_and_vertical_test_mappings_into_separate_files() {
+    fn splits_knc_test_shared_and_vertical_test_mappings_into_separate_files() {
         let d = tempfile::tempdir().unwrap();
-        // Domain-shared (every knc test, not just vertical).
+        // Test-shared (every knc subtest, not just vertical).
         fs::write(
             d.path().join("knc-simulation-mappings.toml"),
             "[knc.front_left_travel]\nentity='fl'\ncomponent='travel'\nunit='mm'\n",
         )
         .unwrap();
-        // Vertical-test-specific.
+        // Vertical-subtest-specific.
         fs::write(
             d.path().join("knc-vertical-simulation-mappings.toml"),
             "[front_left_wheel_center_x]\nentity='fl'\ncomponent='x'\nunit='mm'\n",
@@ -634,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_domain_mapping_file_names_the_reference() {
+    fn missing_test_mapping_file_names_the_reference() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
         fs::write(
@@ -722,12 +722,12 @@ mod tests {
     }
 
     #[test]
-    fn meta_rejects_redundant_domain() {
+    fn meta_rejects_redundant_test() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("case.toml");
         fs::write(
             &p,
-            "[meta]\nname='n'\ndomain='svc'\nloadcase='l'\n[input.svc.simulation]\ninput_file='simulation.json'\n[mappings.svc.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
+            "[meta]\nname='n'\ntest='svc'\nloadcase='l'\n[input.svc.simulation]\ninput_file='simulation.json'\n[mappings.svc.total]\nentity='e'\ncomponent='c'\nunit='kg'\n",
         )
         .unwrap();
         assert!(load_config(&p).unwrap_err().to_string().contains("unknown"));
@@ -993,14 +993,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_input_whose_declared_domain_or_test_differs() {
+    fn rejects_input_whose_declared_test_or_test_differs() {
         let d = tempfile::tempdir().unwrap();
         let config = d.path().join("case.toml");
         for (attrs, expected) in [
-            (&[("domain", "svc")][..], "has domain 'svc', expected 'knc'"),
+            (&[("test", "svc")][..], "has test 'svc', expected 'knc'"),
             (
-                &[("domain", "knc"), ("test", "static")][..],
-                "has test 'static', expected 'vertical'",
+                &[("test", "knc"), ("subtest", "static")][..],
+                "has subtest 'static', expected 'vertical'",
             ),
         ] {
             let input = d.path().join("input.h5");
@@ -1023,7 +1023,7 @@ mod tests {
             assert!(message.contains(expected), "{message}");
             fs::remove_file(&input).unwrap();
         }
-        // Files without domain and test (converted earlier) are accepted.
+        // Files without test and subtest (converted earlier) are accepted.
         let input = d.path().join("input.h5");
         source_kind(&input, "simulation");
         fs::write(
@@ -1042,7 +1042,7 @@ mod tests {
     }
 
     #[test]
-    fn derives_direct_input_kinds_and_rejects_mixed_domains() {
+    fn derives_direct_input_kinds_and_rejects_mixed_tests() {
         let d = tempfile::tempdir().unwrap();
         let svc = d.path().join("svc.h5");
         let vertical = d.path().join("vertical.h5");

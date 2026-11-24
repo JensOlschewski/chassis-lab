@@ -1,4 +1,4 @@
-/** One plot of `knc-<test>.plots.json`, as written by the Python plot kernel (schema_version 1). */
+/** One plot of `knc-<subtest>.plots.json`, as written by the Python plot kernel (schema_version 1). */
 export interface PlotSource {
   label: string;
   color: string;
@@ -38,7 +38,7 @@ export interface Plot {
 
 export interface PlotsFile {
   schema_version: number;
-  test: string;
+  subtest: string;
   plots: Plot[];
 }
 
@@ -71,8 +71,8 @@ const signed = (value: number) => `${value < 0 ? "-" : "+"}${Number(Math.abs(val
 
 const suffix = (index: number) => (index === 0 ? "" : String(index + 1));
 
-/** Domains `[x0, x1, y0, y1]` per panel: a 2×2 grid, or a wide top panel over two for axle plots. */
-function panelDomains(count: number, bottom: number): [number, number, number, number][] {
+/** Tests `[x0, x1, y0, y1]` per panel: a 2×2 grid, or a wide top panel over two for axle plots. */
+function panelTests(count: number, bottom: number): [number, number, number, number][] {
   const { left, right, top, wspace, hspace } = GRID;
   const width = (right - left) / (2 + wspace);
   const height = (top - bottom) / (2 + hspace);
@@ -113,7 +113,7 @@ export function buildReportPlot(plot: Plot, width: number, logo: string) {
     ? Math.max(band, (tableTop + (rows ? TABLE.xlabelInches : 0)) / PAGE.height)
     : 0.1;
 
-  const domains = panelDomains(plot.panels.length, bottom);
+  const tests = panelTests(plot.panels.length, bottom);
   const traces: object[] = [];
   const layout: Record<string, unknown> = {};
   const annotations: object[] = [];
@@ -122,16 +122,16 @@ export function buildReportPlot(plot: Plot, width: number, logo: string) {
 
   plot.panels.forEach((panel, index) => {
     const s = suffix(index);
-    const [x0, x1, y0, y1] = domains[index];
+    const [x0, x1, y0, y1] = tests[index];
     layout[`xaxis${s}`] = {
       ...frame,
-      domain: [x0, x1],
+      test: [x0, x1],
       anchor: `y${s}`,
       title: { text: panel.x_label, font: { size: 10 * pt } },
     };
     layout[`yaxis${s}`] = {
       ...frame,
-      domain: [y0, y1],
+      test: [y0, y1],
       anchor: `x${s}`,
       title: { text: panel.y_label, font: { size: 10 * pt } },
       ...(plot.y_limits ? { range: plot.y_limits } : {}),

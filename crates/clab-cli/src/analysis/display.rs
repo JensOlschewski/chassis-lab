@@ -1,7 +1,7 @@
 //! Shared console/report naming for analysis metrics and warnings.
 //!
-//! `analyze` and `compare` both render per-domain metrics and warnings; this
-//! module is the one place that decides how a `(domain, test)` pair becomes
+//! `analyze` and `compare` both render per-test metrics and warnings; this
+//! module is the one place that decides how a `(test, subtest)` pair becomes
 //! a qualifier, so the two commands can never drift apart.
 
 use std::io::{IsTerminal, Write};
@@ -28,8 +28,8 @@ pub(crate) fn paint_if(text: &str, color: &str, terminal: bool) -> String {
 /// Shared `analyze` CSV layout, including empty conditions for SVC rows.
 pub(crate) const ANALYSIS_CSV_COLUMNS: [&str; 9] = [
     "run",
-    "domain",
     "test",
+    "subtest",
     "metric",
     "unit",
     "value",
@@ -54,17 +54,17 @@ pub(crate) fn print_json(value: &serde_json::Value) {
     println!("{value}");
 }
 
-/// Envelope of one domain section in `analyze --json` and `compare --json`.
+/// Envelope of one test section in `analyze --json` and `compare --json`.
 /// `extra` holds command-specific keys merged beside the shared ones.
 pub(crate) fn section_json(
     title: &str,
-    (domain, test): (&str, Option<&str>),
+    (test, subtest): (&str, Option<&str>),
     metrics: Vec<serde_json::Value>,
     warnings: &[String],
     extra: serde_json::Value,
 ) -> serde_json::Value {
     let mut section = serde_json::json!({
-        "title": title, "domain": domain, "test": test,
+        "title": title, "test": test, "subtest": subtest,
         "metrics": metrics, "warnings": warnings,
     });
     if let (Some(section), Some(extra)) = (section.as_object_mut(), extra.as_object()) {
@@ -73,16 +73,16 @@ pub(crate) fn section_json(
     serde_json::json!({ "section": section })
 }
 
-/// Qualified display name for a metric row: `domain::metric` or
-/// `domain::test::metric`, e.g. `svc::front_left_mass_kg` or
+/// Qualified display name for a metric row: `test::metric` or
+/// `test::subtest::metric`, e.g. `svc::front_left_mass_kg` or
 /// `knc::vertical::bump_steer_front_left_deg_per_mm`.
-pub(crate) fn qualified_metric_name(domain: &str, test: Option<&str>, metric: &str) -> String {
-    format!("{}::{metric}", qualifier(domain, test))
+pub(crate) fn qualified_metric_name(test: &str, subtest: Option<&str>, metric: &str) -> String {
+    format!("{}::{metric}", qualifier(test, subtest))
 }
 
 /// Only the concise summary is printed and listed in `report.json`; `metrics.csv` keeps the full catalog.
-pub(crate) fn show_metric(domain: &str, test: Option<&str>, metric: &str) -> bool {
-    console_metric_order(domain, test, metric).is_some()
+pub(crate) fn show_metric(test: &str, subtest: Option<&str>, metric: &str) -> bool {
+    console_metric_order(test, subtest, metric).is_some()
 }
 
 /// The metrics the console shows, in console order: what `report.json` lists.
@@ -90,8 +90,8 @@ pub(crate) fn show_metric(domain: &str, test: Option<&str>, metric: &str) -> boo
 pub(crate) fn console_ordered(metrics: &[serde_json::Value]) -> Vec<serde_json::Value> {
     let rank = |metric: &serde_json::Value| {
         console_metric_order(
-            metric["domain"].as_str().unwrap_or_default(),
-            metric["test"].as_str(),
+            metric["test"].as_str().unwrap_or_default(),
+            metric["subtest"].as_str(),
             metric["metric"].as_str().unwrap_or_default(),
         )
     };
@@ -104,13 +104,13 @@ pub(crate) fn console_ordered(metrics: &[serde_json::Value]) -> Vec<serde_json::
     shown
 }
 
-/// Console order follows each KnC test's requested list; reports list the same.
+/// Console order follows each KnC subtest's requested list; reports list the same.
 pub(crate) fn console_metric_order(
-    domain: &str,
-    test: Option<&str>,
+    test: &str,
+    subtest: Option<&str>,
     metric: &str,
 ) -> Option<usize> {
-    if (domain, test) == ("knc", Some("vertical")) {
+    if (test, subtest) == ("knc", Some("vertical")) {
         return Some(
             corner_metric_order(
                 metric,
@@ -129,7 +129,7 @@ pub(crate) fn console_metric_order(
             .unwrap_or(usize::MAX),
         );
     }
-    if (domain, test) == ("knc", Some("longitudinal")) {
+    if (test, subtest) == ("knc", Some("longitudinal")) {
         return Some(
             corner_metric_order(
                 metric,
@@ -142,7 +142,7 @@ pub(crate) fn console_metric_order(
             .unwrap_or(usize::MAX),
         );
     }
-    if (domain, test) != ("knc", Some("roll")) {
+    if (test, subtest) != ("knc", Some("roll")) {
         return Some(0);
     }
     corner_metric_order(
@@ -192,35 +192,39 @@ fn corner_metric_order(metric: &str, families: &[(&str, &str, usize)]) -> Option
     None
 }
 
-/// Qualifier for a domain/test pair: `domain` or `domain::test`.
-fn qualifier(domain: &str, test: Option<&str>) -> String {
-    match test {
-        Some(test) => format!("{domain}::{test}"),
-        None => domain.into(),
+/// Qualifier for a test/subtest pair: `test` or `test::subtest`.
+fn qualifier(test: &str, subtest: Option<&str>) -> String {
+    match subtest {
+        Some(subtest) => format!("{test}::{subtest}"),
+        None => test.into(),
     }
 }
 
-/// Tag one warning message with its domain/test qualifier, e.g.
+/// Tag one warning message with its test/subtest qualifier, e.g.
 /// `knc::vertical: metric 'bump_steer_front_left_deg_per_mm' unavailable: ...`.
 pub(crate) fn tag_warning(
-    domain: &str,
-    test: Option<&str>,
+    test: &str,
+    subtest: Option<&str>,
     message: impl std::fmt::Display,
 ) -> String {
-    format!("{}: {message}", qualifier(domain, test))
+    format!("{}: {message}", qualifier(test, subtest))
 }
 
-/// Tag every warning produced by one domain/test, in place of tagging each
+/// Tag every warning produced by one test/subtest, in place of tagging each
 /// `warnings.push` call site individually.
-pub(crate) fn tag_warnings(domain: &str, test: Option<&str>, warnings: Vec<String>) -> Vec<String> {
+pub(crate) fn tag_warnings(
+    test: &str,
+    subtest: Option<&str>,
+    warnings: Vec<String>,
+) -> Vec<String> {
     warnings
         .into_iter()
-        .map(|message| tag_warning(domain, test, message))
+        .map(|message| tag_warning(test, subtest, message))
         .collect()
 }
 
 /// Warning when an HDF5 signal declares no unit and a mapped unit from
-/// configuration is substituted. Shared by every domain that reads HDF5
+/// configuration is substituted. Shared by every test that reads HDF5
 /// signals (SVC and KnC vertical).
 pub(crate) fn missing_unit_warning(entity: &str, component: &str, declared_unit: &str) -> String {
     format!(
@@ -232,8 +236,8 @@ pub(crate) fn missing_unit_warning(entity: &str, component: &str, declared_unit:
 /// Shared by every required lookup that resolves a canonical name before
 /// reading its raw signal (SVC and KnC vertical; simulation and
 /// measurement) so the message never drifts between call sites.
-pub(crate) fn mapping_missing(domain: &str, name: &str) -> String {
-    format!("{domain} signal mapping missing: {name}")
+pub(crate) fn mapping_missing(test: &str, name: &str) -> String {
+    format!("{test} signal mapping missing: {name}")
 }
 
 #[cfg(test)]
@@ -245,7 +249,7 @@ mod tests {
     #[test]
     fn report_metrics_are_the_console_ones_in_console_order() {
         let metric =
-            |name: &str| serde_json::json!({"domain": "knc", "test": "roll", "metric": name});
+            |name: &str| serde_json::json!({"test": "knc", "subtest": "roll", "metric": name});
         let listed = console_ordered(&[
             metric("roll_ride_rate_front_left_n_per_mm"),
             metric("roll_moment_peak_nm"),

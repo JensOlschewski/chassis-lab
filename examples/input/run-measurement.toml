@@ -3,8 +3,8 @@
 # Convert raw results first (run from the repository root):
 # SVC measurement values are provided in the committed JSON reference.
 #
-# clab convert examples/input/raw-measurement/example-measurement-knc-vertical.acd -d knc -t vertical -o examples/input/generated-measurement-knc-vertical.h5
-# clab convert examples/input/raw-measurement/example-measurement-knc-roll.acd -d knc -t roll -o examples/input/generated-measurement-knc-roll.h5
+# clab convert examples/input/raw-measurement/example-measurement-knc-vertical.acd --test knc --subtest vertical -o examples/input/generated-measurement-knc-vertical.h5
+# clab convert examples/input/raw-measurement/example-measurement-knc-roll.acd --test knc --subtest roll -o examples/input/generated-measurement-knc-roll.h5
 
 [meta]
 name = "example_run_measurement"

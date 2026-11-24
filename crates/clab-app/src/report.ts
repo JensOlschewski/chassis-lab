@@ -5,29 +5,29 @@ import { Plot, PlotsFile, drawReportPlot } from "./reportplot";
 import { ComparedMetric, ComparisonSection, Section, Series, renderComparison, renderSection } from "./sections";
 
 interface ReportMetric {
-  domain: string;
-  test: string | null;
+  test: string;
+  subtest: string | null;
   metric: string;
   unit: string;
   value: number | null;
 }
 
-interface ReportDomain {
-  domain: string;
-  test?: string;
+interface ReportTest {
+  test: string;
+  subtest?: string;
 }
 
 interface AnalysisFile {
   command?: "analyze";
-  domains: ReportDomain[];
+  tests: ReportTest[];
   metrics: ReportMetric[];
   warnings: string[];
 }
 
 /** A compared metric row as written by `clab compare`, one per candidate. */
 interface CompareMetric {
-  domain: string;
-  test: string | null;
+  test: string;
+  subtest: string | null;
   metric: string;
   unit: string;
   baseline_value: number | null;
@@ -44,11 +44,11 @@ interface CompareInput {
 
 export interface CompareFile {
   command: "compare";
-  domains: ReportDomain[];
+  tests: ReportTest[];
   baseline: CompareInput;
   candidates: (CompareInput & {
     metrics: CompareMetric[];
-    domains: { domain: string; test: string | null; status: string }[];
+    tests: { test: string; subtest: string | null; status: string }[];
   })[];
 }
 
@@ -63,36 +63,36 @@ export async function readReport(directory: string): Promise<ReportFile> {
 
 export const roleOf = (index: number) => (index === 0 ? "Baseline" : `Candidate ${index}`);
 
-const keyOf = ({ domain, test }: { domain: string; test?: string | null }) => (test ? `${domain}::${test}` : domain);
+const keyOf = ({ test, subtest }: { test: string; subtest?: string | null }) => (subtest ? `${test}::${subtest}` : test);
 
-/** The order of the live results; `report.json` lists domains sorted by key instead. */
-const DOMAIN_ORDER = ["svc", "knc::vertical", "knc::roll", "knc::longitudinal"];
+/** The order of the live results; `report.json` lists tests sorted by key instead. */
+const TEST_ORDER = ["svc", "knc::vertical", "knc::roll", "knc::longitudinal"];
 
-const inResultOrder = (domains: ReportDomain[]) =>
-  [...domains].sort((a, b) => DOMAIN_ORDER.indexOf(keyOf(a)) - DOMAIN_ORDER.indexOf(keyOf(b)));
+const inResultOrder = (tests: ReportTest[]) =>
+  [...tests].sort((a, b) => TEST_ORDER.indexOf(keyOf(a)) - TEST_ORDER.indexOf(keyOf(b)));
 
-const titleOf = (domain: ReportDomain) =>
-  domain.domain === "svc" ? "SVC" : `KnC ${domain.test!.charAt(0).toUpperCase()}${domain.test!.slice(1)}`;
+const titleOf = (test: ReportTest) =>
+  test.test === "svc" ? "SVC" : `KnC ${test.subtest!.charAt(0).toUpperCase()}${test.subtest!.slice(1)}`;
 
-/** Cards from `report.json`: metrics and warnings grouped by domain and test, as in the Analyze tab. */
+/** Cards from `report.json`: metrics and warnings grouped by test and subtest, as in the Analyze tab. */
 export function sectionsFromReport(report: AnalysisFile): Section[] {
   const warnings = [...report.warnings];
-  const sections: Section[] = inResultOrder(report.domains).map((domain) => {
-    const key = keyOf(domain);
+  const sections: Section[] = inResultOrder(report.tests).map((test) => {
+    const key = keyOf(test);
     const prefix = `${key}: `;
     const own = warnings.filter((warning) => warning.startsWith(prefix));
     own.forEach((warning) => warnings.splice(warnings.indexOf(warning), 1));
     return {
-      domain: domain.domain,
-      test: domain.test,
-      title: titleOf(domain),
+      test: test.test,
+      subtest: test.subtest,
+      title: titleOf(test),
       metrics: report.metrics
         .filter((metric) => keyOf(metric) === key)
         .map(({ metric, unit, value }) => ({ name: metric, unit, value })),
       warnings: own.map((warning) => warning.slice(prefix.length)),
     };
   });
-  // Warnings that name no domain would otherwise vanish.
+  // Warnings that name no test would otherwise vanish.
   if (warnings.length > 0) sections.push({ title: "General", metrics: [], warnings });
   return sections;
 }
@@ -103,10 +103,10 @@ export function comparisonFromReport(report: CompareFile): { series: Series[]; s
     path: input.path,
     name: label ?? roleOf(index),
   }));
-  const sections = inResultOrder(report.domains).map((domain) => {
-    const key = keyOf(domain);
+  const sections = inResultOrder(report.tests).map((test) => {
+    const key = keyOf(test);
     const rows = report.candidates.map((candidate) => ({
-      skipped: candidate.domains.some((entry) => keyOf(entry) === key && entry.status === "not compared"),
+      skipped: candidate.tests.some((entry) => keyOf(entry) === key && entry.status === "not compared"),
       metrics: candidate.metrics.filter((metric) => keyOf(metric) === key),
     }));
     const names = [...new Set(rows.flatMap(({ metrics }) => metrics.map(({ metric }) => metric)))];
@@ -125,7 +125,7 @@ export function comparisonFromReport(report: CompareFile): { series: Series[]; s
         ),
       };
     });
-    return { title: titleOf(domain), metrics, warnings: [], domain: domain.domain, test: domain.test };
+    return { title: titleOf(test), metrics, warnings: [], test: test.test, subtest: test.subtest };
   });
   return { series, sections };
 }
@@ -137,7 +137,7 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
   const picker = document.querySelector<HTMLSelectElement>("#report-plot")!;
   const chart = document.querySelector<HTMLElement>("#report-chart")!;
 
-  let plots: { plot: Plot; test: string }[] = [];
+  let plots: { plot: Plot; subtest: string }[] = [];
   let axes: string[] = [];
 
   const selectedTool = () => document.querySelector<HTMLElement>("#report-tools [aria-pressed=true]")?.dataset.tool;
@@ -166,22 +166,22 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
     resizing = window.setTimeout(() => !viewer.hidden && draw(), 150);
   });
 
-  /** Plots of every KnC test the report has; a test without a plots file is named in the status. */
-  async function loadPlots(directory: string, domains: ReportDomain[]): Promise<string[]> {
+  /** Plots of every KnC subtest the report has; a subtest without a plots file is named in the status. */
+  async function loadPlots(directory: string, tests: ReportTest[]): Promise<string[]> {
     plots = [];
     const groups: HTMLOptGroupElement[] = [];
     const missing: string[] = [];
-    for (const domain of inResultOrder(domains).filter((domain) => domain.domain === "knc")) {
-      const stems = domain.test === "longitudinal" ? ["longitudinal-b0", "longitudinal-b1"] : [domain.test!];
+    for (const test of inResultOrder(tests).filter((test) => test.test === "knc")) {
+      const stems = test.subtest === "longitudinal" ? ["longitudinal-b0", "longitudinal-b1"] : [test.subtest!];
       for (const stem of stems) {
-        const label = stems.length > 1 ? `${titleOf(domain)} (brakes ${stem.endsWith("b1") ? "on" : "off"})` : titleOf(domain);
+        const label = stems.length > 1 ? `${titleOf(test)} (brakes ${stem.endsWith("b1") ? "on" : "off"})` : titleOf(test);
         try {
           const file = JSON.parse(await readFile(directory, `knc-${stem}.plots.json`)) as PlotsFile;
           const group = document.createElement("optgroup");
           group.label = label;
           for (const plot of file.plots) {
             group.append(new Option(plot.name, String(plots.length)));
-            plots.push({ plot, test: domain.test! });
+            plots.push({ plot, subtest: test.subtest! });
           }
           groups.push(group);
         } catch {
@@ -198,8 +198,8 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
       sectionsRoot.replaceChildren();
       viewer.hidden = true;
     },
-    /** Shows the report in `directory`, starting at the plots of `test` if given. The pane must be visible. */
-    async open(directory: string, test?: string) {
+    /** Shows the report in `directory`, starting at the plots of `subtest` if given. The pane must be visible. */
+    async open(directory: string, subtest?: string) {
       this.clear();
       show("Opening…");
       try {
@@ -210,14 +210,14 @@ export function setupReport(show: (message: string, ok?: boolean) => void) {
         } else {
           sectionsRoot.replaceChildren(...sectionsFromReport(report).map((section) => renderSection(section)));
         }
-        const missing = await loadPlots(directory, report.domains);
+        const missing = await loadPlots(directory, report.tests);
         viewer.hidden = plots.length === 0;
         show(
           missing.length > 0
             ? `No plot data for ${missing.join(", ")}; run ${report.command === "compare" ? "Compare" : "Analyze"} with a report folder again.`
             : "",
         );
-        const first = plots.findIndex((entry) => entry.test === test);
+        const first = plots.findIndex((entry) => entry.subtest === subtest);
         if (first >= 0) picker.value = String(first);
         if (plots.length > 0) await draw();
       } catch (error) {
