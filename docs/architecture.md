@@ -22,7 +22,7 @@ The target `0.4.0` pipeline is:
 ```text
 Adams .res / HDF5 v3 / Lommel .acd / TOML
                        ↓
-        Rust CLI, parsers, domain model, conventions
+        Rust CLI, parsers, test model, conventions
                        ↓
           normalized f64 arrays plus typed metadata
                        ↓
@@ -42,14 +42,14 @@ second CLI or an owner of engineering files.
 |---|---|
 | CLI parsing, help, completion, errors, and exit codes | Rust |
 | TOML configuration, path resolution, and reference JSON | Rust |
-| Domain types, units, corners, signs, scales, and baselines | Rust |
+| Test types, units, corners, signs, scales, and baselines | Rust |
 | `.res` and `.acd` conversion; normalized HDF5 parsing | Rust |
 | Conversion, orchestration, validation policy, and provenance | Rust |
 | Console, JSON, CSV, SVG file handling, and overwrite safety | Rust |
 | Signal processing, interpolation, fitting, and curve algorithms | Python |
 | Headless deterministic plotting | Python |
 
-Stable domain calculations that do not benefit from the scientific Python
+Stable test calculations that do not benefit from the scientific Python
 ecosystem, including SVC calculations and tolerance comparison, belong in Rust.
 Python remains appropriate for evolving NumPy/SciPy algorithms and Matplotlib
 rendering.
@@ -93,17 +93,15 @@ capabilities:
 
 Vertical migration: `[vertical.inputs].measurement_hdf5` is required. Convert
 legacy ACD inputs with `clab convert`; validation never reads raw ACD.
-| `clab convert-res INPUT` | `clab convert INPUT -d DOMAIN [-t TEST --setup CODE [--phase P --offset MM]]` | Writes normalized HDF5 with `domain`, `test` and the declared KnC conditions |
+| `clab convert-res INPUT` | `clab convert INPUT -d TEST [-t TEST --setup CODE [--phase P --offset MM]]` | Writes normalized HDF5 with `test`, `subtest` and the declared KnC conditions |
 
 `clab inspect FILE` accepts normalized simulation or measurement HDF5 files
 (`.h5` or `.hdf5`) only. Convert raw `.res` or `.acd` inputs first with
 `clab convert`. `--signals` combines summary and signal listing, while `--match`
 implies signal listing.
 
-`clab analyze CONFIG RUN` analyzes configured SVC inputs. Repeatable
-`--domain DOMAIN` options select a subset. This avoids conflicting boolean flags
-and scales to later validation domains. Multi-domain reports use deterministic
-filenames below `--output`.
+`clab analyze CONFIG RUN` analyzes configured inputs. Reports use deterministic
+filenames below `--report`.
 
 Temporary hidden aliases may preserve old flat command forms during migration.
 Read-only commands never convert or write implicitly. JSON and CSV fields,
@@ -118,9 +116,9 @@ remain compatible until an explicitly versioned contract change.
 - `py-chassislab/src/chassis_lab/` contains the embedded KnC kernels:
   `knc_kernel.py` (branch detection, least-squares metric fit, interpolation,
   metric catalog evaluation), `knc_plot_kernel.py` (report plotting), and one
-  thin test kernel each, `knc_vertical_kernel.py` and `knc_roll_kernel.py`,
-  holding that test's metric and plot catalog. Rust loads the core, the plot
-  kernel when the test plots, and the test kernel.
+  thin subtest kernel each, `knc_vertical_kernel.py` and `knc_roll_kernel.py`,
+  holding that subtest's metric and plot catalog. Rust loads the core, the plot
+  kernel when the subtest plots, and the subtest kernel.
 - `examples/` stores synthetic inputs, reference values, configuration, and
   signal-map TOML files; real engineering data stays local.
 - `py-chassislab/tests/` contains Python and cross-language tests; Rust tests
@@ -133,7 +131,7 @@ Supported canonical schema version: `1`.
 
 ```text
 /
-├── attrs: schema_version (2), source_kind, domain, test, sample_count, signal_count, source_file
+├── attrs: schema_version (2), source_kind, test, subtest, sample_count, signal_count, source_file
 ├── axis/attrs: kind, unit
 ├── axis/values            uint64 [sample_index] or float64 [time]
 ├── signals/<safe-name>/values
@@ -185,8 +183,8 @@ and roll normalization. Roll axle input signals (`total_roll_angle` and
 `front|rear_suspension_roll_angle`) keep absolute values; only corner
 signals are normalized. Every normalized curve records the subtracted
 `offset`, so absolute positions stay recoverable. SVC, vertical and roll
-combine in one run manifest for `analyze` and `compare`; each KnC test is its
-own report domain with its own normalization. Nested simulation/measurement role tables remain compatible.
+combine in one run manifest for `analyze` and `compare`; each KnC subtest is its
+own report test with its own normalization. Nested simulation/measurement role tables remain compatible.
 
 Roll moments are calculated by the shared Python kernel for both source kinds,
 not read from mapped axle or rig moment channels. The kernel restores absolute
@@ -200,42 +198,42 @@ moment about a migrating roll center. Exported suspension-moment channels are
 not mapped or used by these stiffness metrics.
 
 External role files can replace inline sections, at any depth — a whole
-`source_kind` under `[mappings]`, one domain under it, or one test under that
-domain, can each point at its own file (`examples/` combines every domain
+`source_kind` under `[mappings]`, one test under it, or one subtest under that
+test, can each point at its own file (`examples/` combines every test
 into one file per source_kind, `simulation-mappings.toml` /
-`measurement-mappings.toml`; splitting further per domain or test, or
+`measurement-mappings.toml`; splitting further per test or subtest, or
 combining into one file overall, works identically — see `merged_mapping` in
 `crates/clab-core/src/config.rs`). Input JSON combines SVC and
 KnC paths; setup JSON contains setup and window data; mappings TOML contains
-`[simulation]` and `[measurement]` bases plus domain and test overrides;
-validation TOML contains optional policy. `[meta]` contains optional run `name` and `loadcase`; domain is derived.
+`[simulation]` and `[measurement]` bases plus test and subtest overrides;
+validation TOML contains optional policy. `[meta]` contains optional run `name` and `loadcase`; test is derived.
 Run metadata overrides shared configuration metadata, and absent values report
 as `undefined`. Paths resolve relative to main config.
 
 KnC setup lives under `[setup.knc]`; `[setup.knc.vertical]` and
-`[setup.knc.roll]` hold test-only values and override `[setup.knc]` key by key
+`[setup.knc.roll]` hold subtest-only values and override `[setup.knc]` key by key
 (nested tables deep-merge).
-The test setup (brakes, engine, ARBs) is not configured: it is stored in the
+The subtest setup (brakes, engine, ARBs) is not configured: it is stored in the
 HDF5 by `clab convert --setup`. Required for every KnC input, including vertical
 and roll; missing setup requires reconversion. Old setup flags and `[meta]`
 are rejected.
 
 `inspect` shows stored setup, phase and offset. `analyze` carries a `conditions`
-object in each KnC JSON section and report domain; the PDF shows it beside the
+object in each KnC JSON section and report test; the PDF shows it beside the
 input name. Console output stays minimal: title, metric count, metrics. `metrics.csv` appends `setup`, `phase`, `offset_mm`; SVC cells stay
 empty. Phase and offset apply only to lateral tests and are omitted from other
 JSON conditions. No filename inference or missing-case substitution.
 
-`compare` pairs matching tests only. Different tests are refused for single-test
-inputs; a missing domain in a multi-test run stays `not compared`. Setup, phase
+`compare` pairs matching tests only. Different tests are refused for single-subtest
+inputs; a missing test in a multi-subtest run stays `not compared`. Setup, phase
 or offset differences warn and continue, without an opt-in flag. Warnings name
 both inputs and changed conditions; console warnings, JSON and PDF retain them. Compare
 CSV appends per-input labels and conditions. Metric formulas and tolerance exit
 codes stay unchanged. Condition source tags remain unavailable until HDF5 stores
 them (Refs #204).
 
-Settings are written directly in `[setup.knc]` or `[setup.knc.<test>]`; there is
-no travel window. Secant widths are per test, named for their unit:
+Settings are written directly in `[setup.knc]` or `[setup.knc.<subtest>]`; there is
+no travel window. Secant widths are per subtest, named for their unit:
 `metric_window_mm` (vertical and roll, default 10), `metric_window_deg`
 (roll only, default 2) and `metric_window_n` (longitudinal only, default 1000).
 The metrics fit one full cycle chosen by `metric_cycle` (default 1), and
@@ -252,7 +250,7 @@ A cycle runs from one upper reversal to the next: a falling branch and the
 rising branch after it. The partial branch before the first reversal is never
 part of a cycle, so `metric_cycle = 1` is the first full cycle.
 Branch detection and edge trimming have four more keys, set in `[setup.knc]` or
-`[setup.knc.<test>]` and also overridable in `[metric.measurement]` and
+`[setup.knc.<subtest>]` and also overridable in `[metric.measurement]` and
 `[metric.simulation]`; unset keys keep
 the kernel default and add no warning: `reversal_min_fraction` (default 0.01; a
 reversal that travels back less than this fraction of the total travel span does
@@ -266,9 +264,9 @@ in `[metric]` are the `ride_frequency` metric's per-corner mass fallback: this r
 own SVC `<corner>_mass_kg` is used automatically when SVC and KnC vertical run
 together, and a configured value overrides it. Signal maps contain
 canonical names, entities, components, and units. Every mapping table ends
-in the same shape: `source_kind.domain[.test][.signals].<canonical_name>`
+in the same shape: `source_kind.test[.subtest][.signals].<canonical_name>`
 (`source_kind` is `simulation` or `measurement`, always the outermost key),
-so a simulation and a measurement table for the same domain/test sit side by
+so a simulation and a measurement table for the same test/subtest sit side by
 side instead of one being an unmarked default — e.g. `[simulation.svc]` /
 `[measurement.svc]`, `[simulation.knc.vertical]` /
 `[measurement.knc.vertical]`. The `.signals` level and the trailing
@@ -276,7 +274,7 @@ canonical-name level can both collapse — `[simulation.knc.vertical.signals.x]`
 `[simulation.knc.vertical.x]`, and a single flat
 `[simulation.knc.vertical.x]` header all resolve the same way; `unit`/`entity`
 (and `component` for simulation) always sit one level below the canonical
-name. Mapping precedence is shared < domain < test; child values override,
+name. Mapping precedence is shared < test < subtest; child values override,
 child-only values add, missing values inherit, and nested tables deep-merge.
 External mapping files use the same merge rules. SVC tolerances are
 optional; without them, comparisons are informational. Paths resolve
@@ -364,10 +362,10 @@ baseline file without a match gets no plots. A metric that either side lists as
 Tolerances use `[validation.knc.longitudinal.tolerances]` by metric name; a
 direct HDF5 input compares the metrics its stored setup covers.
 
-Comparison PDFs live directly in `plots/knc/<test>/`, without a `comparison/`
+Comparison PDFs live directly in `plots/knc/<subtest>/`, without a `comparison/`
 subdirectory. `--debug` uses the same diagnostics as `analyze` for every
 measurement series (baseline `series_0`, then candidates), saved separately in
-`plots/knc/<test>/debug/`, never overlaid. Diagnostic footers name the source
+`plots/knc/<subtest>/debug/`, never overlaid. Diagnostic footers name the source
 HDF5 file, including when the input is a run manifest. Longitudinal diagnostics
 carry the setup suffix and show only the metrics covered by that brake state.
 
@@ -379,7 +377,7 @@ are `knc-longitudinal-b0.json` and `knc-longitudinal-b1.json`. `analyze` prints
 warning details only with `--verbose`; otherwise one summary line.
 
 `--debug` (measurement input only) adds fit debug plots under
-`plots/knc/<test>/debug/`: per corner, branch detection of the sweep signal and
+`plots/knc/<subtest>/debug/`: per corner, branch detection of the sweep signal and
 the response with the metric cycle and the fit window marked. They cover
 longitudinal `toe`, `castor` (B1) and `wc_x` (B0), vertical bump steer, camber and
 spin, and the six roll steer and camber plots.

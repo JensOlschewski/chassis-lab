@@ -31,13 +31,13 @@ fn scalar<T: hdf5::H5Type>(location: &Location, name: &str, value: T) {
         .unwrap();
 }
 
-fn header(file: &File, source_kind: &str, test: &str, samples: u64) {
+fn header(file: &File, source_kind: &str, subtest: &str, samples: u64) {
     scalar(file, "schema_version", 2_u32);
     scalar(file, "sample_count", samples);
     string(file, "source_kind", source_kind);
-    string(file, "domain", "knc");
+    string(file, "test", "knc");
     string(file, "setup", "b1e0f1r1");
-    string(file, "test", test);
+    string(file, "subtest", subtest);
     string(file, "source_file", "fixture");
 }
 
@@ -136,9 +136,9 @@ fn roll_measurement(path: &Path, roll: &[f64], front_moment: f64) {
     file.close().unwrap();
 }
 
-fn roll_simulation(path: &Path, test: &str) {
+fn roll_simulation(path: &Path, subtest: &str) {
     let file = File::create(path).unwrap();
-    header(&file, "simulation", test, 3);
+    header(&file, "simulation", subtest, 3);
     let axis = file.create_group("axis").unwrap();
     string(&axis, "kind", "sample_index");
     string(&axis, "unit", "");
@@ -182,7 +182,7 @@ fn roll_simulation(path: &Path, test: &str) {
             corner,
             "load",
             "newton",
-            if test == "static" {
+            if subtest == "static" {
                 [6000., 7000., 8000.]
             } else {
                 [4000., 4000. - side * gain, 4000. + side * gain]
@@ -192,14 +192,14 @@ fn roll_simulation(path: &Path, test: &str) {
             corner,
             "cp_y",
             "mm",
-            if test == "static" {
+            if subtest == "static" {
                 [side * 0.01; 3]
             } else {
                 [-side * 750., -side * 750. + 1., -side * 750. + 2.]
             },
         );
     }
-    if test == "roll" {
+    if subtest == "roll" {
         add("body", "roll", "deg", [0., -1., 1.]);
     }
     scalar(
@@ -331,7 +331,7 @@ fn analyzes_roll_measurement_as_curve_bundle() {
     assert!(String::from_utf8_lossy(&result.stdout).contains("KnC Roll"));
     let detail: Value =
         serde_json::from_str(&fs::read_to_string(output.join("knc-roll.json")).unwrap()).unwrap();
-    assert_eq!(detail["test"], "roll");
+    assert_eq!(detail["subtest"], "roll");
     // Left rises and right drops: corner mapping is not mirrored.
     assert_eq!(
         values(curve(&detail, "front_left", "wheel_center_z")),
@@ -363,7 +363,7 @@ fn analyzes_roll_measurement_as_curve_bundle() {
         report["summary"]["metric_count"],
         report["metrics"].as_array().unwrap().len()
     );
-    assert_eq!(report["domains"][0]["test"], "roll");
+    assert_eq!(report["tests"][0]["subtest"], "roll");
     assert!(
         output
             .join("plots/knc/roll/knc_roll_wcz_vs_wcx_b1e0f1r1.pdf")
@@ -473,7 +473,7 @@ fn analyzes_roll_metrics_from_measurement_cycles() {
             .clone()
     };
     let stiffness = metric("roll_stiffness_front_nm_per_deg");
-    assert_eq!(stiffness["test"], "roll");
+    assert_eq!(stiffness["subtest"], "roll");
     assert_eq!(stiffness["interval_deg"], serde_json::json!([-2., 2.]));
     assert!((stiffness["value"].as_f64().unwrap() - 500.).abs() < 1e-6);
     let distribution = metric("roll_stiffness_distribution_front_pct")["value"]
@@ -655,11 +655,11 @@ fn analyzes_and_compares_roll_combined_with_vertical_in_one_run() {
     assert!(stdout.contains("KnC Roll"), "{stdout}");
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("report.json")).unwrap()).unwrap();
-    let tests = report["domains"]
+    let tests = report["tests"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|domain| (domain["domain"].clone(), domain["test"].clone()))
+        .map(|test| (test["test"].clone(), test["subtest"].clone()))
         .collect::<Vec<_>>();
     assert_eq!(
         tests,
@@ -773,8 +773,8 @@ fn compares_roll_metrics_between_measurements() {
     let report: Value =
         serde_json::from_str(&fs::read_to_string(output.join("knc-roll.json")).unwrap()).unwrap();
     assert_eq!(
-        report["domains"],
-        serde_json::json!([{"domain": "knc", "test": "roll", "conditions": {"setup": "b1e0f1r1"}}])
+        report["tests"],
+        serde_json::json!([{"test": "knc", "subtest": "roll", "conditions": {"setup": "b1e0f1r1"}}])
     );
     let stiffness = report["candidates"][0]["metrics"]
         .as_array()
@@ -782,7 +782,7 @@ fn compares_roll_metrics_between_measurements() {
         .iter()
         .find(|metric| metric["metric"] == "roll_stiffness_front_nm_per_deg")
         .unwrap();
-    assert_eq!(stiffness["test"], "roll");
+    assert_eq!(stiffness["subtest"], "roll");
     assert!((stiffness["difference"].as_f64().unwrap() - 100.).abs() < 1e-6);
     assert!(
         output

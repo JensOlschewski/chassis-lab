@@ -12,7 +12,7 @@ fn clab() -> Command {
 /// matching `write_simulation_json`'s entity/component names below. Read
 /// from a file (not duplicated inline) so it has one definition shared
 /// with `analyze.rs`, and renaming or restructuring `examples/` never
-/// breaks a test whose only need was "some valid SVC mapping".
+/// breaks a subtest whose only need was "some valid SVC mapping".
 fn svc_simulation_mapping_toml() -> String {
     fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -318,7 +318,7 @@ fn compare_json_prints_sections_and_summary_and_keeps_exit_code() {
         .collect();
     assert_eq!(lines.len(), 2);
     let section = &lines[0]["section"];
-    assert_eq!(section["domain"], "svc");
+    assert_eq!(section["test"], "svc");
     assert!(section["result"]["failed"].as_u64().unwrap() > 0);
     let metric = section["metrics"]
         .as_array()

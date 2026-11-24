@@ -49,9 +49,9 @@ fn inspects_measurement_hdf5_and_lists_channels() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b0e0f1r1",
@@ -72,7 +72,7 @@ fn inspects_measurement_hdf5_and_lists_channels() {
     assert!(stdout.contains("example-measurement-knc-vertical.acd"));
     assert!(stdout.contains("schema version: 2"));
     assert!(
-        stdout.contains("source kind: measurement\ndomain: knc\ntest: vertical\nsetup: b0e0f1r1\nsamples: 4096\nsignals: 49\ntest metadata: 5")
+        stdout.contains("source kind: measurement\ntest: knc\nsubtest: vertical\nsetup: b0e0f1r1\nsamples: 4096\nsignals: 49\ntest metadata: 5")
     );
     assert!(stdout.contains("SIGNAL\tCOMPONENT\tUNIT\tSOURCE"));
     assert!(stdout.contains("lfwcx"));
@@ -134,7 +134,7 @@ fn rejects_raw_and_unsupported_extensions() {
 }
 
 #[test]
-fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
+fn inspect_warns_for_schema_version_1_and_rejects_v2_without_test() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/input");
     let source = examples.join("raw-measurement/example-measurement-knc-vertical.acd");
     let directory = tempdir().unwrap();
@@ -143,9 +143,9 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b0e0f1r1",
@@ -167,7 +167,7 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
     assert!(String::from_utf8_lossy(&current.stdout).contains("schema version: 2"));
     assert!(!String::from_utf8_lossy(&current.stderr).contains("warning"));
 
-    // Version 1: no domain or test, still readable, with a warning.
+    // Version 1: no test or subtest, still readable, with a warning.
     let legacy_staging = directory.path().join("legacy-staging.h5");
     let legacy = directory.path().join("legacy.h5");
     fs::copy(&path, &legacy_staging).unwrap();
@@ -181,8 +181,8 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
         .unwrap()
         .write_scalar(&1_u32)
         .unwrap();
-    file.delete_attr("domain").unwrap();
     file.delete_attr("test").unwrap();
+    file.delete_attr("subtest").unwrap();
     file.close().unwrap();
     fs::copy(&legacy_staging, &legacy).unwrap();
     let result = inspect(&legacy);
@@ -193,7 +193,7 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
         "{stderr}"
     );
 
-    // Version 2 requires the domain.
+    // Version 2 requires the test.
     let broken_staging = directory.path().join("broken-staging.h5");
     let broken = directory.path().join("broken.h5");
     fs::copy(&path, &broken_staging).unwrap();
@@ -201,16 +201,13 @@ fn inspect_warns_for_schema_version_1_and_rejects_v2_without_domain() {
         .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong))
         .open_rw(&broken_staging)
         .unwrap();
-    file.delete_attr("domain").unwrap();
+    file.delete_attr("test").unwrap();
     file.close().unwrap();
     fs::copy(&broken_staging, &broken).unwrap();
     let result = inspect(&broken);
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(!result.status.success(), "{stderr}");
-    assert!(
-        stderr.contains("missing HDF5 attribute: domain"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("missing HDF5 attribute: test"), "{stderr}");
 }
 
 fn convert_example_measurement(directory: &Path) -> PathBuf {
@@ -221,9 +218,9 @@ fn convert_example_measurement(directory: &Path) -> PathBuf {
         .args([
             "convert",
             source.to_str().unwrap(),
-            "-d",
+            "--test",
             "knc",
-            "-t",
+            "--subtest",
             "vertical",
             "--setup",
             "b0e0f1r1",

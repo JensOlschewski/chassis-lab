@@ -12,8 +12,8 @@ function confirmWarnings(warnings: string[]): Promise<boolean> {
 
 interface ConvertRequest {
   input: string;
-  domain: string;
-  test: string | null;
+  test: string;
+  subtest: string | null;
   setup: string | null;
   output: string | null;
   force: boolean;
@@ -32,13 +32,13 @@ const SETUP_FIELDS = [
 export function readRequest(form: HTMLFormElement): ConvertRequest {
   const data = new FormData(form);
   const text = (name: string) => String(data.get(name) ?? "").trim();
-  const domain = text("domain");
+  const test = text("test");
   return {
     input: text("input"),
-    domain,
-    // Only knc has tests; clab rejects a test for svc.
-    test: domain === "knc" ? text("test") : null,
-    setup: domain === "knc" ? SETUP_FIELDS.map(([letter, name]) => `${letter}${data.has(name) ? 1 : 0}`).join("") : null,
+    test,
+    // Only knc has tests; clab rejects a subtest for svc.
+    subtest: test === "knc" ? text("subtest") : null,
+    setup: test === "knc" ? SETUP_FIELDS.map(([letter, name]) => `${letter}${data.has(name) ? 1 : 0}`).join("") : null,
     output: text("output") || null,
     force: data.has("force"),
     confirmed: false,
@@ -48,8 +48,8 @@ export function readRequest(form: HTMLFormElement): ConvertRequest {
 /** The form as stored in a session file. */
 export interface ConvertState {
   input: string | null;
-  domain: string;
-  test: string | null;
+  test: string;
+  subtest: string | null;
   setup: string | null;
   output: string | null;
   force: boolean;
@@ -57,7 +57,7 @@ export interface ConvertState {
 
 export function setupConvert() {
   const form = document.querySelector<HTMLFormElement>("#convert-form")!;
-  const testField = document.querySelector<HTMLElement>("#test-field")!;
+  const testField = document.querySelector<HTMLElement>("#subtest-field")!;
   const setupField = document.querySelector<HTMLElement>("#setup-field")!;
   const status = document.querySelector<HTMLElement>("#convert-status")!;
   const output = document.querySelector<HTMLElement>("#convert-output")!;
@@ -70,7 +70,7 @@ export function setupConvert() {
   };
 
   const syncTest = () => {
-    testField.hidden = setupField.hidden = readRequest(form).domain !== "knc";
+    testField.hidden = setupField.hidden = readRequest(form).test !== "knc";
   };
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement;
 
@@ -117,8 +117,8 @@ export function setupConvert() {
     },
     set(state: ConvertState): void {
       field("input").value = state.input ?? "";
-      field("domain").value = state.domain;
-      if (state.test) field("test").value = state.test;
+      field("test").value = state.test;
+      if (state.subtest) field("subtest").value = state.subtest;
       SETUP_FIELDS.forEach(([letter, name]) => {
         (field(name) as HTMLInputElement).checked = state.setup?.includes(`${letter}1`) ?? false;
       });

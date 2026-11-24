@@ -57,8 +57,8 @@ tolerance files.
 | File                                       | Purpose                                                               |
 | ------------------------------------------ | --------------------------------------------------------------------- |
 | `config.toml`                              | Main configuration file                                               |
-| `setup.toml`                               | General test setup.                                                   |
-| `mappings/mappings-<source>-<domain>.toml` | Maps source signals to ChassisLab signals and units                   |
+| `setup.toml`                               | General subtest setup.                                                   |
+| `mappings/mappings-<source>-<test>.toml` | Maps source signals to ChassisLab signals and units                   |
 | `tolerances.toml`                          | Optional absolute and relative tolerances used with (`--tolerances`). |
 
 ```toml
@@ -68,7 +68,7 @@ gravity = 9.80665 # m/s²
 [setup]
 file = "setup.toml"
 
-# Example mapping: simulation source, SVC domain
+# Example mapping: simulation source, SVC test
 [mappings.simulation.svc]
 file = "mappings/mappings-simulation-svc.toml"
 
@@ -84,33 +84,33 @@ Convert raw simulation or measurement data to HDF5. By default, the output is
 written next to the input with its extension replaced by `.h5`.
 
 ```bash
-clab convert input.res --domain svc
+clab convert input.res --test svc
 ```
 
 ```bash
-clab convert input.acd --domain knc --test vertical --setup b1e1f1r1
+clab convert input.acd --test knc --subtest vertical --setup b1e1f1r1
 ```
 
 Lateral tests also need `--phase` and `--offset`:
 
 ```bash
-clab convert lat.res --domain knc --test lateral --setup b1e0f1r1 --phase in --offset 30
+clab convert lat.res --test knc --subtest lateral --setup b1e0f1r1 --phase inphase --offset 30
 ```
 
 - `--output` (`-o`): Write to a specified file or directory. A path ending in
   `/` is treated as a directory and created if missing.
 - `--force`: Replace an existing output file.
-- `--domain` (`-d`): Required. Use `svc` or `knc`.
-- `--test` (`-t`): Required for `knc`; not allowed for `svc`. Use `vertical`,
+- `--test`: Required. Use `svc` or `knc`.
+- `--subtest`: Required for `knc`; not allowed for `svc`. Use `vertical`,
   `roll`, `static`, `longitudinal`, or `lateral`.
 - `--setup bXeXfXrX`: Required for `knc`. A `1` means brakes applied (`b`),
   steering engine on (`e`), or the front (`f`) or rear (`r`) anti-roll bar
   connected. A `0` means the opposite.
-- `--phase`: Required for `lateral`. Use `in` or `anti` to set the phase
+- `--phase`: Required for `lateral`. Use `inphase` or `antiphase` for the
   relationship between the left and right wheels' lateral forces.
 - `--offset MM`: Required for `lateral`. Sets the pneumatic trail offset in mm.
 - `--yes` (`-y`): Proceed without prompting when motion data disagrees with
-  `--test`.
+  `--subtest`.
 
 ### 🔍 clab inspect
 
@@ -123,11 +123,11 @@ clab inspect examples/input/raw-measurement/example-measurement-knc-vertical.h5 
 Create a mapping template for KnC vertical analysis:
 
 ```bash
-clab inspect --mapping knc --test vertical --template
+clab inspect --mapping knc --subtest vertical --template
 ```
 
 - `--mapping svc|knc` shows mapping requirements without opening an input file
-- `--test TEST` filters KnC requirements, and `--template` emits a TOML
+- `--subtest SUBTEST` filters KnC requirements, and `--template` emits a TOML
   skeleton.
 
 A solver solution (from `clab solve --json`) prints a summary with the steps,

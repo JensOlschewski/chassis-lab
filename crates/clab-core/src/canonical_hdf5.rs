@@ -1,6 +1,6 @@
 //! The canonical HDF5 file format itself: schema, reading, and writing.
 //!
-//! This is the one normalized input shape both domains (SVC and KnC) and
+//! This is the one normalized input shape both tests (SVC and KnC) and
 //! both source kinds (simulation and measurement) share, produced by
 //! `clab convert` (see `clab-converter`) from each format's raw native data.
 //! SVC also accepts its own native JSON directly without this conversion —
@@ -11,8 +11,8 @@
 //! Root attributes:
 //! `schema_version` (uint32),
 //! `source_kind` (`simulation` or `measurement`),
-//! `domain` (`svc` or `knc`; required in version 2),
-//! `test` (`vertical` for KnC; absent for SVC),
+//! `test` (`svc` or `knc`; required in version 2),
+//! `subtest` (`vertical` for KnC; absent for SVC),
 //! `source_file` (UTF-8 string),
 //! `sample_count` (uint64),
 //! `signal_count` (uint64)
@@ -29,9 +29,9 @@ use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group, Location};
 use thiserror::Error;
 
-/// Current schema version. Version 2 adds the required `domain` and optional `test`.
+/// Current schema version. Version 2 adds the required `test` and optional `subtest`.
 pub const SCHEMA_VERSION: u32 = 2;
-/// Oldest schema version that is still read, without `domain` and `test`.
+/// Oldest schema version that is still read, without `test` and `subtest`.
 pub const LEGACY_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,11 +41,11 @@ pub enum SourceKind {
 }
 
 impl Summary {
-    /// Warning for files converted before `domain` and `test` were stored.
+    /// Warning for files converted before `test` and `subtest` were stored.
     pub fn legacy_warning(&self) -> Option<String> {
         (self.schema_version < SCHEMA_VERSION).then(|| {
             format!(
-                "'{}' uses schema version {}, which has no domain or test; inferring from the config. Convert again with --domain and --test to get schema version {SCHEMA_VERSION}",
+                "'{}' uses schema version {}, which has no test or subtest; inferring from the config. Convert again with --test and --subtest to get schema version {SCHEMA_VERSION}",
                 self.path.display(),
                 self.schema_version
             )
@@ -67,13 +67,13 @@ pub struct Summary {
     pub path: PathBuf,
     pub schema_version: u32,
     pub source_kind: SourceKind,
-    /// Declared domain (`svc`, `knc`); `None` for files converted before it was stored.
-    pub domain: Option<String>,
-    /// Declared test within the domain (`vertical`); `None` for domains without tests.
+    /// Declared test (`svc`, `knc`); `None` for files converted before it was stored.
     pub test: Option<String>,
+    /// Declared subtest (`vertical`); `None` for tests without subtests.
+    pub subtest: Option<String>,
     /// Declared KnC setup code (`B1E0F1R1`); `None` for files converted without one.
     pub setup: Option<String>,
-    /// Lateral force phase (`in`, `anti`); lateral tests only.
+    /// Lateral force phase (`inphase`, `antiphase`); lateral tests only.
     pub phase: Option<String>,
     /// Pneumatic trail offset in mm; lateral tests only.
     pub offset_mm: Option<f64>,
@@ -269,16 +269,16 @@ fn validate(
             "unsupported canonical HDF5 schema version {schema_version}; expected {LEGACY_SCHEMA_VERSION} or {SCHEMA_VERSION}"
         ));
     }
-    let domain = optional_string(file, "domain")?;
     let test = optional_string(file, "test")?;
-    if schema_version >= 2 && domain.is_none() {
-        return format("missing HDF5 attribute: domain (required since schema version 2)".into());
+    let subtest = optional_string(file, "subtest")?;
+    if schema_version >= 2 && test.is_none() {
+        return format("missing HDF5 attribute: test (required since schema version 2)".into());
     }
-    if schema_version >= 2 && domain.as_deref() == Some("knc") && test.is_none() {
-        return format("missing HDF5 attribute: test (required for KnC)".into());
+    if schema_version >= 2 && test.as_deref() == Some("knc") && subtest.is_none() {
+        return format("missing HDF5 attribute: subtest (required for KnC)".into());
     }
-    if schema_version >= 2 && domain.as_deref() == Some("svc") && test.is_some() {
-        return format("HDF5 attribute test must be absent for SVC".into());
+    if schema_version >= 2 && test.as_deref() == Some("svc") && subtest.is_some() {
+        return format("HDF5 attribute subtest must be absent for SVC".into());
     }
     let source_kind = match string(file, "source_kind")?.as_str() {
         "simulation" => SourceKind::Simulation,
@@ -376,8 +376,8 @@ fn validate(
             path: path.into(),
             schema_version,
             source_kind,
-            domain,
             test,
+            subtest,
             setup: optional_string(file, "setup")?,
             phase: optional_string(file, "phase")?,
             offset_mm: optional_f64(file, "offset_mm")?,

@@ -24,7 +24,7 @@ const MINIMAL_RES: &str = r#"<Result>
 
 const MINIMAL_ACD: &str = "FileInfo: ASCII3\nTime\tWheel\tstring\tDescription\n0\t10\tfloat\tOffset\ntime\ttravel\tstring\tName\ns\tmm\tstring\tUnits\nNaN\tNaN\tstring\tKPoly\n0\t1\n";
 
-/// `analysis_type` Q=0.0 declares this data as KnC, contradicting `--domain svc`.
+/// `analysis_type` Q=0.0 declares this data as KnC, contradicting `--test svc`.
 const RES_DECLARING_KNC: &str = r#"<Result>
   <Entity type="request" name="analysis_type" entity="model.analysis_type" objectId="1">
     <Component name="Q" unitsValue="none" id="1" />
@@ -46,7 +46,7 @@ fn convert(input: &Path) -> Command {
     command
         .args(["convert", "--yes"])
         .arg(input)
-        .args(["-d", "svc"]);
+        .args(["--test", "svc"]);
     command
 }
 
@@ -284,7 +284,7 @@ fn rejects_input_as_output_even_with_force() {
 }
 
 #[test]
-fn requires_domain_and_validates_test() {
+fn requires_test_and_validates_subtest() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("shared.res");
     fs::write(&input, MINIMAL_RES).unwrap();
@@ -303,34 +303,61 @@ fn requires_domain_and_validates_test() {
 
     let (code, stderr) = run(&[]);
     assert_eq!(code, Some(2));
-    assert!(stderr.contains("--domain"), "{stderr}");
+    assert!(stderr.contains("--test"), "{stderr}");
     for (args, message) in [
-        (&["-d", "driving"][..], "unknown domain 'driving'"),
-        (&["-d", "knc"][..], "--test <TEST>"),
-        (&["-d", "knc", "-t", "roll"][..], "--setup <SETUP>"),
+        (&["--test", "driving"][..], "unknown test 'driving'"),
+        (&["--test", "knc"][..], "--subtest <SUBTEST>"),
         (
-            &["-d", "knc", "-t", "roll", "--setup", "b1e0f1"][..],
+            &["--test", "knc", "--subtest", "roll"][..],
+            "--setup <SETUP>",
+        ),
+        (
+            &["--test", "knc", "--subtest", "roll", "--setup", "b1e0f1"][..],
             "invalid setup 'b1e0f1'",
         ),
         (
-            &["-d", "knc", "-t", "lateral", "--setup", "b1e0f1r1"][..],
+            &[
+                "--test",
+                "knc",
+                "--subtest",
+                "lateral",
+                "--setup",
+                "b1e0f1r1",
+            ][..],
             "--phase <PHASE>",
         ),
         (
             &[
-                "-d", "knc", "-t", "roll", "--setup", "b1e0f1r1", "--phase", "in",
+                "--test",
+                "knc",
+                "--subtest",
+                "roll",
+                "--setup",
+                "b1e0f1r1",
+                "--phase",
+                "inphase",
             ][..],
-            "only apply to test 'lateral'",
+            "only apply to subtest 'lateral'",
         ),
         (
-            &["-d", "svc", "--setup", "b1e0f1r1"][..],
+            &["--test", "svc", "--setup", "b1e0f1r1"][..],
             "takes no --setup",
         ),
         (
-            &["-d", "knc", "-t", "steering", "--setup", "b1e0f1r1"][..],
-            "unknown test 'steering'",
+            &[
+                "--test",
+                "knc",
+                "--subtest",
+                "steering",
+                "--setup",
+                "b1e0f1r1",
+            ][..],
+            "unknown subtest 'steering'",
         ),
-        (&["-d", "svc", "-t", "vertical"][..], "has no tests"),
+        (
+            &["--test", "svc", "--subtest", "vertical"][..],
+            "has no subtests",
+        ),
     ] {
         let (code, stderr) = run(args);
         assert_eq!(code, Some(2), "{args:?}");
@@ -339,7 +366,7 @@ fn requires_domain_and_validates_test() {
 }
 
 #[test]
-fn stores_domain_and_test_when_data_has_no_identity_to_disagree_with() {
+fn stores_test_and_subtest_when_data_has_no_identity_to_disagree_with() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("shared.res");
     fs::write(&input, MINIMAL_RES).unwrap();
@@ -349,7 +376,14 @@ fn stores_domain_and_test_when_data_has_no_identity_to_disagree_with() {
         .arg("convert")
         .arg(&input)
         .args([
-            "-d", "knc", "-t", "vertical", "--setup", "b1e0f1r1", "--yes", "-o",
+            "--test",
+            "knc",
+            "--subtest",
+            "vertical",
+            "--setup",
+            "b1e0f1r1",
+            "--yes",
+            "-o",
         ])
         .arg(&output)
         .output()
@@ -366,11 +400,11 @@ fn stores_domain_and_test_when_data_has_no_identity_to_disagree_with() {
             .to_owned()
     };
     assert_eq!(
-        (read("domain"), read("test"), read("setup")),
+        (read("test"), read("subtest"), read("setup")),
         ("knc".into(), "vertical".into(), "b1e0f1r1".into())
     );
     assert!(file.attr("phase").is_err());
-    // MINIMAL_RES has no motion channels, so the test cannot be verified.
+    // MINIMAL_RES has no motion channels, so the subtest cannot be verified.
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("no motion channels"), "{stderr}");
 }
@@ -385,8 +419,15 @@ fn stores_lateral_phase_and_offset() {
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .arg("convert")
         .arg(&input)
-        .args(["-d", "knc", "-t", "lateral", "--setup", "B1e0F1r1"])
-        .args(["--phase", "anti", "--offset", "30", "--yes", "-o"])
+        .args([
+            "--test",
+            "knc",
+            "--subtest",
+            "lateral",
+            "--setup",
+            "B1e0F1r1",
+        ])
+        .args(["--phase", "antiphase", "--offset", "30", "--yes", "-o"])
         .arg(&output)
         .output()
         .unwrap();
@@ -408,7 +449,7 @@ fn stores_lateral_phase_and_offset() {
     };
     assert_eq!(
         (text("setup"), text("phase")),
-        ("b1e0f1r1".into(), "anti".into())
+        ("b1e0f1r1".into(), "antiphase".into())
     );
     assert_eq!(
         file.attr("offset_mm")
@@ -442,12 +483,12 @@ fn knc_res(roll: f64, vertical: f64) -> String {
     )
 }
 
-fn convert_knc(input: &Path, test: &str) -> Command {
+fn convert_knc(input: &Path, subtest: &str) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
     command
         .arg("convert")
         .arg(input)
-        .args(["-d", "knc", "-t", test, "--setup", "b1e0f1r1"])
+        .args(["--test", "knc", "--subtest", subtest, "--setup", "b1e0f1r1"])
         .stdin(std::process::Stdio::null());
     command
 }
@@ -509,7 +550,7 @@ fn combined_motion_warns_and_converts() {
 
     assert!(result.status.success());
     let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(stderr.contains("combined test file"), "{stderr}");
+    assert!(stderr.contains("combined subtest file"), "{stderr}");
 }
 
 #[test]
@@ -540,8 +581,9 @@ fn acd_testtype_mismatch_warns_and_prompts() {
     assert!(!result.status.success());
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(
-        stderr
-            .contains("testtype 'roll' and motion data indicate 'roll', but --test is 'vertical'"),
+        stderr.contains(
+            "testtype 'roll' and motion data indicate 'roll', but --subtest is 'vertical'"
+        ),
         "{stderr}"
     );
 
@@ -551,7 +593,7 @@ fn acd_testtype_mismatch_warns_and_prompts() {
 }
 
 #[test]
-fn rejects_declared_domain_the_data_contradicts_and_writes_nothing() {
+fn rejects_declared_test_the_data_contradicts_and_writes_nothing() {
     let directory = tempdir().unwrap();
     let input = directory.path().join("shared.res");
     fs::write(&input, RES_DECLARING_KNC).unwrap();
@@ -560,7 +602,7 @@ fn rejects_declared_domain_the_data_contradicts_and_writes_nothing() {
     let result = Command::new(env!("CARGO_BIN_EXE_clab"))
         .arg("convert")
         .arg(&input)
-        .args(["-d", "svc", "-o"])
+        .args(["--test", "svc", "-o"])
         .arg(&output)
         .stdin(std::process::Stdio::null())
         .output()
@@ -569,7 +611,7 @@ fn rejects_declared_domain_the_data_contradicts_and_writes_nothing() {
     assert!(!result.status.success());
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(
-        stderr.contains("analysis_type indicates 'knc', but --domain is 'svc'"),
+        stderr.contains("analysis_type indicates 'knc', but --test is 'svc'"),
         "{stderr}"
     );
     assert!(!output.exists());

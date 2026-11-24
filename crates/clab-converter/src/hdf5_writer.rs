@@ -30,9 +30,9 @@ pub fn write_file(
         .create("schema_version")?
         .write_scalar(&SCHEMA_VERSION)?;
     write_string_attribute(&file, "source_kind", "simulation")?;
-    write_string_attribute(&file, "domain", &identity.domain)?;
-    if let Some(test) = &identity.test {
-        write_string_attribute(&file, "test", test)?;
+    write_string_attribute(&file, "test", &identity.test)?;
+    if let Some(subtest) = &identity.subtest {
+        write_string_attribute(&file, "subtest", subtest)?;
     }
     if let Some(conditions) = &identity.conditions {
         conditions.write(&file)?;

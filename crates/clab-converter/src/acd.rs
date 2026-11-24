@@ -159,8 +159,8 @@ fn parse_text(text: &str, encoding: &str) -> Result<AcdMeasurement, AcdError> {
             duplicates.join(", ")
         ));
     }
-    let test_names: HashSet<_> = test_info.iter().map(|info| &info.name).collect();
-    if test_names.len() != test_info.len() {
+    let subtest_names: HashSet<_> = test_info.iter().map(|info| &info.name).collect();
+    if subtest_names.len() != test_info.len() {
         return format_error("ACD test metadata names must be unique");
     }
 

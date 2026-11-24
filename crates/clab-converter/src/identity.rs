@@ -1,7 +1,7 @@
-//! Domain and test a converted file belongs to.
+//! Test and subtest a converted file belongs to.
 //!
 //! The caller declares both. The data cross-checks the declaration before
-//! anything is written: a declared domain or test the data contradicts is
+//! anything is written: a declared test or subtest the data contradicts is
 //! a hard error, not a warning, so a canonical HDF5 file is never written
 //! under the wrong identity.
 
@@ -11,8 +11,8 @@ use crate::acd::AcdMeasurement;
 use crate::conditions::Conditions;
 use crate::model::AdamsResult;
 
-/// Known domains and their tests. Add new domains and tests here.
-pub const DOMAINS: &[(&str, &[&str])] = &[
+/// Known tests and their subtests. Add new tests and subtests here.
+pub const TESTS: &[(&str, &[&str])] = &[
     ("svc", &[]),
     (
         "knc",
@@ -22,48 +22,45 @@ pub const DOMAINS: &[(&str, &[&str])] = &[
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Identity {
-    pub domain: String,
-    pub test: Option<String>,
-    /// Declared KnC setup; stored next to domain and test.
+    pub test: String,
+    pub subtest: Option<String>,
+    /// Declared KnC setup; stored next to test and subtest.
     pub conditions: Option<Conditions>,
 }
 
 impl Identity {
-    /// Validate a declared domain and test against the known domains.
-    pub fn new(domain: &str, test: Option<&str>) -> Result<Self> {
+    /// Validate a declared test and subtest against the known tests.
+    pub fn new(test: &str, subtest: Option<&str>) -> Result<Self> {
         let known = |names: &[&str]| names.join(", ");
-        let Some((_, tests)) = DOMAINS.iter().find(|(name, _)| *name == domain) else {
-            let domains: Vec<_> = DOMAINS.iter().map(|(name, _)| *name).collect();
-            bail!(
-                "unknown domain '{domain}'; expected one of: {}",
-                known(&domains)
-            );
+        let Some((_, tests)) = TESTS.iter().find(|(name, _)| *name == test) else {
+            let tests: Vec<_> = TESTS.iter().map(|(name, _)| *name).collect();
+            bail!("unknown test '{test}'; expected one of: {}", known(&tests));
         };
-        match (tests.is_empty(), test) {
-            (true, Some(test)) => {
-                bail!("domain '{domain}' has no tests; remove --test {test}")
+        match (tests.is_empty(), subtest) {
+            (true, Some(subtest)) => {
+                bail!("test '{test}' has no subtests; remove --subtest {subtest}")
             }
             (false, None) => bail!(
-                "domain '{domain}' requires --test; expected one of: {}",
+                "test '{test}' requires --subtest; expected one of: {}",
                 known(tests)
             ),
-            (false, Some(test)) if !tests.contains(&test) => bail!(
-                "unknown test '{test}' for domain '{domain}'; expected one of: {}",
+            (false, Some(subtest)) if !tests.contains(&subtest) => bail!(
+                "unknown subtest '{subtest}' for test '{test}'; expected one of: {}",
                 known(tests)
             ),
             _ => Ok(Self {
-                domain: domain.into(),
-                test: test.map(Into::into),
+                test: test.into(),
+                subtest: subtest.map(Into::into),
                 conditions: None,
             }),
         }
     }
 }
 
-/// Domain an Adams result indicates through its `analysis_type` variable:
+/// Test an Adams result indicates through its `analysis_type` variable:
 /// 0 is a KnC rig analysis, 1 an SVC analysis. The last sample is used,
 /// because SVC results start at 0.
-pub fn res_domain(result: &AdamsResult) -> Option<&'static str> {
+pub fn res_test(result: &AdamsResult) -> Option<&'static str> {
     let value = result
         .values()
         .find(|(entity, component)| {
@@ -86,7 +83,7 @@ pub fn res_domain(result: &AdamsResult) -> Option<&'static str> {
 }
 
 /// KnC when the result has a `wheel_travel` entity; SVC results never do.
-fn res_structural_domain(result: &AdamsResult) -> Option<&'static str> {
+fn res_structural_test(result: &AdamsResult) -> Option<&'static str> {
     result
         .entities
         .iter()
@@ -95,21 +92,21 @@ fn res_structural_domain(result: &AdamsResult) -> Option<&'static str> {
 }
 
 /// Warnings when the `analysis_type` value or a `wheel_travel` entity
-/// contradicts the declared domain, or when neither signal exists.
-pub fn res_domain_warnings(result: &AdamsResult, declared: &str) -> Vec<String> {
+/// contradicts the declared test, or when neither signal exists.
+pub fn res_test_warnings(result: &AdamsResult, declared: &str) -> Vec<String> {
     let signals = [
-        ("analysis_type", res_domain(result)),
-        ("wheel_travel entity", res_structural_domain(result)),
+        ("analysis_type", res_test(result)),
+        ("wheel_travel entity", res_structural_test(result)),
     ];
     if signals.iter().all(|(_, found)| found.is_none()) {
-        return vec!["no analysis_type or wheel_travel, domain not verified".into()];
+        return vec!["no analysis_type or wheel_travel, test not verified".into()];
     }
     signals
         .into_iter()
         .filter_map(|(signal, found)| {
             found
                 .filter(|found| *found != declared)
-                .map(|found| format!("{signal} indicates '{found}', but --domain is '{declared}'"))
+                .map(|found| format!("{signal} indicates '{found}', but --test is '{declared}'"))
         })
         .collect()
 }
@@ -130,12 +127,12 @@ pub enum Detection {
     Unavailable,
 }
 
-/// Applied wheel force range (N) above which a compliance test drives the wheels.
+/// Applied wheel force range (N) above which a compliance subtest drives the wheels.
 /// Measured: compliance runs apply 3000 N, all other runs exactly 0.
 const FORCE_MOVES_N: f64 = 100.0;
-/// Applied wheel torque range (N·mm) above which an aligning test runs.
+/// Applied wheel torque range (N·mm) above which an aligning subtest runs.
 const TORQUE_MOVES_NMM: f64 = 10_000.0;
-/// Steering input range (rad) above which a steering test runs.
+/// Steering input range (rad) above which a steering subtest runs.
 const STEER_MOVES_RAD: f64 = 0.05;
 
 /// Largest peak-to-peak range over the named component of every entity
@@ -179,10 +176,10 @@ fn wheel_force_range(result: &AdamsResult, component: &str) -> f64 {
     .unwrap_or(0.0)
 }
 
-/// Detect the KnC test from which rig motion moves and which wheel
+/// Detect the KnC subtest from which rig motion moves and which wheel
 /// loads are applied. Several excitations at once, or an excitation
-/// without its own test (steering, aligning torque), are undetermined.
-pub fn res_test(result: &AdamsResult) -> Detection {
+/// without its own subtest (steering, aligning torque), are undetermined.
+pub fn res_subtest(result: &AdamsResult) -> Detection {
     let (Some(roll), Some(vertical)) = (
         motion_range(result, "motion_roll"),
         motion_range(result, "motion_vertical"),
@@ -212,7 +209,7 @@ pub fn res_test(result: &AdamsResult) -> Detection {
     let mut active = excited.iter().filter(|(moves, _)| *moves);
     match (active.next(), active.next()) {
         (None, _) => Detection::Test("static"),
-        (Some((_, Some(test))), None) => Detection::Test(test),
+        (Some((_, Some(subtest))), None) => Detection::Test(subtest),
         _ => Detection::Undetermined,
     }
 }
@@ -239,7 +236,7 @@ fn paired_range(left: &[f64], right: &[f64], f: impl Fn(f64, f64) -> f64) -> f64
     if max >= min { max - min } else { 0.0 }
 }
 
-/// Front wheel force range (N) above which a compliance test drives the wheels.
+/// Front wheel force range (N) above which a compliance subtest drives the wheels.
 /// Measured: compliance runs span 6000 N and more, all other runs at most 156 N.
 const ACD_FORCE_MOVES_N: f64 = 1000.0;
 
@@ -252,10 +249,10 @@ fn force_range(measurement: &AcdMeasurement, names: [&str; 2]) -> f64 {
         .fold(0.0, f64::max)
 }
 
-/// Detect the KnC test from front wheel forces and wheel-centre Z:
-/// forces drive a compliance test, vertical moves both wheels together
+/// Detect the KnC subtest from front wheel forces and wheel-centre Z:
+/// forces drive a compliance subtest, vertical moves both wheels together
 /// (heave), roll moves them in opposition.
-pub fn acd_motion_test(measurement: &AcdMeasurement) -> Detection {
+pub fn acd_motion_subtest(measurement: &AcdMeasurement) -> Detection {
     let (Some(left), Some(right)) = (
         acd_channel(measurement, "lfwcz"),
         acd_channel(measurement, "rfwcz"),
@@ -281,31 +278,32 @@ pub fn acd_motion_test(measurement: &AcdMeasurement) -> Detection {
     }
 }
 
-const COMBINED: &str = "test not determinable from motion data (combined test file? unsupported)";
+const COMBINED: &str =
+    "subtest not determinable from motion data (combined subtest file? unsupported)";
 
-/// Warnings when motion data alone disagrees with, or cannot confirm, the declared test.
+/// Warnings when motion data alone disagrees with, or cannot confirm, the declared subtest.
 fn motion_warnings(motion: Detection, declared: &str) -> Vec<String> {
     match motion {
         Detection::Test(detected) if detected == declared => vec![],
         Detection::Test(detected) => {
             vec![format!(
-                "motion data indicates '{detected}', but --test is '{declared}'"
+                "motion data indicates '{detected}', but --subtest is '{declared}'"
             )]
         }
         Detection::Undetermined => vec![COMBINED.into()],
-        Detection::Unavailable => vec!["no motion channels, test not verified".into()],
+        Detection::Unavailable => vec!["no motion channels, subtest not verified".into()],
     }
 }
 
-/// Warnings for a declared KnC test checked against RES motion data.
+/// Warnings for a declared KnC subtest checked against RES motion data.
 pub fn res_warnings(result: &AdamsResult, declared: &str) -> Vec<String> {
-    motion_warnings(res_test(result), declared)
+    motion_warnings(res_subtest(result), declared)
 }
 
-/// Warnings for a declared KnC test checked against ACD `testtype` and motion data.
+/// Warnings for a declared KnC subtest checked against ACD `testtype` and motion data.
 /// An empty list means everything agrees.
 pub fn acd_warnings(measurement: &AcdMeasurement, declared: &str) -> Vec<String> {
-    let motion = acd_motion_test(measurement);
+    let motion = acd_motion_subtest(measurement);
     let Some(info) = measurement
         .test_info
         .iter()
@@ -313,12 +311,12 @@ pub fn acd_warnings(measurement: &AcdMeasurement, declared: &str) -> Vec<String>
     else {
         return motion_warnings(motion, declared);
     };
-    let Some((_, meta)) = acd_test(&info.value) else {
+    let Some((_, meta)) = acd_subtest(&info.value) else {
         return motion_warnings(motion, declared);
     };
     let tt = &info.value;
     let mismatch = meta != declared;
-    let against = format!("but --test is '{declared}'");
+    let against = format!("but --subtest is '{declared}'");
     match motion {
         Detection::Test(detected) if detected == meta && mismatch => {
             vec![format!(
@@ -344,7 +342,7 @@ pub fn acd_warnings(measurement: &AcdMeasurement, declared: &str) -> Vec<String>
 }
 
 /// Test an ACD `testtype` value names, if known.
-fn acd_test(testtype: &str) -> Option<(&'static str, &'static str)> {
+fn acd_subtest(testtype: &str) -> Option<(&'static str, &'static str)> {
     match testtype {
         "vert" => Some(("knc", "vertical")),
         "roll" => Some(("knc", "roll")),
@@ -367,13 +365,13 @@ pub fn check_acd_identity(
     else {
         return Ok(());
     };
-    let Some((domain, _)) = acd_test(&info.value) else {
+    let Some((test, _)) = acd_subtest(&info.value) else {
         return Ok(());
     };
-    if domain != identity.domain {
+    if test != identity.test {
         bail!(
-            "--domain {} but testtype '{}' in '{source}' indicates {domain}",
-            identity.domain,
+            "--test {} but testtype '{}' in '{source}' indicates {test}",
+            identity.test,
             info.value
         );
     }
@@ -383,27 +381,27 @@ pub fn check_acd_identity(
 #[cfg(test)]
 mod tests {
     use super::{
-        COMBINED, Detection, Identity, acd_motion_test, acd_test, acd_warnings, check_acd_identity,
-        res_domain_warnings, res_test, res_warnings,
+        COMBINED, Detection, Identity, acd_motion_subtest, acd_subtest, acd_warnings,
+        check_acd_identity, res_subtest, res_test_warnings, res_warnings,
     };
     use crate::acd::{AcdChannel, AcdMeasurement, AcdTestInfo};
     use crate::model::{AdamsResult, Component, Entity};
 
     #[test]
-    fn validates_domain_and_test_pairs() {
+    fn validates_test_and_subtest_pairs() {
         assert!(Identity::new("svc", None).is_ok());
         assert!(Identity::new("knc", Some("vertical")).is_ok());
         assert!(Identity::new("knc", Some("static")).is_ok());
         assert!(Identity::new("knc", Some("roll")).is_ok());
         assert!(Identity::new("knc", Some("lateral")).is_ok());
         assert!(Identity::new("knc", Some("longitudinal")).is_ok());
-        for (domain, test, message) in [
-            ("driving", None, "unknown domain 'driving'"),
-            ("knc", None, "requires --test"),
-            ("knc", Some("steering"), "unknown test 'steering'"),
-            ("svc", Some("vertical"), "has no tests"),
+        for (test, subtest, message) in [
+            ("driving", None, "unknown test 'driving'"),
+            ("knc", None, "requires --subtest"),
+            ("knc", Some("steering"), "unknown subtest 'steering'"),
+            ("svc", Some("vertical"), "has no subtests"),
         ] {
-            let error = Identity::new(domain, test).unwrap_err().to_string();
+            let error = Identity::new(test, subtest).unwrap_err().to_string();
             assert!(error.contains(message), "{error}");
         }
     }
@@ -427,12 +425,12 @@ mod tests {
     }
 
     #[test]
-    fn res_domain_warnings_cover_each_signal_state() {
+    fn res_test_warnings_cover_each_signal_state() {
         let knc = res_with_analysis_type(0.0);
-        assert!(res_domain_warnings(&knc, "knc").is_empty());
+        assert!(res_test_warnings(&knc, "knc").is_empty());
         assert_eq!(
-            res_domain_warnings(&knc, "svc"),
-            ["analysis_type indicates 'knc', but --domain is 'svc'"]
+            res_test_warnings(&knc, "svc"),
+            ["analysis_type indicates 'knc', but --test is 'svc'"]
         );
 
         let mut split = res_with_analysis_type(1.0);
@@ -443,12 +441,12 @@ mod tests {
             components: vec![],
         });
         assert_eq!(
-            res_domain_warnings(&split, "knc"),
-            ["analysis_type indicates 'svc', but --domain is 'knc'"]
+            res_test_warnings(&split, "knc"),
+            ["analysis_type indicates 'svc', but --test is 'knc'"]
         );
         assert_eq!(
-            res_domain_warnings(&split, "svc"),
-            ["wheel_travel entity indicates 'knc', but --domain is 'svc'"]
+            res_test_warnings(&split, "svc"),
+            ["wheel_travel entity indicates 'knc', but --test is 'svc'"]
         );
 
         let none = AdamsResult {
@@ -457,8 +455,8 @@ mod tests {
             values_per_sample: 0,
         };
         assert_eq!(
-            res_domain_warnings(&none, "knc"),
-            ["no analysis_type or wheel_travel, domain not verified"]
+            res_test_warnings(&none, "knc"),
+            ["no analysis_type or wheel_travel, test not verified"]
         );
     }
 
@@ -511,7 +509,7 @@ mod tests {
             (flat(), None, Detection::Unavailable),
         ];
         for (roll, vertical, expected) in cases {
-            assert_eq!(res_test(&res_with_motion(roll, vertical)), expected);
+            assert_eq!(res_subtest(&res_with_motion(roll, vertical)), expected);
         }
     }
 
@@ -576,7 +574,7 @@ mod tests {
             (vec![], Detection::Test("static")),
         ];
         for (loads, expected) in cases {
-            assert_eq!(res_test(&res_with_loads(&loads)), expected, "{loads:?}");
+            assert_eq!(res_subtest(&res_with_loads(&loads)), expected, "{loads:?}");
         }
     }
 
@@ -584,7 +582,7 @@ mod tests {
     fn wheel_load_with_rig_motion_is_undetermined() {
         let mut result = res_with_loads(&[("gforce_tire_lf", "FY", 3000.0)]);
         result.entities[1].components[0].values = vec![0.0, 100.0];
-        assert_eq!(res_test(&result), Detection::Undetermined);
+        assert_eq!(res_subtest(&result), Detection::Undetermined);
     }
 
     #[test]
@@ -596,19 +594,19 @@ mod tests {
             );
             crate::acd::parse_file(path).unwrap()
         };
-        for (file, test) in [
+        for (file, subtest) in [
             ("example-measurement-knc-roll.acd", "roll"),
             ("example-measurement-knc-vertical.acd", "vertical"),
         ] {
             let measurement = example(file);
-            assert_eq!(acd_motion_test(&measurement), Detection::Test(test));
-            assert!(acd_warnings(&measurement, test).is_empty());
+            assert_eq!(acd_motion_subtest(&measurement), Detection::Test(subtest));
+            assert!(acd_warnings(&measurement, subtest).is_empty());
         }
 
         let roll = example("example-measurement-knc-roll.acd");
         assert_eq!(
             acd_warnings(&roll, "vertical"),
-            ["testtype 'roll' and motion data indicate 'roll', but --test is 'vertical'"]
+            ["testtype 'roll' and motion data indicate 'roll', but --subtest is 'vertical'"]
         );
 
         let mut disagree = roll.clone();
@@ -632,7 +630,7 @@ mod tests {
         no_motion.test_info.retain(|i| i.name != "testtype");
         assert_eq!(
             acd_warnings(&no_motion, "roll"),
-            ["no motion channels, test not verified"]
+            ["no motion channels, subtest not verified"]
         );
     }
 
@@ -657,19 +655,19 @@ mod tests {
     #[test]
     fn detects_acd_compliance_from_wheel_forces() {
         let lateral = acd_with_forces(&[("lffy", 3000.0), ("rffy", 3000.0)]);
-        assert_eq!(acd_motion_test(&lateral), Detection::Test("lateral"));
+        assert_eq!(acd_motion_subtest(&lateral), Detection::Test("lateral"));
         assert!(acd_warnings(&lateral, "lateral").is_empty());
         let longitudinal = acd_with_forces(&[("lffx", 3000.0), ("rffx", 3000.0)]);
         assert_eq!(
-            acd_motion_test(&longitudinal),
+            acd_motion_subtest(&longitudinal),
             Detection::Test("longitudinal")
         );
         let both = acd_with_forces(&[("lffx", 3000.0), ("lffy", 3000.0)]);
-        assert_eq!(acd_motion_test(&both), Detection::Undetermined);
+        assert_eq!(acd_motion_subtest(&both), Detection::Undetermined);
         let rest = acd_with_forces(&[("lffy", 150.0)]);
-        assert_eq!(acd_motion_test(&rest), Detection::Test("static"));
-        assert_eq!(acd_test("lat"), Some(("knc", "lateral")));
-        assert_eq!(acd_test("long"), Some(("knc", "longitudinal")));
+        assert_eq!(acd_motion_subtest(&rest), Detection::Test("static"));
+        assert_eq!(acd_subtest("lat"), Some(("knc", "lateral")));
+        assert_eq!(acd_subtest("long"), Some(("knc", "longitudinal")));
     }
 
     #[test]
@@ -678,14 +676,14 @@ mod tests {
         assert!(res_warnings(&roll, "roll").is_empty());
         assert_eq!(
             res_warnings(&roll, "vertical"),
-            ["motion data indicates 'roll', but --test is 'vertical'"]
+            ["motion data indicates 'roll', but --subtest is 'vertical'"]
         );
         let both = res_with_motion(Some(vec![0.0, 0.14]), Some(vec![0.0, 100.0]));
         assert_eq!(res_warnings(&both, "roll"), [COMBINED]);
         let none = res_with_motion(None, None);
         assert_eq!(
             res_warnings(&none, "roll"),
-            ["no motion channels, test not verified"]
+            ["no motion channels, subtest not verified"]
         );
     }
 
@@ -719,12 +717,12 @@ mod tests {
     }
 
     #[test]
-    fn acd_identity_rejects_domain_the_testtype_contradicts() {
+    fn acd_identity_rejects_test_the_testtype_contradicts() {
         let identity = Identity::new("svc", None).unwrap();
         let error = check_acd_identity(&acd_with_testtype("vert"), &identity, "source.acd")
             .unwrap_err()
             .to_string();
-        assert!(error.contains("--domain svc"), "{error}");
+        assert!(error.contains("--test svc"), "{error}");
         assert!(error.contains("indicates knc"), "{error}");
     }
 
@@ -735,7 +733,7 @@ mod tests {
         assert_eq!(
             acd_warnings(&acd_with_testtype("vert"), "static"),
             [
-                "testtype 'vert' indicates 'vertical', but --test is 'static'; no motion channels to confirm"
+                "testtype 'vert' indicates 'vertical', but --subtest is 'static'; no motion channels to confirm"
             ]
         );
         assert_eq!(

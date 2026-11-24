@@ -11,8 +11,8 @@ export interface Section {
   title: string;
   metrics: Metric[];
   warnings: string[];
-  domain?: string;
-  test?: string | null;
+  test?: string;
+  subtest?: string | null;
 }
 
 export type BadgeState = "ok" | "warning" | "error" | "running";
@@ -72,8 +72,8 @@ export interface ComparisonSection {
   title: string;
   metrics: ComparedMetric[];
   warnings: string[];
-  domain?: string;
-  test?: string | null;
+  test?: string;
+  subtest?: string | null;
 }
 
 /** Names arrive qualified (`svc::front_left_mass_kg`); the card title already says where. */

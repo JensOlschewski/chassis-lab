@@ -71,9 +71,9 @@ pub fn write_file(
     scalar(&file, "sample_count", sample_count as u64)?;
     scalar(&file, "signal_count", measurement.channels.len() as u64)?;
     write_string_attribute(&file, "source_kind", "measurement")?;
-    write_string_attribute(&file, "domain", &identity.domain)?;
-    if let Some(test) = &identity.test {
-        write_string_attribute(&file, "test", test)?;
+    write_string_attribute(&file, "test", &identity.test)?;
+    if let Some(subtest) = &identity.subtest {
+        write_string_attribute(&file, "subtest", subtest)?;
     }
     if let Some(conditions) = &identity.conditions {
         conditions.write(&file)?;

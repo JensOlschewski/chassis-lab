@@ -28,9 +28,9 @@ pub(crate) struct InspectArgs {
     /// Filter signals or channels by case-insensitive catalog text.
     #[arg(long)]
     r#match: Option<String>,
-    /// Restrict KnC mapping output to one test.
+    /// Restrict KnC mapping output to one subtest.
     #[arg(long)]
-    test: Option<String>,
+    subtest: Option<String>,
     /// Emit editable TOML mapping skeleton.
     #[arg(long)]
     template: bool,
@@ -56,18 +56,18 @@ pub(crate) fn inspect(args: InspectArgs) -> Result<()> {
         }
         return signals::mapping(
             Some(match mapping {
-                Mapping::Svc => signals::Domain::Svc,
-                Mapping::Knc => signals::Domain::Knc,
+                Mapping::Svc => signals::Test::Svc,
+                Mapping::Knc => signals::Test::Knc,
             }),
-            args.test.as_deref(),
+            args.subtest.as_deref(),
             args.template,
         );
     }
     let Some(file) = args.file else {
         bail!("FILE is required unless --mapping is provided");
     };
-    if args.test.is_some() || args.template {
-        bail!("--test and --template require --mapping");
+    if args.subtest.is_some() || args.template {
+        bail!("--subtest and --template require --mapping");
     }
     if !file.is_file() {
         bail!("input file does not exist: {}", file.display());
@@ -266,8 +266,8 @@ fn inspect_json(
             "summary": {
                 "source_file": summary.source_file,
                 "source_kind": summary.source_kind.as_str(),
-                "domain": summary.domain,
                 "test": summary.test,
+                "subtest": summary.subtest,
                 "setup": summary.setup,
                 "phase": summary.phase,
                 "offset_mm": summary.offset_mm,
@@ -334,11 +334,11 @@ fn inspect_hdf5(path: &Path, signals: bool, match_text: Option<&str>) -> Result<
     println!("source file: {}", summary.source_file);
     println!("schema version: {}", summary.schema_version);
     println!("source kind: {}", summary.source_kind.as_str());
-    if let Some(domain) = &summary.domain {
-        println!("domain: {domain}");
-    }
     if let Some(test) = &summary.test {
         println!("test: {test}");
+    }
+    if let Some(subtest) = &summary.subtest {
+        println!("subtest: {subtest}");
     }
     if let Some(setup) = &summary.setup {
         println!("setup: {setup}");

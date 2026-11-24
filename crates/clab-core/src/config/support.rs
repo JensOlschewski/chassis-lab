@@ -14,17 +14,17 @@ use super::{ConfigError, MeasurementSignalRef, SignalRef};
 
 pub(crate) type ToleranceMaps = (BTreeMap<String, f64>, BTreeMap<String, f64>);
 
-/// Resolve one domain's (and optional test's) signal mapping for one
+/// Resolve one test's (and optional subtest's) signal mapping for one
 /// `source_kind` ("simulation" or "measurement"). Every mapping table ends
-/// in the same shape: `domain[.test].source_kind[.signals]`, so simulation
+/// in the same shape: `test[.subtest].source_kind[.signals]`, so simulation
 /// and measurement are resolved identically, just with a different
 /// `source_kind` — the only asymmetry left is which one a given fixture
 /// happens to define entries under.
 pub(crate) fn merged_mapping(
     root: &toml::map::Map<String, Value>,
     source_kind: &str,
-    domain: &str,
-    test: Option<&str>,
+    test: &str,
+    subtest: Option<&str>,
     path: &Path,
 ) -> Result<Map<String, Value>, Box<dyn std::error::Error>> {
     let all = root
@@ -37,44 +37,44 @@ pub(crate) fn merged_mapping(
         && let Some(by_kind) = all.get(source_kind)
     {
         // `[mappings.simulation]`/`[mappings.measurement]` may itself be a
-        // `file = "..."` pointer covering every domain, not just an inline
+        // `file = "..."` pointer covering every test, not just an inline
         // table — resolve that one level the same way `merge_mapping_source`
-        // resolves a file pointer at the domain/test level.
+        // resolves a file pointer at the test/subtest level.
         let by_kind_table =
             resolve_mapping_file(by_kind, path, &format!("[signals.{source_kind}]"))?;
         let by_kind_table = &by_kind_table;
-        if let Some(shared) = by_kind_table.get(domain) {
-            let shared_table = table(shared, &format!("[signals.{source_kind}.{domain}]"))?;
+        if let Some(shared) = by_kind_table.get(test) {
+            let shared_table = table(shared, &format!("[signals.{source_kind}.{test}]"))?;
             merge_mapping_source(
                 &mut result,
                 shared_table.get("signals").unwrap_or(shared),
                 path,
-                &format!("[signals.{source_kind}.{domain}.signals]"),
-                domain,
+                &format!("[signals.{source_kind}.{test}.signals]"),
+                test,
             )?;
         }
-        if let Some(test) = test
-            && let Some(domain_value) = by_kind_table.get(domain)
+        if let Some(subtest) = subtest
+            && let Some(test_value) = by_kind_table.get(test)
             && let Some(specific) =
-                table(domain_value, &format!("[signals.{source_kind}.{domain}]"))?.get(test)
+                table(test_value, &format!("[signals.{source_kind}.{test}]"))?.get(subtest)
         {
             let specific_table = table(
                 specific,
-                &format!("[signals.{source_kind}.{domain}.{test}]"),
+                &format!("[signals.{source_kind}.{test}.{subtest}]"),
             )?;
             merge_mapping_source(
                 &mut result,
                 specific_table.get("signals").unwrap_or(specific),
                 path,
-                &format!("[signals.{source_kind}.{domain}.{test}.signals]"),
-                domain,
+                &format!("[signals.{source_kind}.{test}.{subtest}.signals]"),
+                test,
             )?;
         }
     }
     if result.is_empty() {
-        let where_ = match test {
-            Some(test) => format!("{source_kind}.{domain}.{test}"),
-            None => format!("{source_kind}.{domain}"),
+        let where_ = match subtest {
+            Some(subtest) => format!("{source_kind}.{test}.{subtest}"),
+            None => format!("{source_kind}.{test}"),
         };
         return Err(ConfigError(format!("[signals.{where_}] must define mappings")).into());
     }
@@ -85,8 +85,8 @@ pub(crate) fn merged_mapping(
 /// actual table — the loaded file's `mappings`/`signal_mappings`/`signals`
 /// wrapper if present, else the file's content as-is; an inline table (no
 /// `file` key) is returned unchanged. Same resolution `merge_mapping_source`
-/// does for a domain/test-level file pointer, lifted one level so a
-/// `source_kind`-level pointer (covering every domain in one file) works too.
+/// does for a test/subtest-level file pointer, lifted one level so a
+/// `source_kind`-level pointer (covering every test in one file) works too.
 fn resolve_mapping_file(
     value: &Value,
     path: &Path,
@@ -121,7 +121,7 @@ fn merge_mapping_source(
     source: &Value,
     path: &Path,
     where_: &str,
-    domain: &str,
+    test: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = table(source, where_)?;
     if let Some(file) = source.get("file") {
@@ -143,16 +143,11 @@ fn merge_mapping_source(
             .map(|value| table(value, &format!("mapping file {}", file.display())))
             .transpose()?
             .unwrap_or(&external);
-        // A domain-level file may retain its original [svc.*] or [knc.*]
+        // A test-level file may retain its original [svc.*] or [knc.*]
         // headers after splitting a source-kind mapping file.
         let values = values
-            .get(domain)
-            .map(|value| {
-                table(
-                    value,
-                    &format!("mapping file {} [{domain}]", file.display()),
-                )
-            })
+            .get(test)
+            .map(|value| table(value, &format!("mapping file {} [{test}]", file.display())))
             .transpose()?
             .unwrap_or(values);
         merge_map(target, values);
@@ -187,17 +182,17 @@ fn merge_value(target: &mut Map<String, Value>, key: &str, value: &Value) {
 
 pub(crate) fn mapping_file_path(
     root: &toml::map::Map<String, Value>,
-    domain: &str,
-    test: Option<&str>,
+    test: &str,
+    subtest: Option<&str>,
     path: &Path,
 ) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
     let Some(mappings) = root.get("mappings").and_then(Value::as_table) else {
         return Ok(None);
     };
-    let Some(base) = mappings.get(domain).and_then(Value::as_table) else {
+    let Some(base) = mappings.get(test).and_then(Value::as_table) else {
         return Ok(None);
     };
-    let source = test
+    let source = subtest
         .and_then(|t| base.get(t).and_then(Value::as_table))
         .or_else(|| base.get("base").and_then(Value::as_table))
         .unwrap_or(base);
