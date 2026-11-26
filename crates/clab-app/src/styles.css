@@ -299,10 +299,6 @@ pre.info { display: block; font-family: var(--mono, ui-monospace, monospace); wh
 #solve-sections summary::before, #optimize-sections summary::before { content: "▸"; display: inline-block; margin-right: 8px; color: var(--muted); transition: transform 0.1s; }
 #solve-sections details[open] > summary::before, #optimize-sections details[open] > summary::before { transform: rotate(90deg); }
 .actions { align-items: center; }
-.steps { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
-.steps li { display: flex; align-items: center; gap: 8px; }
-.steps small { color: var(--muted); font-variant-numeric: tabular-nums; }
-#solve-summary { margin-top: 12px; }
 #optimize-adjusted[hidden] { display: none; }
 #optimize-sections .grid td:last-child { width: 1%; white-space: nowrap; text-align: center; }
 #optimize-sections .grid td:last-child button { padding: 2px 8px; }

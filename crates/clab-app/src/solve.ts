@@ -14,36 +14,14 @@ import {
   setVariable,
   variableNames,
 } from "./parameters";
-import { BadgeState, createBadge, element, setBadge } from "./sections";
+import { element } from "./sections";
 import { Outcome, errorLine } from "./worker";
-
-interface Summary {
-  steps: number;
-  end_time: number;
-  bodies: number;
-}
 
 /** Pasted paths often carry whitespace or the quotes added by "Copy as path". */
 const clean = (path: string) => path.trim().replace(/^"|"$/g, "").trim();
 
 /** `model.json` is solved to `model-solution.json` unless the user chooses another file. */
 const defaultOutput = (model: string) => model.replace(/\.json$/i, "") + "-solution.json";
-
-/** One line of the run's progress: a badge, the step and a detail such as the percent done. */
-function createStep(label: string) {
-  const badge = createBadge("running");
-  const detail = element("small");
-  const node = element("li");
-  node.append(badge, element("span", label), detail);
-  return {
-    node,
-    detail,
-    finish: (state: BadgeState) => {
-      setBadge(badge, state);
-      if (state === "ok") detail.textContent = "";
-    },
-  };
-}
 
 /** The parameter tables of the model, by the backend section `id`. Same shape as Optimize's SECTIONS. */
 const SECTIONS: { id: string; subtitle?: string; help?: Help }[] = [
@@ -103,8 +81,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
   const adjust = document.querySelector<HTMLInputElement>("#solve-adjust")!;
   const sections = document.querySelector<HTMLElement>("#solve-sections")!;
   const status = document.querySelector<HTMLElement>("#solve-status")!;
-  const steps = document.querySelector<HTMLElement>("#solve-steps")!;
-  const summary = document.querySelector<HTMLElement>("#solve-summary")!;
+  const log = document.querySelector<HTMLElement>("#solve-log")!;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
   const stop = document.querySelector<HTMLButtonElement>("#solve-stop")!;
   const open = document.querySelector<HTMLButtonElement>("#solve-open")!;
@@ -135,7 +112,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
     );
     if (!proceed) return;
     setBusy(true);
-    steps.replaceChildren();
+    log.textContent = "";
     show("Installing the MATLAB Runtime…");
     try {
       const outcome = await invoke<Outcome>("install_runtime");
@@ -298,54 +275,33 @@ export function setupSolve(openInInspect: (path: string) => void) {
     stopped = false;
     setBusy(true);
     stop.hidden = false;
-    summary.hidden = true;
     open.hidden = true;
     installRuntime.hidden = true;
-    show("");
-    const solve = createStep("Solve motion");
-    const write = createStep("Write solution");
-    steps.replaceChildren(solve.node);
-    const onProgress = new Channel<number>();
-    onProgress.onmessage = (percent) => {
-      solve.detail.textContent = `${percent.toFixed(0)} %`;
-      if (percent >= 100 && !write.node.isConnected) {
-        solve.finish("ok");
-        steps.append(write.node);
-      }
+    log.textContent = "";
+    show("Solving…");
+    const onLine = new Channel<string>();
+    onLine.onmessage = (line) => {
+      // The status line shows the error.
+      if (line.startsWith("error: ")) return;
+      log.textContent += line + "\n";
+      log.scrollTop = log.scrollHeight;
     };
     try {
-      const outcome = await invoke<Outcome>("run_solve", { request, onProgress });
+      const outcome = await invoke<Outcome>("run_solve", { request, onLine });
       if (outcome.exit_code === 0) {
-        solve.finish("ok");
-        if (!write.node.isConnected) steps.append(write.node);
-        write.finish("ok");
-        await showSummary(output);
+        show("Solved");
+        open.onclick = () => openInInspect(output);
+        open.hidden = false;
       } else {
-        (write.node.isConnected ? write : solve).finish("error");
         fail(stopped ? "Stopped" : (errorLine(outcome.stderr) ?? `clab exited with ${outcome.exit_code}`));
       }
     } catch (error) {
-      (write.node.isConnected ? write : solve).finish("error");
       fail(String(error));
     } finally {
       stop.hidden = true;
       setBusy(false);
     }
   });
-
-  const showSummary = async (output: string) => {
-    const { steps, end_time, bodies } = await invoke<Summary>("solution_summary", { path: output });
-    show("Solved");
-    summary.replaceChildren(
-      ...Object.entries({ Solution: output, Steps: steps, "End time": end_time, Bodies: bodies }).flatMap(([name, value]) => [
-        element("dt", name),
-        element("dd", String(value)),
-      ]),
-    );
-    summary.hidden = false;
-    open.onclick = () => openInInspect(output);
-    open.hidden = false;
-  };
 
   /** Loads `path` with its parameters shown, for another pane that wants the model's details. */
   return async (path: string) => {

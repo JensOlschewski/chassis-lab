@@ -62,22 +62,19 @@ fn read_design(path: PathBuf) -> Result<BTreeMap<String, solve::DesignValue>, St
     solve::read_design(&path)
 }
 
-/// Solves a model; `on_progress` gets the percent done as the solver reports it.
+/// Solves a model; `on_line` gets each `--progress` line as clab prints it.
 #[tauri::command]
 async fn run_solve(
     app: AppHandle,
     request: solve::SolveRequest,
     cancel: State<'_, worker::Cancel>,
-    on_progress: Channel<f64>,
+    on_line: Channel<String>,
 ) -> Result<worker::Outcome, String> {
     let prepared = request.case().prepare()?;
     let args = request.args(&prepared);
     let outcome = worker::run_streaming(&app, args, Some(cancel.inner().clone()), move |line| {
-        if let worker::Line::Err(line) = line
-            && let Some(percent) = solve::progress(&line)
-        {
-            let _ = on_progress.send(percent);
-        }
+        let (worker::Line::Out(line) | worker::Line::Err(line)) = line;
+        let _ = on_line.send(line);
     })
     .await;
     drop(prepared);
@@ -141,11 +138,6 @@ async fn install_runtime(app: AppHandle) -> Result<worker::Outcome, String> {
 #[tauri::command]
 fn cancel_solve(cancel: State<'_, worker::Cancel>) {
     cancel.kill();
-}
-
-#[tauri::command]
-fn solution_summary(path: PathBuf) -> Result<solve::Summary, String> {
-    solve::summarize(&path)
 }
 
 /// Writes an exported chart image to the path the user chose in the save dialog.
@@ -318,7 +310,6 @@ fn main() {
             check_runtime,
             install_runtime,
             cancel_solve,
-            solution_summary,
             save_image,
             path_kind,
             read_report_file,

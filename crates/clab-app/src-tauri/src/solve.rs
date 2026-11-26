@@ -590,47 +590,6 @@ impl SolveRequest {
     }
 }
 
-/// The percent done in a solver progress row (`step time percent`), `None` for any other line.
-pub fn progress(line: &str) -> Option<f64> {
-    let mut columns = line.split_whitespace();
-    columns.next()?.parse::<u64>().ok()?;
-    columns.next()?.parse::<f64>().ok()?;
-    let percent = columns.next()?.parse().ok()?;
-    columns.next().is_none().then_some(percent)
-}
-
-#[derive(Serialize, Debug, PartialEq)]
-pub struct Summary {
-    steps: usize,
-    end_time: f64,
-    bodies: usize,
-}
-
-pub fn summarize(solution: &Path) -> Result<Summary, String> {
-    #[derive(Deserialize)]
-    struct Solution {
-        format: Option<u64>,
-        time: Vec<f64>,
-        bodies: serde_json::Map<String, Value>,
-    }
-    let solution = clean_path(solution);
-    let text = std::fs::read_to_string(&solution)
-        .map_err(|error| format!("{}: {error}", solution.display()))?;
-    let Solution {
-        format,
-        time,
-        bodies,
-    } = serde_json::from_str(&text).map_err(|error| format!("not a solution file: {error}"))?;
-    if format != Some(2) {
-        return Err("solution format is not supported: solve the model again".to_owned());
-    }
-    Ok(Summary {
-        steps: time.len(),
-        end_time: time.last().copied().unwrap_or_default(),
-        bodies: bodies.len(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -988,34 +947,5 @@ mod tests {
             "--force".into(),
         ];
         assert_eq!(args, expected);
-    }
-
-    #[test]
-    fn progress_reads_only_table_rows() {
-        assert_eq!(
-            progress("20           1.00e-01        40.00       "),
-            Some(40.0)
-        );
-        assert_eq!(progress("Current Step  Current Time  Progress (%)"), None);
-        assert_eq!(progress("------------ ------------- ------------"), None);
-        assert_eq!(progress(""), None);
-    }
-
-    #[test]
-    fn summary_counts_steps_and_bodies() {
-        let file = NamedTempFile::new().unwrap();
-        std::fs::write(
-            file.path(),
-            r#"{"format": 2, "time": [0.0, 0.5, 1.0], "bodies": {"Link": {}}}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            summarize(file.path()).unwrap(),
-            Summary {
-                steps: 3,
-                end_time: 1.0,
-                bodies: 1
-            }
-        );
     }
 }
