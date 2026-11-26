@@ -376,49 +376,6 @@ pub fn read_design(path: &Path) -> Result<BTreeMap<String, DesignValue>, String>
     })
 }
 
-/// A design variable name for the value at `pointer`: `HP_L_X`, `t_end`, `B1_k1`, `B1_i_euler_angles_1`.
-fn variable_name(pointer: &str) -> String {
-    let parts: Vec<String> = pointer
-        .split('/')
-        .skip(1)
-        .map(|part| part.replace("~1", "/").replace("~0", "~"))
-        .collect();
-    let named = match parts.as_slice() {
-        [group, owner, index] if group == "Hardpoints" => {
-            let axis = index
-                .parse()
-                .ok()
-                .and_then(|i: usize| ["X", "Y", "Z"].get(i).copied());
-            format!("HP_{owner}_{}", axis.unwrap_or(index))
-        }
-        [_, _, key] if parts[0] == "sim_param" => key.clone(),
-        [_, rest @ ..] => rest
-            .iter()
-            .map(|part| match part.parse::<usize>() {
-                Ok(index) => (index + 1).to_string(),
-                Err(_) => part.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join("_"),
-        [] => String::new(),
-    };
-    let name: String = named
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if name.starts_with(|c: char| c.is_ascii_alphabetic()) {
-        name
-    } else {
-        format!("v_{name}")
-    }
-}
-
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     let file =
         std::fs::File::create(path).map_err(|error| format!("{}: {error}", path.display()))?;
@@ -442,8 +399,9 @@ pub struct Prepared {
 }
 
 impl Case {
-    /// The model with the overrides applied, and the design values it needs by variable name.
-    fn resolve(&self) -> Result<(Value, BTreeMap<String, DesignValue>), String> {
+    /// The model with the overrides applied, and the design values it needs by variable name. Unless
+    /// `complete`, a variable without a value is left out instead of failing.
+    fn resolve(&self, complete: bool) -> Result<(Value, BTreeMap<String, DesignValue>), String> {
         let mut model = read_model(&clean_path(&self.model))?;
         let known: BTreeSet<_> = cells(&parameters(&model)?)
             .map(|cell| cell.pointer.clone())
@@ -460,11 +418,15 @@ impl Case {
         let sections = parameters(&model)?;
         let mut values = BTreeMap::new();
         for name in cells(&sections).filter_map(|cell| cell.variable.as_deref()) {
-            let value = self
-                .design
-                .get(name)
-                .ok_or_else(|| format!("Design variable {name} needs a value"))?;
-            values.insert(name.to_string(), value.clone());
+            match self.design.get(name) {
+                Some(value) => _ = values.insert(name.to_string(), value.clone()),
+                None if complete => {
+                    return Err(format!(
+                        "Design variable {name} needs a value: load a design file"
+                    ));
+                }
+                None => {}
+            }
         }
         // Names in drive expressions are only a guess, so they count when the design has them.
         for cell in cells(&sections).filter(|cell| cell.kind == Kind::Expression) {
@@ -481,7 +443,7 @@ impl Case {
     /// sits beside the model because the model's relative paths resolve from its directory.
     pub fn prepare(&self) -> Result<Prepared, String> {
         let model_path = clean_path(&self.model);
-        let (model, values) = self.resolve()?;
+        let (model, values) = self.resolve(true)?;
 
         let mut files = Vec::new();
         let mut design = None;
@@ -514,33 +476,11 @@ impl Case {
     }
 
     /// Saves the model with the overrides applied (design variables stay variables) and, when it has
-    /// any, its design variable values beside it as `<name>-design.json`. With `parametrize`, each
-    /// overridden value becomes a new design variable instead, except drive expressions, which only
-    /// hold variables inside the text. Returns the design file.
-    pub fn export(&self, path: &Path, parametrize: bool) -> Result<Option<PathBuf>, String> {
+    /// any, its design variable values beside it as `<name>-design.json`. An override that is a name
+    /// makes that cell a design variable. Returns the design file.
+    pub fn export(&self, path: &Path) -> Result<Option<PathBuf>, String> {
         let path = clean_path(path);
-        let (mut model, mut values) = self.resolve()?;
-        if parametrize {
-            let kinds: BTreeMap<_, _> = cells(&parameters(&model)?)
-                .map(|cell| (cell.pointer.clone(), cell.kind))
-                .collect();
-            for (pointer, value) in &self.overrides {
-                if kinds.get(pointer) == Some(&Kind::Expression) {
-                    continue;
-                }
-                let name = variable_name(pointer);
-                let design = match value {
-                    Value::String(text) => DesignValue::Text(text.clone()),
-                    number => DesignValue::Number(number.as_f64().unwrap_or_default()),
-                };
-                if values.insert(name.clone(), design).is_some() {
-                    return Err(format!("The variable name {name} is already in use"));
-                }
-                if let Some(slot) = model.pointer_mut(pointer) {
-                    *slot = Value::String(name);
-                }
-            }
-        }
+        let (model, values) = self.resolve(false)?;
         let design = (!values.is_empty()).then(|| {
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
             path.with_file_name(format!("{stem}-design.json"))
@@ -845,7 +785,10 @@ mod tests {
         let mut incomplete = design();
         incomplete.remove("HP_L_Y");
         let error = case(incomplete, &[]).prepare().err().unwrap();
-        assert_eq!(error, "Design variable HP_L_Y needs a value");
+        assert_eq!(
+            error,
+            "Design variable HP_L_Y needs a value: load a design file"
+        );
     }
 
     #[test]
@@ -882,7 +825,7 @@ mod tests {
         let case = case(design(), &[("/Hardpoints/U/0", json!(7.5))]);
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("m.json");
-        let design_path = case.export(&path, false).unwrap().unwrap();
+        let design_path = case.export(&path).unwrap().unwrap();
         assert_eq!(design_path, directory.path().join("m-design.json"));
         assert_eq!(
             read_design(&design_path).unwrap().get("HP_L_Y"),
@@ -891,44 +834,38 @@ mod tests {
         let saved = read_model(&path).unwrap();
         assert_eq!(saved["Hardpoints"]["U"][0], json!(7.5));
         assert_eq!(saved["Hardpoints"]["L"][0], "HP_L_X");
-        let error = case.export(&path, false).unwrap_err();
+        let error = case.export(&path).unwrap_err();
         assert!(error.ends_with("m-design.json already exists"));
-        let error = case.export(&case.model, false).unwrap_err();
+        let error = case.export(&case.model).unwrap_err();
         assert_eq!(error, "Choose a file other than the model");
         assert_eq!(read_model(&case.model).unwrap(), model());
     }
 
     #[test]
-    fn parametrized_export_turns_edits_into_variables() {
-        let case = case(
-            design(),
-            &[
-                ("/Hardpoints/U/0", json!(7.5)),
-                ("/sim_param/step_parameters/t_end", json!(3.0)),
-            ],
-        );
+    fn export_keeps_a_variable_without_value() {
+        let mut incomplete = design();
+        incomplete.remove("HP_L_Y");
+        let case = case(incomplete, &[]);
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("p.json");
-        let design_path = case.export(&path, true).unwrap().unwrap();
-        let saved = read_model(&path).unwrap();
-        assert_eq!(saved["Hardpoints"]["U"][0], "HP_U_X");
-        assert_eq!(saved["sim_param"]["step_parameters"]["t_end"], "t_end");
-        let values = read_design(&design_path).unwrap();
-        assert_eq!(values["HP_U_X"], DesignValue::Number(7.5));
-        assert_eq!(values["t_end"], DesignValue::Number(3.0));
-        assert_eq!(values["HP_L_Y"], design()["HP_L_Y"]);
+        let design_path = case.export(&path).unwrap().unwrap();
+        assert_eq!(read_model(&path).unwrap()["Hardpoints"]["L"][1], "HP_L_Y");
+        assert!(!read_design(&design_path).unwrap().contains_key("HP_L_Y"));
     }
 
     #[test]
-    fn variable_names_follow_the_place() {
-        for (pointer, name) in [
-            ("/Hardpoints/L/1", "HP_L_Y"),
-            ("/sim_param/step_parameters/h", "h"),
-            ("/primary_bushings/B1/stiffness/0", "B1_stiffness_1"),
-            ("/additional_forces/S 2/free_length/0", "S_2_free_length_1"),
-        ] {
-            assert_eq!(variable_name(pointer), name);
-        }
+    fn a_named_override_becomes_a_design_variable() {
+        let mut values = design();
+        values.insert("HP_U_X".into(), DesignValue::Number(7.5));
+        let case = case(values, &[("/Hardpoints/U/0", json!("HP_U_X"))]);
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("p.json");
+        let design_path = case.export(&path).unwrap().unwrap();
+        assert_eq!(read_model(&path).unwrap()["Hardpoints"]["U"][0], "HP_U_X");
+        assert_eq!(
+            read_design(&design_path).unwrap()["HP_U_X"],
+            DesignValue::Number(7.5)
+        );
     }
 
     #[test]

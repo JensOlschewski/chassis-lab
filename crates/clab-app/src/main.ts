@@ -1,6 +1,7 @@
 import { setupAnalyze } from "./analyze";
 import { setupConvert } from "./convert";
 import { setupInspect } from "./inspect";
+import { setupOptimize } from "./optimize";
 import { setupSession } from "./session";
 import { setupSolve } from "./solve";
 
@@ -23,8 +24,12 @@ const analyze = setupAnalyze((directory, test) => {
   showPane("inspect");
   void inspect.show(directory, test);
 });
-setupSolve((path) => {
+const openModel = setupSolve((path) => {
   showPane("inspect");
   void inspect.show(path);
+});
+setupOptimize((path) => {
+  showPane("solve");
+  void openModel(path);
 });
 setupSession(setupConvert(), inspect, analyze);

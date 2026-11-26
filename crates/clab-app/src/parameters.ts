@@ -33,8 +33,17 @@ const UNDEFINED = "~";
 
 const isEmpty = (input: HTMLInputElement) =>
   input.type === "text" && input.dataset.kind !== "expression" && input.value.trim() === "";
+/** A design variable shows as its quoted name, `"HP_L_X"`, in a number or text cell; a switch shows its value. */
+const NAMED = /^"([A-Za-z][A-Za-z0-9_]*)"$/;
+const nameIn = (input: HTMLInputElement) => NAMED.exec(input.value.trim())?.[1];
+const holdsName = (input: HTMLInputElement) => input.dataset.kind === "number" || input.dataset.kind === "text";
+export const isNamed = (input: HTMLInputElement) => holdsName(input) && nameIn(input) !== undefined;
+/** Numbers must be numbers, texts (characteristic files) `.json` paths, unless the cell holds a name. */
 const isBad = (input: HTMLInputElement) =>
-  isEmpty(input) || (input.dataset.kind === "number" && Number.isNaN(Number(input.value)));
+  isEmpty(input) ||
+  (!isNamed(input) &&
+    ((input.dataset.kind === "number" && Number.isNaN(Number(input.value))) ||
+      (input.dataset.kind === "text" && !/\.json$/i.test(input.value.trim()))));
 
 const inputs = (root: ParentNode) => [...root.querySelectorAll<HTMLInputElement>("input[data-kind]")];
 
@@ -79,12 +88,14 @@ function createInput(cell: Cell, kept: Map<string, string>) {
   }
   if (cell.variable) {
     input.dataset.variable = cell.variable;
-    write(input, kept.get(cell.variable) ?? (cell.kind === "switch" ? "false" : ""));
+    if (cell.kind === "switch") write(input, kept.get(cell.variable) ?? "false");
+    else write(input, `"${cell.variable}"`);
   } else {
     input.dataset.default = literal(cell);
     write(input, literal(cell));
     input.disabled = cell.locked;
   }
+  input.classList.toggle("named", isNamed(input));
   return input;
 }
 
@@ -128,6 +139,7 @@ export function createSection(section: Section, kept: Map<string, string>, open:
 
   setupGrid(body, (input) => {
     input.classList.toggle("invalid", !isEmpty(input) && isBad(input));
+    input.classList.toggle("named", isNamed(input));
   });
 
   const head = element("tr");
@@ -147,10 +159,10 @@ export function createSection(section: Section, kept: Map<string, string>, open:
 export const keptVariables = (root: ParentNode) =>
   new Map(inputs(root).flatMap((input) => (input.dataset.variable ? [[input.dataset.variable, read(input)] as const] : [])));
 
-/** Sets a design variable in every cell that uses it: the same variable appears in several places. */
+/** Sets a design variable switch in every cell that uses it; number and text cells keep showing the name. */
 export function setVariable(root: ParentNode, name: string, value: DesignValue) {
   inputs(root)
-    .filter((input) => input.dataset.variable === name)
+    .filter((input) => input.dataset.variable === name && input.type === "checkbox")
     .forEach((input) => {
       write(input, String(value));
       fire(input);
@@ -159,19 +171,32 @@ export function setVariable(root: ParentNode, name: string, value: DesignValue) 
 
 export const variableNames = (root: ParentNode) => new Set(keptVariables(root).keys());
 
-/** The design variable values, and the literals the user changed (by JSON pointer), as the backend expects them. */
+/**
+ * The design variable values, and the literals the user changed (by JSON pointer), as the backend expects them.
+ * Number and text variables take their values from a design file, so only switches give one here. A cell with a
+ * new name goes in as that name; a plain cell named so gets its model value. A variable cell given a value stops
+ * being a variable.
+ */
 export function readParameters(root: ParentNode) {
   const design: Record<string, DesignValue> = {};
   const overrides: Record<string, number | string> = {};
+  const named: Record<string, DesignValue> = {};
   for (const input of inputs(root)) {
     const { kind, variable, pointer } = input.dataset;
-    if (variable) {
-      design[variable] = kind === "number" ? Number(input.value) : kind === "switch" ? input.checked : input.value;
+    const name = isNamed(input) ? nameIn(input)! : undefined;
+    if (kind === "switch" && variable) {
+      design[variable] = input.checked;
+    } else if (name !== undefined) {
+      if (name === variable) continue;
+      overrides[pointer!] = name;
+      if (!variable) named[name] ??= kind === "number" ? Number(input.dataset.default) : input.dataset.default!;
+    } else if (variable) {
+      overrides[pointer!] = kind === "number" ? Number(input.value) : input.value.trim();
     } else if (modelValue(input) !== modelDefault(input)) {
       overrides[pointer!] = modelValue(input);
     }
   }
-  return { design, overrides };
+  return { design: { ...named, ...design }, overrides };
 }
 
 /** The first cell the user must still fix, with its section opened so it can be seen. */
