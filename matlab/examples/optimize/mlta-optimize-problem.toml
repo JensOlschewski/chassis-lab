@@ -12,7 +12,7 @@ v_wc      = "pwt.characteristics.wheel_velocities.l_wc"
 
 # PWT Calculate projected wheelpatch velocity
 r_wcwp    = "pwt.characteristics.wheel_points.l_wp -pwt.characteristics.wheel_points.l_wc"
- omega_wca = "pwt.bodies.B2_Wheelcarrier.velocity.angular"
+omega_wca = "pwt.bodies.B2_Wheelcarrier.velocity.angular"
 v_wp_proj = "cross(omega_wca, r_wcwp) + pwt.characteristics.wheel_velocities.l_wc"
 
 epsilon = "rad2deg(atan(v_wc.x ./ v_wc.z))"
@@ -28,5 +28,5 @@ value  = "-epsilon_ast(mid_idx)"
 [constraints]
 min_epsilon = "epsilon(mid_idx) >= 10"
 max_epsilon = "epsilon(mid_idx) <= 15"
-min_epsilon_ast = "epsilon_ast(mid_idx) >= 8"
-max_epsilon_ast = "epsilon_ast(mid_idx) <= 15"
+min_epsilon_ast = "epsilon_ast(mid_idx) >= 20"
+max_epsilon_ast = "epsilon_ast(mid_idx) <= 30"

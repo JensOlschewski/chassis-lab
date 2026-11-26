@@ -1045,7 +1045,7 @@
     "sim_param": {
         "step_parameters": {
             "t_start": [0],
-            "t_end": [100],
+            "t_end": [30],
             "h": [1],
             "h_preload": [0.1]
         },
@@ -1081,50 +1081,36 @@
     "drives": {
         "force_torque_drives": {
             "Force Left Wheelcenter": {
-                "signal": [
-                    "sin(2*pi*1/30*TIME)*1000*0",
-                    "sin(2*pi*1/30*TIME)*1000*0",
-                    "sin(2*pi*1/30*TIME)*1000*0",
-                    "~",
-                    "~",
-                    "~"
-                ],
+                "signal": [ "~", "~", "~", "~", "~", "~" ],
                 "i": 0,
                 "j": 3
             },
             "Force Right Wheelcenter": {
-                "signal": [
-                    "sin(2*pi*1/30*TIME)*1000*0",
-                    "sin(2*pi*1/30*TIME)*1000*0",
-                    "sin(pi+2*pi*1/30*TIME)*1000*0",
-                    "~",
-                    "~",
-                    "~"
-                ],
+                "signal": [ "~", "~", "~", "~", "~", "~" ],
                 "i": 0,
                 "j": 10
             },
             "Force Left Wheelpatch": {
-                "signal": ["~", "sin(2*pi*1/30*TIME)*1000*0", "~", "~", "~", "~"],
+                "signal": [ "~", "~", "~", "~", "~", "~" ],
                 "i": 0,
                 "j": 4
             },
             "Force Right Wheelpatch": {
-                "signal": ["~", "sin(2*pi*1/30*TIME)*1000*0", "~", "~", "~", "~"],
+                "signal": [ "~", "~", "~", "~", "~", "~" ],
                 "i": 0,
                 "j": 11
             }
         },
         "relonomic_drives": {
             "Displacement Left Platform": {
-                "signal": ["~", "~", "+1*TIME", "~", "~", "~"],
+                "signal": ["~", "~", "sin(2*pi*1/30*TIME)*100", "~", "~", "~"],
                 "i": 0,
                 "j": 5,
                 "jointTopology": "secondary",
                 "jointID": 2
             },
             "Displacement Right Platform": {
-                "signal": ["~", "~", "+1*TIME", "~", "~", "~"],
+                "signal": ["~", "~", "sin(2*pi*1/30*TIME)*100", "~", "~", "~"],
                 "i": 0,
                 "j": 12,
                 "jointTopology": "secondary",
