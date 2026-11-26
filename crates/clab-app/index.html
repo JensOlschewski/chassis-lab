@@ -220,7 +220,6 @@
           <fieldset id="solve-design" hidden>
             <div class="path-row">
               <button type="button" id="solve-load-design">Load design file…</button>
-              <button type="button" id="solve-save">Save model…</button>
               <small id="solve-design-note" class="optional"></small>
             </div>
             <div id="solve-sections"></div>
@@ -228,6 +227,7 @@
 
           <div class="path-row actions">
             <button type="submit" class="primary">Solve</button>
+            <button type="button" id="solve-save" hidden>Save model…</button>
             <button type="button" id="solve-stop" hidden>Stop</button>
             <button type="button" id="solve-open" hidden>Open in Inspect</button>
             <button type="button" id="solve-install-runtime" hidden>Install MATLAB Runtime…</button>
@@ -237,7 +237,12 @@
         <p id="solve-status" class="status" role="status"></p>
         <ul id="solve-steps" class="steps"></ul>
         <dl id="solve-summary" class="info" hidden></dl>
-
+        <dialog id="solve-help" class="help-dialog">
+          <h2></h2>
+          <p></p>
+          <dl></dl>
+          <menu><button type="button">Close</button></menu>
+        </dialog>
       </section>
       <section id="optimize" class="pane wide" hidden>
         <h2>Optimize</h2>
@@ -276,6 +281,12 @@
 
         <p id="optimize-status" class="status" role="status"></p>
         <pre id="optimize-log" class="output"></pre>
+        <dialog id="optimize-help" class="help-dialog">
+          <h2></h2>
+          <p></p>
+          <dl></dl>
+          <menu><button type="button">Close</button></menu>
+        </dialog>
       </section>
     </main>
 

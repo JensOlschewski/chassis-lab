@@ -291,6 +291,7 @@ fn load_session(app: AppHandle, path: PathBuf) -> Result<LoadedSession, String> 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(worker::Cancel::default())
         .setup(|app| {
             // Extracted inputs of earlier runs are unreachable now; a failure only wastes disk.

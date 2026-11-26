@@ -1,4 +1,5 @@
 import { fire, setupGrid } from "./grid";
+import { helpMark } from "./help";
 import { element } from "./sections";
 
 export type DesignValue = number | boolean | string;
@@ -15,6 +16,8 @@ interface Cell {
   variable: string | null;
   value: unknown;
   locked: boolean;
+  /** Other pointers that take the same value. */
+  also: string[];
 }
 
 /** A table of related model values, as the backend lists them. */
@@ -79,7 +82,7 @@ const modelValue = (input: HTMLInputElement) => {
 
 function createInput(cell: Cell, kept: Map<string, string>) {
   const input = document.createElement("input");
-  Object.assign(input.dataset, { kind: cell.kind, pointer: cell.pointer });
+  Object.assign(input.dataset, { kind: cell.kind, pointer: cell.pointer, also: JSON.stringify(cell.also) });
   input.title = cell.label;
   if (cell.kind === "switch") {
     input.type = "checkbox";
@@ -116,11 +119,34 @@ function createDriveToggle(row: HTMLTableRowElement, cells: Cell[]) {
   return apply;
 }
 
-/** A foldable table of one section. Variable inputs take their text from `kept`, by variable name. */
-export function createSection(section: Section, kept: Map<string, string>, open: boolean) {
-  const body = document.createElement("tbody");
-  const drives = section.id === "drives";
+/** A foldable section: a table, or for simulation one row of labelled inputs like the Optimizer Options. */
+export function createSection(section: Section, kept: Map<string, string>, open: boolean, onHelp: () => void) {
+  const details = document.createElement("details");
+  details.open = open;
+  const summary = element("summary", section.title);
+  summary.append(helpMark(section.title, onHelp));
+  const scroll = element("div", "", "grid-scroll");
+  details.append(summary, scroll);
 
+  if (section.id === "simulation") {
+    const row = element("div", "", "option-row");
+    const mark = (input: HTMLInputElement) => {
+      input.classList.toggle("invalid", !isEmpty(input) && isBad(input));
+      input.classList.toggle("named", isNamed(input));
+    };
+    for (const cell of section.rows[0].cells) {
+      const label = element("label", section.columns[cell.column]);
+      const input = createInput(cell, kept);
+      input.addEventListener("input", () => mark(input));
+      label.append(input);
+      row.append(label);
+    }
+    scroll.append(row);
+    return details;
+  }
+
+  const drives = section.id === "drives";
+  const body = document.createElement("tbody");
   section.rows.forEach(({ name, cells }) => {
     const row = body.insertRow();
     row.insertCell().textContent = name;
@@ -147,11 +173,7 @@ export function createSection(section: Section, kept: Map<string, string>, open:
   const table = element("table", "", "grid");
   table.createTHead().append(head);
   table.append(body);
-
-  const details = element("details");
-  details.open = open;
-  details.append(element("summary", section.title), element("div", "", "grid-scroll"));
-  details.lastElementChild!.append(table);
+  scroll.append(table);
   return details;
 }
 
@@ -182,18 +204,20 @@ export function readParameters(root: ParentNode) {
   const overrides: Record<string, number | string> = {};
   const named: Record<string, DesignValue> = {};
   for (const input of inputs(root)) {
-    const { kind, variable, pointer } = input.dataset;
+    const { kind, variable } = input.dataset;
+    const pointers = [input.dataset.pointer!, ...(JSON.parse(input.dataset.also ?? "[]") as string[])];
+    const override = (value: number | string) => pointers.forEach((pointer) => (overrides[pointer] = value));
     const name = isNamed(input) ? nameIn(input)! : undefined;
     if (kind === "switch" && variable) {
       design[variable] = input.checked;
     } else if (name !== undefined) {
       if (name === variable) continue;
-      overrides[pointer!] = name;
+      override(name);
       if (!variable) named[name] ??= kind === "number" ? Number(input.dataset.default) : input.dataset.default!;
     } else if (variable) {
-      overrides[pointer!] = kind === "number" ? Number(input.value) : input.value.trim();
+      override(kind === "number" ? Number(input.value) : input.value.trim());
     } else if (modelValue(input) !== modelDefault(input)) {
-      overrides[pointer!] = modelValue(input);
+      override(modelValue(input));
     }
   }
   return { design: { ...named, ...design }, overrides };

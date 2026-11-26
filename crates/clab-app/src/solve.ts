@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { ask, message, save } from "@tauri-apps/plugin-dialog";
 import { pick, setupBrowse } from "./browse";
+import { Help, setupHelp } from "./help";
 import {
   DesignValue,
   Section,
@@ -44,10 +45,61 @@ function createStep(label: string) {
   };
 }
 
+/** The parameter tables of the model, by the backend section `id`. Same shape as Optimize's SECTIONS. */
+const SECTIONS: { id: string; subtitle?: string; help?: Help }[] = [
+  {
+    id: "hardpoints",
+    subtitle: "The named points of the model",
+    help: [
+      ["X, Y, Z", "Coordinates of the point."],
+      ["Design variable", "A quoted name for example \"DESIGN_VAR\" in a cell makes it a design variable. Value comes from design file"],
+    ],
+  },
+  {
+    id: "bushings",
+    subtitle: "Stiffness and orientation of the bushings",
+    help: [
+      ["Active", "Switches the bushing on or off."],
+      ["k1 … k6", "Stiffness in the six directions, or a stiffness file name for the whole bushing."],
+      ["e 1 … 3", "Euler angles $\\varphi, \\theta, \\psi$ in degrees, z-x-z convention: $R = R_z(\\varphi)\\,R_x(\\theta)\\,R_z(\\psi)$ <a href=\"https://de.wikipedia.org/wiki/Eulersche_Winkel\">More Details</a>"],
+    ],
+  },
+  {
+    id: "forces",
+    subtitle: "Springs between two points",
+    help: [
+      ["Active", "Switches the force element on or off."],
+      ["Stiffness", "Linear spring stiffness, or the name of a stiffness JSON file."],
+      ["Free length", "Length of the spring without load. Empty uses the distance between its two points at the start."],
+    ],
+  },
+  {
+    id: "drives",
+    subtitle: "Forces, torques and motions over time",
+    help: [
+      ["x … rz", "Expression for one component over time. Use ~ for an unused component."],
+      [
+        "Expressions", "MATLAB expressions in $\\text{TIME}$ (or $\\text{time}$) \
+        , For Example $sin\\left(\\frac{2\\pi\\,\\text{TIME}}{30}\\right)$"
+      ]
+    ],
+  },
+  {
+    id: "simulation",
+    subtitle: "Time range and step size of the simulation",
+    help: [
+      ["t_start", "First time point. Drive expressions see it as TIME."],
+      ["t_end", "Last time point."],
+      ["h", "Step size. The solver computes $(t_\\text{end}-t_\\text{start})/h+1$ time points."],
+    ],
+  },
+];
+
 export function setupSolve(openInInspect: (path: string) => void) {
   const form = document.querySelector<HTMLFormElement>("#solve-form")!;
   const designFields = document.querySelector<HTMLElement>("#solve-design")!;
   const designNote = document.querySelector<HTMLElement>("#solve-design-note")!;
+  const saveButton = document.querySelector<HTMLElement>("#solve-save")!;
   const adjust = document.querySelector<HTMLInputElement>("#solve-adjust")!;
   const sections = document.querySelector<HTMLElement>("#solve-sections")!;
   const status = document.querySelector<HTMLElement>("#solve-status")!;
@@ -112,7 +164,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
         installRuntime.hidden = false;
         return offerInstall();
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   /** Values of a loaded design file; names without a cell (such as inside drive expressions) still reach the solver. */
@@ -126,13 +178,19 @@ export function setupSolve(openInInspect: (path: string) => void) {
 
   const renderSections = (parameters: Section[]) => {
     const kept = keptVariables(sections);
-    sections.replaceChildren(...parameters.map((section) => createSection(section, kept, false)));
+    sections.replaceChildren(
+      ...parameters.map((section) => createSection(section, kept, false, () => {
+        const entry = SECTIONS.find((s) => s.id === section.id);
+        if (entry?.help) showHelp(section.title, entry.subtitle, entry.help);
+      })),
+    );
     showDesign();
     designNote.textContent = "";
   };
 
   const showDesign = () => {
     designFields.hidden = !adjust.checked || !sections.hasChildNodes();
+    saveButton.hidden = designFields.hidden;
   };
   adjust.addEventListener("change", showDesign);
 
@@ -217,6 +275,8 @@ export function setupSolve(openInInspect: (path: string) => void) {
     stopped = true;
     void invoke("cancel_solve");
   });
+
+  const showHelp = setupHelp(document.querySelector<HTMLDialogElement>("#solve-help")!);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
