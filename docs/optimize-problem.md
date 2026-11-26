@@ -170,7 +170,7 @@ in use.
 
 ```toml
 [models]
-pwt = "mlta-model-file-1e2-param.json"
+pwt = "mlta-optimize-model-file-1e2.json"
 
 [optimizer]
 max_iterations = 100
