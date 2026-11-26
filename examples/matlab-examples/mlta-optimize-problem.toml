@@ -1,29 +1,28 @@
 [models]
-pwt = "mlta-model-file-1e2-param.json"
+pwt = "mlta-optimize-model-file-1e2.json"
 
 [optimizer]
 max_iterations = 100
 
 [design]
 HP_L_Z = [426.38, 446.38]
+HP_L_X = [3935.2, 3955.2]
+HP_L_Y = [-549.68, -529.68]
 
 [signals]
-v_wc      = "pwt.characteristics.wheel_velocities.l_wc"
-
-# PWT Calculate projected wheelpatch velocity
-r_wcwp    = "pwt.characteristics.wheel_points.l_wp -pwt.characteristics.wheel_points.l_wc"
+v_wc = "pwt.characteristics.wheel_velocities.l_wc"
+r_wcwp = "pwt.characteristics.wheel_points.l_wp -pwt.characteristics.wheel_points.l_wc"
 omega_wca = "pwt.bodies.B2_Wheelcarrier.velocity.angular"
 v_wp_proj = "cross(omega_wca, r_wcwp) + pwt.characteristics.wheel_velocities.l_wc"
-
 epsilon = "rad2deg(atan(v_wc.x ./ v_wc.z))"
 epsilon_ast = "rad2deg(atan(v_wp_proj.x ./ v_wp_proj.z))"
 mid_idx = "round(numel(epsilon)/2)"
 
 [objectives.epsilon_design]
-value  = "-epsilon(mid_idx)"
+value = "-epsilon(mid_idx)"
 
 [objectives.epsilon_ast_design]
-value  = "-epsilon_ast(mid_idx)"
+value = "-epsilon_ast(mid_idx)"
 
 [constraints]
 min_epsilon = "epsilon(mid_idx) >= 10"

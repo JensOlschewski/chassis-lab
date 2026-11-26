@@ -518,6 +518,7 @@ dependencies = [
 name = "clab-app"
 version = "0.10.3"
 dependencies = [
+ "indexmap 2.14.2",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -525,6 +526,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tempfile",
+ "toml 0.9.12+spec-1.1.0",
  "zip",
 ]
 
