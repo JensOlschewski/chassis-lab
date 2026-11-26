@@ -1,5 +1,5 @@
 [models]
-pwt = "mlta-model-file-1e2.json"
+pwt = "mlta-model-file-1e2-param.json"
 
 [optimizer]
 max_iterations = 100

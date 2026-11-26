@@ -2,7 +2,7 @@
 
 Reference for the TOML file read by `clab optimize`. See the README for the
 command line flags. A worked example is
-`matlab/examples/optimize/mlta-optimize-problem.toml`.
+`examples/matlab-examples/mlta-optimize-problem.toml`.
 
 The file defines which models to solve, which design variables may change,
 what to minimize and which limits must hold. `clab` checks the file (syntax,
@@ -170,7 +170,7 @@ in use.
 
 ```toml
 [models]
-pwt = "mlta-model-file-1e2.json"
+pwt = "mlta-model-file-1e2-param.json"
 
 [optimizer]
 max_iterations = 100
