@@ -1,5 +1,6 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { setupBrowse } from "./browse";
+import { helpMark, setupHelp } from "./help";
 import { describe, run } from "./worker";
 
 /** clab exit code: warnings need the user's confirmation. */
@@ -63,6 +64,20 @@ export function setupConvert() {
     testField.hidden = setupField.hidden = readRequest(form).test !== "knc";
   };
   form.addEventListener("change", syncTest);
+
+  const showHelp = setupHelp(document.querySelector<HTMLDialogElement>("#convert-help")!);
+  setupField.querySelector("legend")!.append(
+    helpMark("Setup", () =>
+      showHelp("Setup", "The test conditions, written as the code b1e1f1r1. 1 is on or connected, 0 is off or disconnected.", [
+        ["b", "Brakes applied."],
+        ["e", "Steering engine on."],
+        ["f", "Front anti-roll bar connected."],
+        ["r", "Rear anti-roll bar connected."],
+        ["Lommel data", "The rig stores the setup at the top of the .acd file, as <code>TestInfo:</code> lines: <code>brakeson</code>, <code>engineon</code>, <code>farbon</code> and <code>rarbon</code>, with the value in the last column. In the example vertical file, lines 3 to 6 read 0, 0, 1, 1: the code <code>b0e0f1r1</code>. Tick the boxes to match."],
+        ["Adams results", "The .res file does not store it. Tick the boxes to match the simulation you ran: brakes, steering engine and anti-roll bars as set in that model."],
+      ]),
+    ),
+  );
 
   setupBrowse(form);
 

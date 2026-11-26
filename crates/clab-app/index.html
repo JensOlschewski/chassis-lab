@@ -49,7 +49,7 @@
               </select>
             </label>
             <label id="subtest-field" hidden>
-              Test
+              Subtest
               <select name="subtest">
                 <option value="vertical">vertical</option>
                 <option value="roll">roll</option>
@@ -61,10 +61,10 @@
 
           <fieldset id="setup-field" hidden>
             <legend>Setup</legend>
-            <label class="check"><input type="checkbox" name="brakes" /> Brakes applied</label>
-            <label class="check"><input type="checkbox" name="engine" /> Steering engine on</label>
-            <label class="check"><input type="checkbox" name="front_arb" /> Front ARB connected</label>
-            <label class="check"><input type="checkbox" name="rear_arb" /> Rear ARB connected</label>
+            <label class="check"><input type="checkbox" name="brakes" /> Brakes</label>
+            <label class="check"><input type="checkbox" name="engine" /> Steering engine</label>
+            <label class="check"><input type="checkbox" name="front_arb" /> Front ARB</label>
+            <label class="check"><input type="checkbox" name="rear_arb" /> Rear ARB</label>
           </fieldset>
 
           <label>
@@ -82,6 +82,12 @@
 
         <p id="convert-status" class="status" role="status"></p>
         <pre id="convert-output" class="output"></pre>
+        <dialog id="convert-help" class="help-dialog">
+          <h2></h2>
+          <p></p>
+          <dl></dl>
+          <menu><button type="button">Close</button></menu>
+        </dialog>
       </section>
       <section id="inspect" class="pane wide" hidden>
         <h2>Inspect</h2>
