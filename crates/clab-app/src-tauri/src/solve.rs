@@ -208,7 +208,8 @@ fn shares_orientation(model: &Value) -> bool {
     let same = |a: &[Cell], b: &[Cell]| {
         a.len() == b.len()
             && a.iter().zip(b).all(|(a, b)| {
-                (&a.label, &a.variable, &a.value, a.locked) == (&b.label, &b.variable, &b.value, b.locked)
+                (&a.label, &a.variable, &a.value, a.locked)
+                    == (&b.label, &b.variable, &b.value, b.locked)
             })
     };
     bushing_names(model).into_iter().all(|(group, name)| {
@@ -868,12 +869,18 @@ mod tests {
         assert_eq!(&bushings.columns[7..], ["e 1", "e 2", "e 3"]);
         let cells = &bushings.rows[0].cells;
         assert_eq!(cells.len(), 3);
-        assert_eq!(cells[0].also, ["/primary_bushings/B/j/orientation/euler_angles/0"]);
+        assert_eq!(
+            cells[0].also,
+            ["/primary_bushings/B/j/orientation/euler_angles/0"]
+        );
 
         model["primary_bushings"]["B"]["j"]["orientation"]["euler_angles"][2] = json!(9);
         let sections = parameters(&model).unwrap();
         let bushings = sections.iter().find(|s| s.id == "bushings").unwrap();
-        assert_eq!(&bushings.columns[7..], ["i 1", "i 2", "i 3", "j 1", "j 2", "j 3"]);
+        assert_eq!(
+            &bushings.columns[7..],
+            ["i 1", "i 2", "i 3", "j 1", "j 2", "j 3"]
+        );
         assert_eq!(bushings.rows[0].cells.len(), 6);
     }
 
