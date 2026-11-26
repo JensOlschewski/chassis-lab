@@ -241,14 +241,14 @@ mod tests {
 
     fn example() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../matlab/examples/optimize/mlta-optimize-problem.toml")
+            .join("../../../examples/matlab-examples/mlta-optimize-problem.toml")
     }
 
     #[test]
     fn example_loads_with_absolute_models_and_saves_relative() {
         let problem = load(&example()).unwrap();
         let model = &problem.models["pwt"];
-        assert!(model.is_absolute() && model.ends_with("mlta-model-file-1e2.json"));
+        assert!(model.is_absolute() && model.ends_with("mlta-model-file-1e2-param.json"));
         assert_eq!(problem.design["HP_L_Z"], [426.38, 446.38]);
         assert_eq!(problem.optimizer.max_iterations, Some(100));
         let signals: Vec<_> = problem.signals.keys().map(String::as_str).collect();
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn model_names_list_bodies_points_and_joints() {
         let model = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../matlab/examples/solve/mlta-model-file-1e2.json");
+            .join("../../../examples/matlab-examples/mlta-model-file-1e2.json");
         let names = model_names(&model).unwrap();
         assert!(
             names
