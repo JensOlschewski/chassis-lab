@@ -45,16 +45,6 @@ export function readRequest(form: HTMLFormElement): ConvertRequest {
   };
 }
 
-/** The form as stored in a session file. */
-export interface ConvertState {
-  input: string | null;
-  test: string;
-  subtest: string | null;
-  setup: string | null;
-  output: string | null;
-  force: boolean;
-}
-
 export function setupConvert() {
   const form = document.querySelector<HTMLFormElement>("#convert-form")!;
   const testField = document.querySelector<HTMLElement>("#subtest-field")!;
@@ -72,8 +62,6 @@ export function setupConvert() {
   const syncTest = () => {
     testField.hidden = setupField.hidden = readRequest(form).test !== "knc";
   };
-  const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement;
-
   form.addEventListener("change", syncTest);
 
   setupBrowse(form);
@@ -109,23 +97,4 @@ export function setupConvert() {
       submit.disabled = false;
     }
   });
-
-  return {
-    get(): ConvertState {
-      const { input, confirmed, ...rest } = readRequest(form);
-      return { input: input || null, ...rest };
-    },
-    set(state: ConvertState): void {
-      field("input").value = state.input ?? "";
-      field("test").value = state.test;
-      if (state.subtest) field("subtest").value = state.subtest;
-      SETUP_FIELDS.forEach(([letter, name]) => {
-        (field(name) as HTMLInputElement).checked = state.setup?.includes(`${letter}1`) ?? false;
-      });
-      field("output").value = state.output ?? "";
-      (field("force") as HTMLInputElement).checked = state.force;
-      syncTest();
-      show("", true);
-    },
-  };
 }

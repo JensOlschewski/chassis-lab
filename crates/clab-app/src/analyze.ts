@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { pick, setupBrowse } from "./browse";
 import { swatch } from "./colors";
-import { readReport, roleOf, sectionsFromReport } from "./report";
+import { roleOf } from "./report";
 import {
   BadgeState,
   ComparisonSection,
@@ -56,31 +56,6 @@ const parentOf = (path: string) => {
 interface ReportBadge {
   badge: HTMLElement;
   phases: string[];
-}
-
-/** The form as stored in a session file: paths only, never results. */
-export interface AnalyzeState {
-  config: string | null;
-  /** One input is analyzed; more are compared, the first being the baseline. */
-  inputs: string[];
-  /** Legend name per input, in order; empty keeps the default. */
-  names: string[];
-  tolerances: boolean;
-  generate: boolean;
-  report: string | null;
-}
-
-interface ChangedInput {
-  path: string;
-  change: "missing" | "changed";
-}
-
-/** Saved results are from an earlier run; say whether the inputs they came from still match. */
-async function describeSaved(directory: string, subject: string, advice: string): Promise<{ message: string; ok: boolean }> {
-  const changed = await invoke<ChangedInput[]>("changed_report_inputs", { directory });
-  if (changed.length === 0) return { message: `${subject}. Inputs unchanged since the run. ${advice}`, ok: true };
-  const list = changed.map(({ path, change }) => `${path} (${change})`).join(", ");
-  return { message: `${subject}. Inputs changed since the run: ${list}. Run again to update.`, ok: false };
 }
 
 /** `showReport` opens a report folder in Inspect, at the plots of `subtest` if given. */
@@ -146,9 +121,6 @@ export function setupAnalyze(showReport: (directory: string, subtest?: string) =
   const comparing = () => rows().length > 1;
   /** The Baseline/Candidate N role of the `index`th row, which names its column unless the user did. */
 
-  /** Tells the session that the input rows changed; each field reports its own edits. */
-  const changed = () => inputsRoot.dispatchEvent(new Event("change", { bubbles: true }));
-
   /** Marks rows with their plot colors, and switches the form between Analyze and Compare. */
   const syncRows = () => {
     rows().forEach((row, index) => {
@@ -195,7 +167,6 @@ export function setupAnalyze(showReport: (directory: string, subtest?: string) =
     remove.addEventListener("click", () => {
       row.remove();
       syncRows();
-      changed();
     });
     row.append(role, label, input, browse, remove);
     inputsRoot.append(row);
@@ -205,7 +176,6 @@ export function setupAnalyze(showReport: (directory: string, subtest?: string) =
 
   addInput.addEventListener("click", () => {
     addRow().focus();
-    changed();
   });
 
   /** The report folder to write, `null` for none; `undefined` when the user cancels a confirmation. */
@@ -314,75 +284,5 @@ export function setupAnalyze(showReport: (directory: string, subtest?: string) =
     }
   });
 
-  const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement;
-  const saved = (name: string) => clean(field(name).value) || null;
-
   addRow();
-
-  return {
-    get(): AnalyzeState {
-      const filled = rows().filter((row) => clean(pathField(row).value));
-      return {
-        config: saved("config"),
-        inputs: filled.map((row) => clean(pathField(row).value)),
-        names: filled.map((row) => nameField(row).value.trim()),
-        tolerances: tolerances.checked,
-        generate: generate.checked,
-        report: saved("report"),
-      };
-    },
-    /** Restore saved report results as historical, never as a new analysis. */
-    async set(state: AnalyzeState): Promise<void> {
-      const current = ++revision;
-      field("config").value = state.config ?? "";
-      inputsRoot.replaceChildren();
-      (state.inputs.length > 0 ? state.inputs : [""]).forEach((input, index) => addRow(input, state.names[index]));
-      tolerances.checked = state.tolerances;
-      generate.checked = state.generate;
-      folder.value = state.report ?? "";
-      syncGenerate();
-      sections.replaceChildren();
-      sections.classList.remove("finished");
-      reportButton.hidden = true;
-      plotsButton.hidden = true;
-      shown = null;
-      phaseStates.clear();
-      reportBadges.length = 0;
-      show("", true);
-
-      const directory = state.report;
-      if (!directory) return;
-      try {
-        if ((await invoke<string>("path_kind", { path: directory })) !== "report") {
-          if (current === revision) show("Saved report is unavailable. Run it again to generate it.", false);
-          return;
-        }
-        const report = await readReport(directory);
-        if (current !== revision) return;
-        if (report.command === "compare") {
-          shown = directory;
-          reportButton.hidden = false;
-          plotsButton.hidden = false;
-          const { message, ok } = await describeSaved(directory, `Saved comparison report: ${directory}`, "Show it in Inspect.");
-          if (current === revision) show(message, ok);
-          return;
-        }
-        if (report.command !== "analyze") return;
-        const cards = sectionsFromReport(report).map((section) => renderSection(section, {
-          badge: createBadge("ok"),
-          plots: section.test === "knc" ? join(directory, "plots", "knc", String(section.subtest)) : undefined,
-          open: section.test === "knc" ? () => showReport(directory, String(section.subtest)) : undefined,
-        }));
-        sections.replaceChildren(...cards);
-        sections.classList.add("finished");
-        shown = directory;
-        reportButton.hidden = false;
-        plotsButton.hidden = false;
-        const { message, ok } = await describeSaved(directory, "Saved report results", "Not rerun.");
-        if (current === revision) show(message, ok);
-      } catch (error) {
-        if (current === revision) show(`Could not restore saved report: ${error}`, false);
-      }
-    },
-  };
 }

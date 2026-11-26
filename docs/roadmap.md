@@ -167,9 +167,6 @@ Architecture and scope:
 - Reuse Rust-owned configuration, validation, analysis, comparison, and output
   safety. The UI owns presentation, not engineering calculations. Keep the CLI
   supported and run long analyses in isolated worker processes.
-- A saved session references inputs, configurations, and reports; it does not
-  copy large engineering files or preserve running processes. Session files are
-  separate from existing analysis run manifests.
 - First delivery supports one complete vertical/roll workflow. Portable project
   archives, collaboration, advanced job recovery, and a general-purpose TOML
   editor are out of scope.
@@ -180,43 +177,29 @@ Small tasks, in implementation order (each suitable for a separate issue/PR):
    installed build can invoke the bundled `clab` worker with embedded Python.
    Acceptance: a synthetic analysis succeeds offline after relocation, without
    system Python; restrict frontend capabilities to the required operations.
-2. **Define saved sessions.** Add a versioned session format for input/config
-   references, baseline/candidates, report locations, and selected result views.
-   Acceptance: round-trip tests pass; resolve relative paths from the session
-   directory, reject unsupported versions, and save atomically. Keep window
-   geometry and recent-session history in separate local preferences.
-3. **Add session lifecycle controls.** Implement new, open, save, and save-as,
-   with a dirty-state indicator.
-   Acceptance: closing or replacing a session prompts for unsaved changes;
-   failed saves leave the previous file intact.
-4. **Select and inspect files.** Add native dialogs for configurations, inputs,
+2. **Select and inspect files.** Add native dialogs for configurations, inputs,
    existing reports, and output folders; expose existing inspection results.
-   Acceptance: show resolved paths, source kind, signals, and actionable errors;
-   missing session references can be relinked without silently substituting data.
-5. **Edit the initial configuration subset.** Add forms for vertical/roll setup,
+   Acceptance: show resolved paths, source kind, signals, and actionable errors.
+3. **Edit the initial configuration subset.** Add forms for vertical/roll setup,
    mappings, and tolerances using existing Rust validation.
    Acceptance: opening does not rewrite TOML; explicit save/save-as preserves
    unrelated settings and modular file references, respects each file's path
    rules, and refuses to overwrite externally changed files without confirmation.
-6. **Run an analysis.** Launch an isolated worker with the selected configuration,
+4. **Run an analysis.** Launch an isolated worker with the selected configuration,
    inputs, and output directory; show running state, diagnostics, and completion.
    Acceptance: the UI remains responsive, repeat launches cannot collide on an
    output directory, and existing overwrite protections remain enforced. Closing
    during a job requires an explicit decision; interruption is not shown as success.
-7. **Browse existing and new results.** Display report metrics, units, warnings,
+5. **Browse existing and new results.** Display report metrics, units, warnings,
    provenance, and available plots without recalculating engineering values.
    Acceptance: unsupported, unavailable, failed, and tolerance-failing results
    remain distinguishable; reports can be opened without rerunning an analysis.
-8. **Run comparisons and overlay curves.** Select a baseline and candidates,
+6. **Run comparisons and overlay curves.** Select a baseline and candidates,
    invoke existing comparison operations, and add interactive curve selection.
    Acceptance: existing compatibility checks and tolerance semantics are retained;
    overlays preserve units, corner labels, and branch identity.
-9. **Resume sessions safely.** Restore saved selections and report references;
-   record sufficient input/config identity to detect changes since a result ran.
-   Acceptance: missing or changed dependencies are flagged, historical results are
-   not presented as current, and unfinished jobs reopen as interrupted, not running.
-10. **Validate and package the first desktop release.** Add a synthetic end-to-end
-    subtest covering configure, save, analyze, compare, close, and reopen; document
+7. **Validate and package the first desktop release.** Add a synthetic end-to-end
+    subtest covering configure, analyze, and compare; document
     the workflow and validate packaging on each declared desktop target.
     Acceptance: keyboard-accessible controls and labeled validation errors work;
     desktop bundles include the required runtime and do not regress CLI releases.
@@ -224,8 +207,6 @@ Small tasks, in implementation order (each suitable for a separate issue/PR):
 Exit criteria:
 
 - An engineer can complete the supported vertical/roll workflow without a terminal.
-- A saved session reopens with its configuration/input references and result views,
-  with clear handling of missing files, changed dependencies, and interrupted jobs.
 - UI and CLI produce equivalent engineering results for the same synthetic inputs.
 - No UI operation silently rewrites configuration or overwrites existing outputs.
 - Desktop builds run offline without a separately installed Python environment.

@@ -25,24 +25,6 @@
       <button class="nav-item" data-pane="optimize">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 16C5 7 9 7 11 12S17 19 21 4"/><path d="M13.5 14.5l3 3M16.5 14.5l-3 3"/></svg>Optimize
       </button>
-
-      <section class="session" aria-label="Session">
-        <div class="session-bar">
-          <details class="session-menu">
-            <summary class="nav-item" aria-label="Session menu" title="Session">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
-            </summary>
-            <div class="session-actions">
-              <button type="button" data-session="new">New<kbd>Ctrl+N</kbd></button>
-              <button type="button" data-session="open">Open…<kbd>Ctrl+O</kbd></button>
-              <button type="button" data-session="save">Save<kbd>Ctrl+S</kbd></button>
-              <button type="button" data-session="saveAs">Save as…<kbd>Ctrl+Shift+S</kbd></button>
-            </div>
-          </details>
-          <p id="session-name" class="session-name">Untitled</p>
-        </div>
-        <label class="check"><input type="checkbox" id="session-embed" /> Embed files and reports</label>
-      </section>
     </nav>
 
     <main>
@@ -56,7 +38,6 @@
               <input name="input" required placeholder=".res or .acd" />
               <button type="button" data-browse="file" data-target="input" data-extensions="res,acd">Browse…</button>
             </span>
-            <small class="embedded-note" data-embedded-for="input" hidden></small>
           </label>
 
           <div class="row">
@@ -113,7 +94,6 @@
               <button type="button" data-browse="file" data-target="file">File…</button>
               <button type="button" data-browse="directory" data-target="file">Folder…</button>
             </span>
-            <small class="embedded-note" data-embedded-for="file" hidden></small>
           </label>
         </form>
         <p id="inspect-status" class="status" role="status"></p>

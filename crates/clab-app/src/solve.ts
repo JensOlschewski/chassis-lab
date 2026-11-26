@@ -14,7 +14,6 @@ import {
   setVariable,
   variableNames,
 } from "./parameters";
-import { element } from "./sections";
 import { Outcome, errorLine } from "./worker";
 
 /** Pasted paths often carry whitespace or the quotes added by "Copy as path". */

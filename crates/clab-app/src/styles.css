@@ -75,41 +75,6 @@ body {
 .icon { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .nav-item[aria-current="page"] .icon { stroke: #D97757; }
 
-.session {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: auto;
-  padding: 12px 8px 0;
-  border-top: 1px solid var(--border);
-  font-size: 0.85rem;
-}
-
-.session .check { padding-left: 6px; }
-.session-bar { display: flex; align-items: center; gap: 8px; }
-.session-name { min-width: 0; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
-.session-menu { position: relative; flex: none; }
-.session-menu summary { list-style: none; padding: 6px; }
-.session-menu summary::-webkit-details-marker { display: none; }
-.session-menu[open] summary { background: var(--border); }
-.session-actions {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 6px);
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  min-width: 200px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
-}
-.session-actions button { display: flex; justify-content: space-between; gap: 16px; border: 0; background: none; text-align: left; white-space: nowrap; }
-.session-actions button:hover:not(:disabled) { background: var(--sidebar); }
-.session-actions kbd { color: var(--muted); font: inherit; font-size: 0.75rem; }
-
 main {
   overflow-y: auto;
   padding: 32px 40px;
@@ -130,7 +95,6 @@ fieldset:disabled { opacity: 0.5; }
 #setup-field[hidden] { display: none; }
 #setup-field legend { float: left; padding: 0; font-weight: 600; }
 .optional,
-.embedded-note { font-weight: 400; color: var(--muted); }
 .row { display: flex; gap: 16px; }
 .row label { flex: 1; }
 .check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; pointer-events: none; }
