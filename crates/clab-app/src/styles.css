@@ -191,6 +191,11 @@ legend { margin-bottom: 6px; padding: 0; font-size: 0.9rem; font-weight: 500; }
 .input-row { display: flex; gap: 8px; align-items: center; }
 .input-row input { flex: 1; min-width: 0; }
 .input-row .name { flex: 0 0 10em; }
+/* A design variable cell: yellow, its name shown until a value is typed. */
+.grid input.named { background: rgba(240, 200, 0, 0.28); }
+.option-row { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.option-row label { display: flex; align-items: center; gap: 8px; }
+.option-row input { width: 8em; }
 .input-row .role { flex: none; }
 #add-input { align-self: flex-start; }
 .plot { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
@@ -286,19 +291,37 @@ pre.info { display: block; font-family: var(--mono, ui-monospace, monospace); wh
 .grid input[data-kind=expression], .grid input[data-kind=text] { text-align: left; font-variant-numeric: normal; }
 .grid input:disabled { color: var(--muted); opacity: 1; background: transparent; }
 .grid-scroll { overflow-x: auto; }
-#solve-sections details { margin-bottom: 8px; }
-#solve-sections summary { cursor: pointer; margin: 6px 0; list-style: none; }
-#solve-sections summary::-webkit-details-marker { display: none; }
-#solve-sections summary::before { content: "▸"; display: inline-block; margin-right: 8px; color: var(--muted); transition: transform 0.1s; }
-#solve-sections details[open] > summary::before { transform: rotate(90deg); }
+#solve-sections details, #optimize-sections details { margin-bottom: 8px; }
+#solve-sections summary, #optimize-sections summary { cursor: pointer; margin: 6px 0; list-style: none; }
+#solve-sections summary::-webkit-details-marker, #optimize-sections summary::-webkit-details-marker { display: none; }
+#solve-sections summary::before, #optimize-sections summary::before { content: "▸"; display: inline-block; margin-right: 8px; color: var(--muted); transition: transform 0.1s; }
+#solve-sections details[open] > summary::before, #optimize-sections details[open] > summary::before { transform: rotate(90deg); }
 .actions { align-items: center; }
 .steps { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
 .steps li { display: flex; align-items: center; gap: 8px; }
 .steps small { color: var(--muted); font-variant-numeric: tabular-nums; }
 #solve-summary { margin-top: 12px; }
+#optimize-adjusted[hidden] { display: none; }
+#optimize-sections .grid td:last-child { width: 1%; white-space: nowrap; text-align: center; }
+#optimize-sections .grid td:last-child button { padding: 2px 8px; }
+#optimize-sections [data-add] { margin: 6px 0 4px; }
+.completion { position: fixed; z-index: 10; max-height: 14em; margin: 0; padding: 2px; overflow-y: auto; list-style: none; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); font: 0.8125rem ui-monospace, monospace; }
+.completion li { padding: 2px 8px; white-space: nowrap; cursor: pointer; }
+.completion li.selected { background: var(--accent); color: var(--accent-text); }
+.completion b { color: var(--accent); font-weight: 700; text-decoration: underline; }
+.completion li.selected b { color: inherit; }
+#optimize-form .help summary { cursor: pointer; list-style: none; padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+#optimize-form .help p { margin: 4px 0; font-size: 0.8125rem; }
+#optimize-log { max-height: 320px; overflow-y: auto; margin-top: 12px; }
 .grid input.invalid { outline: 2px solid #d33; outline-offset: -2px; }
 .grid tbody.selecting { user-select: none; }
 .grid td.selected { background: color-mix(in srgb, var(--accent) 25%, transparent); }
 .grid td.selected input { background: transparent; }
 .grid input[type=checkbox] { box-sizing: content-box; margin: 0; accent-color: var(--accent); }
 .grid input[type=checkbox]:focus-visible { outline: none; }
+
+.help-mark { margin-left: 8px; padding: 0 7px; border-radius: 50%; font-size: 0.75rem; line-height: 1.4; }
+#optimize-sections summary { position: relative; }
+.section-help { position: absolute; top: 100%; right: 0; z-index: 5; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; width: max-content; max-width: min(680px, 100%); padding: 6px 12px; border: 1px solid var(--muted); background: var(--surface); color: var(--text); cursor: default; font: 0.75rem/1.5 ui-monospace, monospace; }
+.section-help .label { color: var(--muted); }
+.section-help[hidden] { display: none; }
