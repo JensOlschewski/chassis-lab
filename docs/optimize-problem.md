@@ -86,8 +86,9 @@ at the start design and has no `scale`, the solver stops and asks for one.
 ### `[constraints]` (optional)
 
 `name = "lhs <= rhs"` or `name = "lhs >= rhs"`. Exactly one `<=` or `>=` per
-constraint, and both sides must evaluate to one finite number. A constraint is
-measured relative to `|rhs|` (or 1 when `rhs` is about 0).
+constraint, and both sides must evaluate to one finite number. The solver
+(`fmincon` `nonlcon`) gets `c = lhs - rhs` for `<=` and `c = rhs - lhs` for
+`>=`, unscaled, and requires `c <= 0`. The limit is met when `c <= 0`.
 
 ## Expressions
 
