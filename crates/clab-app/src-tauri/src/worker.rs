@@ -11,7 +11,7 @@ use tauri::{AppHandle, Manager};
 
 #[derive(Serialize)]
 pub struct Outcome {
-    exit_code: Option<i32>,
+    pub exit_code: Option<i32>,
     stdout: String,
     stderr: String,
 }

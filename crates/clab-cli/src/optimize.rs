@@ -18,14 +18,16 @@ use crate::matlab::{self, file_path};
 pub(crate) struct OptimizeArgs {
     /// Optimization problem TOML.
     problem: PathBuf,
-    /// Start design JSON. Also sets the objective scales that are not given.
-    /// Without it, the start is the midpoint of the bounds.
+    /// Start design JSON, or a result file written by --json (its optimized
+    /// design). Also sets the objective scales that are not given. Without it,
+    /// the start is the midpoint of the bounds.
     #[arg(long, value_name = "FILE")]
     design: Option<PathBuf>,
-    /// Write the optimized design to PATH: a file, or a directory that receives
-    /// `<problem>-optimized.json`. Without PATH, the file goes to the current
-    /// directory. Give the problem before this flag.
-    #[arg(long, value_name = "PATH", num_args = 0..=1, conflicts_with = "dry_run")]
+    /// Write the result (design, objectives, constraints, J, fmincon) to PATH:
+    /// a file, or a directory that receives `<problem>-optimized.json`. Without
+    /// PATH, the file goes to the current directory. Give the problem before
+    /// this flag.
+    #[arg(long, value_name = "PATH", num_args = 0..=1)]
     json: Option<Option<PathBuf>>,
     /// Evaluate the start design and stop.
     #[arg(long)]
@@ -62,12 +64,18 @@ pub(crate) fn optimize(args: OptimizeArgs) -> Result<()> {
         matlab::check_output(output, &inputs, args.force)?;
     }
 
-    let midpoint_file;
+    let start_file;
     let design = match given_design {
-        Some(design) => design,
+        Some(design) => match result_design(&design)? {
+            Some(file) => {
+                start_file = file;
+                start_file.path().to_path_buf()
+            }
+            None => design,
+        },
         None => {
-            midpoint_file = midpoint_design(&problem, args.yes)?;
-            midpoint_file.path().to_path_buf()
+            start_file = midpoint_design(&problem, args.yes)?;
+            start_file.path().to_path_buf()
         }
     };
 
@@ -97,7 +105,7 @@ pub(crate) fn optimize(args: OptimizeArgs) -> Result<()> {
 
     if let Some(output) = &output {
         let mut text = String::new();
-        matlab::format_json(&result["design"], 0, &mut text);
+        matlab::format_json(&result, 0, &mut text);
         text.push('\n');
         std::fs::write(result_file.path(), text)
             .with_context(|| format!("cannot write {}", output.display()))?;
@@ -114,6 +122,22 @@ fn scratch_json() -> Result<tempfile::NamedTempFile> {
         .suffix(".json")
         .tempfile()
         .context("cannot create a scratch file")
+}
+
+/// The `design` of a result file written by `--json`, as a plain design file;
+/// `None` for a plain design file, which has no object values.
+fn result_design(path: &Path) -> Result<Option<tempfile::NamedTempFile>> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read design file {}", path.display()))?;
+    let value: Value = serde_json::from_str(&text)
+        .with_context(|| format!("design file is not JSON: {}", path.display()))?;
+    let design = &value["design"];
+    if !design.is_object() {
+        return Ok(None);
+    }
+    let mut file = scratch_json()?;
+    serde_json::to_writer(&mut file, design)?;
+    Ok(Some(file))
 }
 
 /// A start design at the midpoint of each bound, after the user confirms it.

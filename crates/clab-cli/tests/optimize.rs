@@ -74,10 +74,8 @@ fn passes_the_problem_json_and_design_to_the_solver() {
 }
 
 #[test]
-fn dry_run_is_passed_on_and_conflicts_with_json() {
+fn dry_run_is_passed_on_and_writes_its_result() {
     let setup = Setup::new(&format!("[ \"$6\" = --dry-run ] && {}", writes_result()));
-    let output = setup.run(&["problem.toml", "--design", "start.json", "--dry-run"]);
-    assert!(output.status.success(), "{}", stderr(&output));
     let output = setup.run(&[
         "problem.toml",
         "--design",
@@ -85,18 +83,19 @@ fn dry_run_is_passed_on_and_conflicts_with_json() {
         "--dry-run",
         "--json",
     ]);
-    assert_eq!(output.status.code(), Some(2));
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(setup.path("problem-optimized.json").is_file());
 }
 
 #[test]
-fn writes_the_optimized_design_and_refuses_to_replace_it() {
+fn writes_the_result_and_refuses_to_replace_it() {
     let setup = Setup::new(&writes_result());
     let output = setup.run(&["problem.toml", "--design", "start.json", "--json"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let written = std::fs::read_to_string(setup.path("problem-optimized.json")).unwrap();
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&written).unwrap(),
-        serde_json::json!({"A": 5})
+        serde_json::from_str::<serde_json::Value>(RESULT).unwrap()
     );
     let output = setup.run(&["problem.toml", "--design", "start.json", "--json"]);
     assert!(stderr(&output).contains("--force"));
@@ -109,6 +108,17 @@ fn writes_the_optimized_design_and_refuses_to_replace_it() {
         "--force",
     ]);
     assert!(stderr(&output).contains("output is the design file"));
+}
+
+#[test]
+fn a_result_file_starts_from_its_design() {
+    let setup = Setup::new(&format!("cp \"$5\" start-used.json && {}", writes_result()));
+    std::fs::write(setup.path("result.json"), RESULT).unwrap();
+    let output = setup.run(&["problem.toml", "--design", "result.json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let start: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(setup.path("start-used.json")).unwrap()).unwrap();
+    assert_eq!(start, serde_json::json!({"A": 5}));
 }
 
 #[test]

@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { ask, save } from "@tauri-apps/plugin-dialog";
+import { ask, message, save } from "@tauri-apps/plugin-dialog";
 import { pick, setupBrowse } from "./browse";
 import {
   DesignValue,
@@ -141,10 +141,6 @@ export function setupSolve(openInInspect: (path: string) => void) {
     if (!model) return;
     try {
       renderSections(await invoke<Section[]>("model_parameters", { path: model }));
-      if (!clean(field("output").value) || field("output").dataset.generated) {
-        field("output").value = defaultOutput(model);
-        field("output").dataset.generated = "true";
-      }
       show("");
     } catch (error) {
       renderSections([]);
@@ -152,11 +148,20 @@ export function setupSolve(openInInspect: (path: string) => void) {
     }
   };
 
-  field("model").addEventListener("change", loadModel);
-  // Typing or browsing makes the path the user's own; a later model change keeps it.
-  ["input", "change"].forEach((type) =>
-    field("output").addEventListener(type, () => delete field("output").dataset.generated),
-  );
+  field("model").addEventListener("change", () => {
+    fromOptimize = false;
+    void loadModel();
+  });
+
+  /** Opened by Optimize's Model details: a cell named here reaches Optimize only through a saved model. Told once. */
+  let fromOptimize = false;
+  sections.addEventListener("change", () => {
+    if (!fromOptimize || !sections.querySelector("input.named")) return;
+    fromOptimize = false;
+    void message("New design variables reach Optimize only after Save model… and loading the saved model in Optimize's Model files.", {
+      title: "New design variable",
+    });
+  });
   setupBrowse(form);
 
   document.querySelector("#solve-load-design")!.addEventListener("click", async () => {
@@ -200,7 +205,6 @@ export function setupSolve(openInInspect: (path: string) => void) {
       const design = await invoke<string | null>("export_case", {
         case: readCase(),
         path,
-        parametrize: document.querySelector<HTMLInputElement>("#solve-parametrize")!.checked,
       });
       show(design ? `Saved ${path} and ${design}` : `Saved ${path}`);
     } catch (error) {
@@ -216,22 +220,21 @@ export function setupSolve(openInInspect: (path: string) => void) {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const output = clean(field("output").value);
-    if (!output) {
-      show("Choose a solution file", false);
-      return;
-    }
+    const model = clean(field("model").value);
+    // The solution goes beside the model.
+    const output = defaultOutput(model);
     const invalid = adjust.checked ? firstInvalid(sections) : undefined;
     if (invalid) {
       invalid.focus();
       show(invalidMessage(invalid), false);
       return;
     }
-    const request = {
-      ...readCase(),
-      output,
-      force: field("force").checked,
-    };
+    let force = false;
+    if ((await invoke<string>("path_kind", { path: output })) !== "missing") {
+      if (!(await ask(`${output} exists. Replace it?`, { title: "Solution file", okLabel: "Replace", cancelLabel: "Cancel" }))) return;
+      force = true;
+    }
+    const request = { ...readCase(), output, force };
     stopped = false;
     setBusy(true);
     stop.hidden = false;
@@ -282,5 +285,14 @@ export function setupSolve(openInInspect: (path: string) => void) {
     summary.hidden = false;
     open.onclick = () => openInInspect(output);
     open.hidden = false;
+  };
+
+  /** Loads `path` with its parameters shown, for another pane that wants the model's details. */
+  return async (path: string) => {
+    field("model").value = path;
+    adjust.checked = true;
+    fromOptimize = true;
+    await loadModel();
+    sections.querySelectorAll("details").forEach((details) => (details.open = true));
   };
 }

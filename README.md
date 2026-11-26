@@ -228,10 +228,12 @@ Without `--json` or `--view` it prints the time and the body velocities as text.
 Optimize a multibody model design against objectives and constraints defined in
 a TOML problem file.
 
-- `--design FILE` start from design variables in a JSON file. Without it,
-  optimization starts at the midpoint of the problem bounds.
+- `--design FILE` start from design variables in a JSON file, or from the
+  `design` of a result file written by `--json`. Without it, optimization starts
+  at the midpoint of the problem bounds.
 - `--dry-run` evaluate the starting design without optimization.
-- `--json [PATH]` write the optimized design as JSON. Without a path, it writes
+- `--json [PATH]` write the result as JSON: `design`, `start_design`,
+  `objectives`, `constraints`, `J`, `start_J` and `fmincon`. Without a path, it writes
   `<problem>-optimized.json` in the current directory. A directory path receives
   that file name.
 - `--force` replace an existing JSON output (requires `--json`).
@@ -241,7 +243,7 @@ a TOML problem file.
 ```bash
 clab optimize examples/problem.toml \
     --design examples/design.json \
-    --json reports/optimized-design.json
+    --json reports/optimized.json
 ```
 
 #### `clab` on the command line

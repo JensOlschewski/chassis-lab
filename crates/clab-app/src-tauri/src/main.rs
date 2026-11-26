@@ -5,6 +5,7 @@ mod analyze;
 mod cli_link;
 mod convert;
 mod inspect;
+mod optimize;
 mod report;
 mod session;
 mod solve;
@@ -52,12 +53,8 @@ fn model_parameters(path: PathBuf) -> Result<Vec<solve::Section>, String> {
 
 /// Saves the adjusted model and its design file; returns the design file, if there is one.
 #[tauri::command]
-fn export_case(
-    case: solve::Case,
-    path: PathBuf,
-    parametrize: bool,
-) -> Result<Option<PathBuf>, String> {
-    case.export(&path, parametrize)
+fn export_case(case: solve::Case, path: PathBuf) -> Result<Option<PathBuf>, String> {
+    case.export(&path)
 }
 
 #[tauri::command]
@@ -85,6 +82,48 @@ async fn run_solve(
     .await;
     drop(prepared);
     outcome
+}
+
+#[tauri::command]
+fn load_problem(path: PathBuf) -> Result<optimize::Problem, String> {
+    optimize::load(&path)
+}
+
+#[tauri::command]
+fn save_problem(path: PathBuf, problem: optimize::Problem, force: bool) -> Result<(), String> {
+    optimize::save(&path, &problem, force)
+}
+
+#[tauri::command]
+fn model_names(path: PathBuf) -> Result<optimize::ModelNames, String> {
+    optimize::model_names(&path)
+}
+
+#[derive(serde::Serialize)]
+struct Optimized {
+    outcome: worker::Outcome,
+    result: Option<serde_json::Value>,
+}
+
+/// Optimizes a problem; `on_line` gets each `--progress` line as clab prints it.
+#[tauri::command]
+async fn run_optimize(
+    app: AppHandle,
+    request: optimize::OptimizeRequest,
+    cancel: State<'_, worker::Cancel>,
+    on_line: Channel<String>,
+) -> Result<Optimized, String> {
+    let prepared = request.prepare()?;
+    let args = request.args(&prepared);
+    let outcome = worker::run_streaming(&app, args, Some(cancel.inner().clone()), move |line| {
+        let (worker::Line::Out(line) | worker::Line::Err(line)) = line;
+        let _ = on_line.send(line);
+    })
+    .await?;
+    let result = (outcome.exit_code == Some(0))
+        .then(|| prepared.result())
+        .transpose()?;
+    Ok(Optimized { outcome, result })
 }
 
 /// Succeeds when the solver and the MATLAB Runtime are found.
@@ -271,6 +310,10 @@ fn main() {
             read_design,
             export_case,
             run_solve,
+            load_problem,
+            save_problem,
+            model_names,
+            run_optimize,
             check_runtime,
             install_runtime,
             cancel_solve,
