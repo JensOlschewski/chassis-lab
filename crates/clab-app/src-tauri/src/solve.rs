@@ -789,7 +789,7 @@ mod tests {
     #[test]
     fn example_model_lists_every_table() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../matlab/examples/solve/mlta-model-file-1e2.json");
+            .join("../../../examples/matlab-examples/mlta-model-file-1e2.json");
         let model = read_model(&path).unwrap();
         let sections = parameters(&model).unwrap();
         let ids: Vec<_> = sections.iter().map(|section| section.id).collect();
