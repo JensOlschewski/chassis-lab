@@ -11,22 +11,6 @@ interface Choice {
   text: string;
 }
 
-/** A curve row as stored in a session file. */
-interface SavedCurve {
-  x: string;
-  y: string;
-  panel: number;
-  plot: boolean;
-}
-
-/** The form as stored in a session file. */
-export interface InspectState {
-  file: string | null;
-  curves: SavedCurve[];
-  /** Whether the chart was drawn; reopening redraws it. */
-  plotted: boolean;
-}
-
 
 /** `clab inspect --json` of a solver solution; HDF5 listings have no `kind`. */
 interface SolutionResult {
@@ -77,7 +61,6 @@ export function setupInspect() {
 
   let choices: Choice[] = [];
   let axes: string[] = [];
-  let plotted = false;
   /** A solver solution carries its signals with the listing; HDF5 signals are read per plot. */
   let solution: Signals | null = null;
   let viewer: Viewer | null = null;
@@ -123,37 +106,21 @@ export function setupInspect() {
       row.querySelector<HTMLElement>(".swatch")!.style.background = colorFor(index);
     });
 
-  /** Tells the session that the curve rows changed; row selects report their own changes. */
-  const changed = () => curvesRoot.dispatchEvent(new Event("change", { bubbles: true }));
-
-  const pick = (wanted: string | undefined, fallback: string) => {
-    if (!wanted) return fallback;
-    if (choices.some(c => c.value === wanted)) return wanted;
-    if (solution) {
-      // Saved sessions before #256 used short body and characteristic names.
-      const body = /^([^.]+)\.([vw])([xyz])$/.exec(wanted);
-      const paths = [`characteristics.${wanted}`];
-      if (body) paths.unshift(`bodies.${body[1]}.velocity.${body[2] === "v" ? "linear" : "angular"}.${body[3]}`);
-      return paths.find(path => choices.some(c => c.value === path)) ?? fallback;
-    }
-    return fallback;
-  };
-
-  function addRow(saved?: SavedCurve): void {
+  function addRow(): void {
     const row = document.createElement("div");
     row.className = "curve";
 
     const swatch = document.createElement("span");
     swatch.className = "swatch";
-    const x = createSelect(choices, pick(saved?.x, choices.some((c) => c.value === "time") ? "time" : AXIS));
-    const y = createSelect(choices, pick(saved?.y, choices[1].value));
+    const x = createSelect(choices, choices.some((c) => c.value === "time") ? "time" : AXIS);
+    const y = createSelect(choices, choices[1].value);
     x.name = "x";
     y.name = "y";
 
     const visible = document.createElement("input");
     visible.type = "checkbox";
     visible.name = "show";
-    visible.checked = saved?.plot ?? true;
+    visible.checked = true;
     const visibleLabel = document.createElement("label");
     visibleLabel.className = "check";
     visibleLabel.append(visible, "Plot");
@@ -167,7 +134,6 @@ export function setupInspect() {
       recolor();
       syncPanels();
       updateRemoveButtons();
-      changed();
     });
 
     const panel = createSelect([], "1");
@@ -196,7 +162,7 @@ export function setupInspect() {
       row.querySelector<HTMLButtonElement>("button")!.hidden = rows().length === 1;
     });
 
-  const savedCurves = (): SavedCurve[] =>
+  const curveRows = () =>
     rows().map((row) => {
       const [x, y, panel] = row.querySelectorAll("select");
       return {
@@ -209,7 +175,7 @@ export function setupInspect() {
 
   /** Rows the user ticked, with the color their position gives them. */
   const selectedCurves = (): Curve[] =>
-    savedCurves().flatMap(({ x, y, panel, plot }, index) =>
+    curveRows().flatMap(({ x, y, panel, plot }, index) =>
       plot ? [{ x, y, panel, color: colorFor(index) }] : [],
     );
 
@@ -220,13 +186,11 @@ export function setupInspect() {
   addButton.addEventListener("click", () => {
     addRow();
     updateRemoveButtons();
-    changed();
   });
 
   /** Drops the previous file's rows, or report, and disables plotting until signals load. */
   const clear = () => {
     report.clear();
-    plotted = false;
     plot.hidden = true;
     submit.disabled = true;
     addButton.disabled = true;
@@ -316,7 +280,6 @@ export function setupInspect() {
 
   file.addEventListener("change", async () => {
     await open();
-    changed();
   });
 
   async function plotCurves(): Promise<void> {
@@ -334,8 +297,6 @@ export function setupInspect() {
       axes = await drawChart(chart, data, curves, pressed?.dataset.tool);
       footer.textContent = `File: ${file.value.trim()} · ${curves.length} curve${curves.length > 1 ? "s" : ""}`;
       show("");
-      plotted = true;
-      changed();
     } catch (error) {
       show(String(error), false);
     } finally {
@@ -353,28 +314,6 @@ export function setupInspect() {
     async show(path: string, test?: string): Promise<void> {
       file.value = path;
       await open(test);
-      changed();
-    },
-    get: (): InspectState => ({ file: file.value.trim() || null, curves: savedCurves(), plotted }),
-    /** A file that fails to load keeps its path; the error is shown as for a manual pick. */
-    async set(state: InspectState): Promise<void> {
-      file.value = state.file ?? "";
-      footer.textContent = "";
-      if (!state.file) {
-        clear();
-        showBody("none");
-        return show("");
-      }
-      if ((await open()) !== "signals" || state.curves.length === 0) return;
-
-      curvesRoot.replaceChildren();
-      state.curves.forEach((curve) => addRow(curve));
-      rows().forEach((row, index) => {
-        const panel = row.querySelector<HTMLSelectElement>("[name=panel]")!;
-        panel.value = String(Math.min(Math.max(state.curves[index].panel, 1), rows().length));
-      });
-      updateRemoveButtons();
-      if (state.plotted) await plotCurves();
     },
   };
 }

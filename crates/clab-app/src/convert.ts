@@ -1,5 +1,6 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { setupBrowse } from "./browse";
+import { Help, helpMark, setupHelp } from "./help";
 import { describe, run } from "./worker";
 
 /** clab exit code: warnings need the user's confirmation. */
@@ -28,6 +29,19 @@ const SETUP_FIELDS = [
   ["r", "rear_arb"],
 ] as const;
 
+/** Help of the Setup checkboxes. */
+const SETUP_HELP: { subtitle: string; help: Help } = {
+  subtitle: "Defines the test conditions for knc test with setup code bX eX fX rX, 0=off, 1=on",
+  help: [
+    ["b", "Brakes applied."],
+    ["e", "Steering engine on."],
+    ["f", "Front anti-roll bar connected."],
+    ["r", "Rear anti-roll bar connected."],
+    ["Lommel data", "The rig stores the setup at the top of the .acd file, as <code>TestInfo:</code>"],
+    ["Adams results", "The .res file does not store it. Tick the boxes to match the simulation you ran"],
+  ],
+};
+
 /** Reads the form into a request; empty optional fields become null. */
 export function readRequest(form: HTMLFormElement): ConvertRequest {
   const data = new FormData(form);
@@ -43,16 +57,6 @@ export function readRequest(form: HTMLFormElement): ConvertRequest {
     force: data.has("force"),
     confirmed: false,
   };
-}
-
-/** The form as stored in a session file. */
-export interface ConvertState {
-  input: string | null;
-  test: string;
-  subtest: string | null;
-  setup: string | null;
-  output: string | null;
-  force: boolean;
 }
 
 export function setupConvert() {
@@ -72,9 +76,12 @@ export function setupConvert() {
   const syncTest = () => {
     testField.hidden = setupField.hidden = readRequest(form).test !== "knc";
   };
-  const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement;
-
   form.addEventListener("change", syncTest);
+
+  const showHelp = setupHelp(document.querySelector<HTMLDialogElement>("#convert-help")!);
+  setupField.querySelector("legend")!.append(
+    helpMark("Setup", () => showHelp("Setup", SETUP_HELP.subtitle, SETUP_HELP.help)),
+  );
 
   setupBrowse(form);
 
@@ -109,23 +116,4 @@ export function setupConvert() {
       submit.disabled = false;
     }
   });
-
-  return {
-    get(): ConvertState {
-      const { input, confirmed, ...rest } = readRequest(form);
-      return { input: input || null, ...rest };
-    },
-    set(state: ConvertState): void {
-      field("input").value = state.input ?? "";
-      field("test").value = state.test;
-      if (state.subtest) field("subtest").value = state.subtest;
-      SETUP_FIELDS.forEach(([letter, name]) => {
-        (field(name) as HTMLInputElement).checked = state.setup?.includes(`${letter}1`) ?? false;
-      });
-      field("output").value = state.output ?? "";
-      (field("force") as HTMLInputElement).checked = state.force;
-      syncTest();
-      show("", true);
-    },
-  };
 }

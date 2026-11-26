@@ -3,6 +3,7 @@ import { ask, save } from "@tauri-apps/plugin-dialog";
 import { pick, setupBrowse } from "./browse";
 import { attachCompletion } from "./complete";
 import { setupGrid } from "./grid";
+import { Help, helpMark, setupHelp } from "./help";
 import { Section } from "./parameters";
 import { element } from "./sections";
 import { Outcome, errorLine } from "./worker";
@@ -48,9 +49,6 @@ const FUNCTIONS = "abs sqrt atan atan2 rad2deg deg2rad round numel max min mean 
 
 type Kind = "models" | "optimizer" | "design" | "signals" | "objectives" | "constraints";
 
-/** A help line: a label, then its text. The label column is aligned, as the viewer's help is. */
-type Help = [label: string, text: string][];
-
 /** One column of a section table; `expression` cells keep their spaces (see `grid.ts`). */
 interface Column {
   name: string;
@@ -61,13 +59,14 @@ interface Column {
 }
 
 /** The foldable tables of the problem, in file order. The optimizer table has one fixed row. */
-const SECTIONS: { kind: Kind; title: string; columns: Column[]; help?: Help }[] = [
+const SECTIONS: { kind: Kind; title: string; subtitle?: string; columns: Column[]; help?: Help }[] = [
   {
     kind: "models",
     title: "Model files",
+    subtitle: "The model files which are used during the optimization",
     help: [
-      ["What", "The model files which are used during the optimization"],
-      ["Alias", "The name the expressions use"],
+      ["Alias", "The short name optimization expressions use to reach the model, e.g. pwt.characteristics.wheel_velocities.l_wc"],
+      ["Details", "Model details opens the model in Solve, where its design variables can be inspected and modified. After change model needs to be saved and loaded again in Model files."],
     ],
     columns: [
       { name: "name", title: "Alias", kind: "text" },
@@ -75,16 +74,15 @@ const SECTIONS: { kind: Kind; title: string; columns: Column[]; help?: Help }[] 
     ],
   },
   {
-    kind: "optimizer",
-    title: "Optimizer",
-    columns: [
-      { name: "max_iterations", title: "Max iterations", kind: "number" },
-      { name: "max_evaluations", title: "Max evaluations", kind: "number" },
-    ],
-  },
-  {
     kind: "design",
     title: "Design Variables",
+    subtitle: "The model parameters the optimizer is able to change",
+    help: [
+      ["Variable", "The name exactly as the model file uses it. A model only receives the variables its file mentions."],
+      ["Start", "Start value is taken from optional defined design file above. Without the midpoint of the bounds is used."],
+      ["Fixed", "A variable in the start design file that is not listed here stays unchangeable by the optimizer."],
+      ["Create", "In Solve, write a quoted name such as \"HP_L_Z\" in a cell, then Save model. Load that saved model in Model files."],
+    ],
     columns: [
       { name: "name", title: "Variable", kind: "text", complete: "variables" },
       { name: "lower", title: "Lower", kind: "number" },
@@ -94,13 +92,13 @@ const SECTIONS: { kind: Kind; title: string; columns: Column[]; help?: Help }[] 
   {
     kind: "signals",
     title: "Signals",
+    subtitle: "A named value computed from model results or other signals. Objectives and constraints use it by name.",
     help: [
-      ["What", "Named values computed from model results and other signals, Objectives and constraints use them. Signals may refer to each other in any order."],
-      ["Completion", "Type letters in an expression cell to get suggestions. ↑ ↓ choose, Tab or Enter accept, Esc close."],
-      ["Functions", "abs sqrt atan atan2 rad2deg deg2rad round numel max min mean gradient cross dot vecnorm interp1. atan2(y, x) gives the full angle of the point (x, y), from -pi to pi. atan(y ./ x) gives only -pi/2 to pi/2, so it cannot tell opposite quadrants apart, and it breaks at x = 0."],
-      ["Operators", "+ - * / ^ .* ./ .^ Constant pi. Components .x .y .z select a row of a 3×n vector."],
-      ["Reserved", "Names a model or signal may not take: x y z xyz (component names), end (index), s (the struct the solver fills: s.<model>, s.<signal>), pi and the functions."],
-      ["Indexing", "One index along time, e.g. eps(mid), eps(2:end), eps(round(end/2))."],
+      ["Order", "Signals can use each other in any order"],
+      ["Names", "Letters, digits and _, starting with a letter. Reserved don't use! x, y, z, xyz, end, s, pi or a function name."],
+      ["Functions", "The following Matlab functions can be used: abs sqrt atan atan2 rad2deg deg2rad round numel max min mean gradient cross dot vecnorm interp1, use MATLAB help for details"],
+      ["Operators", "+ - * / ^ .* ./ .^ and pi. Use .x .y .z to pick a component of a vector."],
+      ["Index", "One index along time: val(mid), val(2:end), val(round(end/2))."],
     ],
     columns: [
       { name: "name", title: "Name", kind: "text" },
@@ -110,10 +108,12 @@ const SECTIONS: { kind: Kind; title: string; columns: Column[]; help?: Help }[] 
   {
     kind: "objectives",
     title: "Objectives (minimized)",
+    subtitle: "What the optimizer minimizes",
     help: [
-      ["What", "Values to minimize, e.g. -epsilon(mid) to maximize epsilon. The optimizer minimizes the weighted sum of value / scale."],
-      ["Weight", "Relative importance, default 1."],
-      ["Scale", "Divides the value so objectives of different size count alike. Default: |value| at the start design. Give one if that value is near 0."],
+      ["Goal", "Minimize $J = \\tfrac{\\sum_i w_i f_i / s_i}{\\sum_i w_i}$"],
+      ["Value", "$f_i$ is the expression defined to minimize. To maximize use -"],
+      ["Weight", "$w_i$ is relative importance, default 1."],
+      ["Scale", "$s_i$ normalize objectives of different size. Default: $|f_i|$ at the start design. Define if $|f_i|$ $\\approx 0$"],
     ],
     columns: [
       { name: "name", title: "Name", kind: "text" },
@@ -125,13 +125,28 @@ const SECTIONS: { kind: Kind; title: string; columns: Column[]; help?: Help }[] 
   {
     kind: "constraints",
     title: "Constraints",
+    subtitle: "Limits the design must keep",
     help: [
-      ["What", "Limits the design must keep, written lhs <= rhs or lhs >= rhs, e.g. epsilon(mid) >= 10."],
-      ["Check", "Each limit is measured relative to |rhs| (or 1 when rhs is about 0). The result marks any limit that is violated."],
+      ["What", "A limit the design must keep. Both sides can be nonlinear"],
+      ["Example", "$x \\le 10$ keeps $x$ below or equal to $10$"],
+      ["Check", "The result marks a limit VIOLATED when it is not met."],
     ],
     columns: [
       { name: "name", title: "Name", kind: "text" },
-      { name: "value", title: "lhs <= rhs or lhs >= rhs", kind: "expression", complete: "formula" },
+      { name: "value", title: "expression", kind: "expression", complete: "formula" },
+    ],
+  },
+  {
+    kind: "optimizer",
+    title: "Optimizer Options",
+    subtitle: "Iteration and evaluation limits for fmincon",
+    help: [
+      ["Iterations", "Maximum fmincon steps. Empty uses 400"],
+      ["Evaluations", "Maximum model evaluations. Empty uses 100 × the number of design variables."],
+    ],
+    columns: [
+      { name: "max_iterations", title: "Max iterations", kind: "number" },
+      { name: "max_evaluations", title: "Max evaluations", kind: "number" },
     ],
   },
 ];
@@ -230,12 +245,11 @@ export function setupOptimize(openInSolve: (path: string) => void) {
     bodies.get("optimizer")!.append(row);
   };
 
-  const closeHelp = () => sectionsRoot.querySelectorAll<HTMLElement>(".section-help").forEach((note) => (note.hidden = true));
-  // A click anywhere else closes an open help box; clicks inside a box and on its `?` stop before this.
-  document.addEventListener("click", closeHelp);
+  // One help dialog for the pane: Esc, Close and a click on the backdrop close it.
+  const showHelp = setupHelp(document.querySelector<HTMLDialogElement>("#optimize-help")!);
 
   /** Builds the empty foldable tables once; `fill` adds the rows. */
-  SECTIONS.forEach(({ kind, title, columns, help }) => {
+  SECTIONS.forEach(({ kind, title, subtitle, columns, help }) => {
     const plain = kind === "models" || kind === "optimizer";
     const scroll = element("div", "", "grid-scroll");
     let body: HTMLElement;
@@ -259,34 +273,8 @@ export function setupOptimize(openInSolve: (path: string) => void) {
     details.open = false;
     details.dataset.kind = kind;
     const summary = element("summary", title);
-    if (help) {
-      // Like the viewer's help: a boxed monospace text over the corner, closed by `?` again or Esc.
-      // It lives in the summary so it shows while the section is folded; a label column keeps wrapped text aligned.
-      const note = element("div", "", "section-help");
-      note.hidden = true;
-      for (const [label, text] of help) note.append(element("span", label, "label"), element("span", text));
-      // Clicks inside the box must not fold the section.
-      note.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      });
-      const mark = element("button", "?", "help-mark");
-      Object.assign(mark, { type: "button", title: `What ${title.split(" ")[0]} is for` });
-      mark.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const open = note.hidden;
-        closeHelp();
-        note.hidden = !open;
-      });
-      details.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") note.hidden = true;
-      });
-      summary.append(mark, note);
-      details.append(summary, content);
-    } else {
-      details.append(summary, content);
-    }
+    if (help) summary.append(helpMark(title, () => showHelp(title, subtitle, help)));
+    details.append(summary, content);
     if (kind !== "optimizer") {
       const add = element("button", "+ Add row");
       add.type = "button";

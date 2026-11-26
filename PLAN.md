@@ -60,6 +60,5 @@ Same layout as Solve:
    tables. A plain-number cell becomes a variable in Solve: type a quoted name ("HP_L_X")
    (cell turns yellow), then Save model…, then use that model in Optimize.
 2. Send result to Solve: not built; use the result file as Solve design.
-3. Session save of the Optimize form: not built.
-4. Static help/path lists in TS can drift from `clab-core`.
-5. Manual check with MATLAB pending: full run, Stop, missing runtime.
+3. Static help/path lists in TS can drift from `clab-core`.
+4. Manual check with MATLAB pending: full run, Stop, missing runtime.

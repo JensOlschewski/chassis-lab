@@ -4,8 +4,8 @@ function result = scoreProblem(problem, values, reference)
 % Each objective counts as value/scale, with its given scale or else |value|
 % of the reference (start) design, so equal weights count the same at the
 % start. The optimizer minimizes J = sum(w.*value./scale)/sum(w). A constraint
-% is scaled by |rhs|, or by 1 when that is about 0, so c <= 0 holds when it is
-% met.
+% is passed to fmincon unscaled: c = lhs - rhs for <=, rhs - lhs for >=, so
+% c <= 0 holds when it is met.
 n = numel(problem.objectives);
 objectives = cell(n, 1);
 weights = zeros(n, 1);
@@ -33,16 +33,12 @@ constraints = cell(m, 1);
 result.c = zeros(m, 1);
 for k = 1:m
     c = problem.constraints(k);
-    scale = abs(values.rhs(k));
-    if scale < 1e-9
-        scale = 1;
-    end
     if c.relation == "<="
         margin = values.rhs(k) - values.lhs(k);
     else
         margin = values.lhs(k) - values.rhs(k);
     end
-    result.c(k) = -margin / scale;
+    result.c(k) = -margin;
     constraints{k} = struct('name', c.name, 'relation', c.relation, 'value', values.lhs(k), ...
         'limit', values.rhs(k), 'margin', margin, 'ok', margin >= 0);
 end

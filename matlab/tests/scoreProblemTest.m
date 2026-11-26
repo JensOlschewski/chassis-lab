@@ -33,7 +33,7 @@ end
 % constraints
 problem.objectives(1).scale = 1;
 r = scoreProblem(problem, values, reference);
-assert(near(r.c(1), -0.25) && near(r.c(2), -0.5));
+assert(near(r.c(1), -1) && near(r.c(2), -1));
 assert(r.constraints(1).ok && r.constraints(2).ok && r.constraints(1).margin == 1);
 values.lhs = [5; 1];
 r = scoreProblem(problem, values, reference);

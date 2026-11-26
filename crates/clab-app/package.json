@@ -19,7 +19,9 @@
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@tauri-apps/plugin-opener": "^2.7.3",
     "@types/three": "^0.187.0",
+    "katex": "^0.16.47",
     "plotly.js-basic-dist-min": "^4.1.2",
     "three": "^0.187.0"
   }

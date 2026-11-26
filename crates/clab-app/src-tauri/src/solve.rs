@@ -46,6 +46,8 @@ struct Cell {
     value: Value,
     /// Shown but not editable.
     locked: bool,
+    /// Other pointers that take the same value: one cell edits both sides of a bushing.
+    also: Vec<String>,
 }
 
 impl Cell {
@@ -70,6 +72,7 @@ impl Cell {
             variable,
             value,
             locked: false,
+            also: Vec::new(),
         })
     }
 }
@@ -159,7 +162,66 @@ fn is_flex(model: &Value, group: &str, name: &str) -> bool {
         .is_some_and(|topology| topology.ends_with("Flex"))
 }
 
-fn bushing_row(model: &Value, group: &str, name: &str) -> Row {
+/// The orientation cells of one side of a bushing, from `column` on.
+fn orientation_cells(model: &Value, owner: &str, side: &str, column: usize) -> Vec<Cell> {
+    let orientation = format!("{owner}/{side}/orientation");
+    let found = [
+        ("euler_angles", ["euler φ", "euler θ", "euler ψ"]),
+        ("helpvec", ["help x", "help y", "help z"]),
+    ]
+    .into_iter()
+    .find(|(key, _)| model.pointer(&format!("{orientation}/{key}")).is_some());
+    let Some((key, labels)) = found else {
+        return Vec::new();
+    };
+    let angles = cells_at(
+        model,
+        &format!("{orientation}/{key}"),
+        Kind::Number,
+        column,
+        &labels,
+    );
+    // Only Euler angles are edited; a two-points orientation follows from the hardpoints.
+    angles
+        .into_iter()
+        .map(|cell| Cell {
+            locked: key == "helpvec" && cell.variable.is_none(),
+            ..cell
+        })
+        .collect()
+}
+
+/// The bushings the solver uses, as (group, name).
+fn bushing_names(model: &Value) -> Vec<(&'static str, &String)> {
+    BUSHING_GROUPS
+        .iter()
+        .flat_map(|group| {
+            members(model, &format!("/{group}"))
+                .filter(move |name| !is_flex(model, group, name))
+                .map(move |name| (*group, name))
+        })
+        .collect()
+}
+
+/// Both sides of a bushing hold the same orientation in every bushing, so one set of cells serves both.
+fn shares_orientation(model: &Value) -> bool {
+    let same = |a: &[Cell], b: &[Cell]| {
+        a.len() == b.len()
+            && a.iter().zip(b).all(|(a, b)| {
+                (&a.label, &a.variable, &a.value, a.locked)
+                    == (&b.label, &b.variable, &b.value, b.locked)
+            })
+    };
+    bushing_names(model).into_iter().all(|(group, name)| {
+        let owner = format!("/{group}/{}", escape(name));
+        same(
+            &orientation_cells(model, &owner, "i", 7),
+            &orientation_cells(model, &owner, "j", 7),
+        )
+    })
+}
+
+fn bushing_row(model: &Value, group: &str, name: &str, shared: bool) -> Row {
     let owner = format!("/{group}/{}", escape(name));
     let mut cells = cells_at(
         model,
@@ -169,28 +231,20 @@ fn bushing_row(model: &Value, group: &str, name: &str) -> Row {
         &["active"],
     );
     cells.extend(stiffness_cells(model, &owner, &STIFFNESS));
-    for (side, column) in [("i", 7), ("j", 10)] {
-        let orientation = format!("{owner}/{side}/orientation");
-        let found = [
-            ("euler_angles", ["euler φ", "euler θ", "euler ψ"]),
-            ("helpvec", ["help x", "help y", "help z"]),
-        ]
-        .into_iter()
-        .find(|(key, _)| model.pointer(&format!("{orientation}/{key}")).is_some());
-        if let Some((key, labels)) = found {
-            let angles = cells_at(
-                model,
-                &format!("{orientation}/{key}"),
-                Kind::Number,
-                column,
-                &labels,
-            );
-            // Only Euler angles are edited; a two-points orientation follows from the hardpoints.
-            cells.extend(angles.into_iter().map(|cell| Cell {
-                locked: key == "helpvec" && cell.variable.is_none(),
-                ..cell
-            }));
-        }
+    if shared {
+        let j = orientation_cells(model, &owner, "j", 7);
+        cells.extend(
+            orientation_cells(model, &owner, "i", 7)
+                .into_iter()
+                .zip(j)
+                .map(|(cell, j)| Cell {
+                    also: vec![j.pointer],
+                    ..cell
+                }),
+        );
+    } else {
+        cells.extend(orientation_cells(model, &owner, "i", 7));
+        cells.extend(orientation_cells(model, &owner, "j", 10));
     }
     Row {
         name: name.to_string(),
@@ -239,13 +293,10 @@ fn parameters(model: &Value) -> Result<Vec<Section>, String> {
             ),
         })
         .collect();
-    let bushings = BUSHING_GROUPS
-        .iter()
-        .flat_map(|group| {
-            members(model, &format!("/{group}"))
-                .filter(move |name| !is_flex(model, group, name))
-                .map(move |name| bushing_row(model, group, name))
-        })
+    let shared = shares_orientation(model);
+    let bushings = bushing_names(model)
+        .into_iter()
+        .map(|(group, name)| bushing_row(model, group, name, shared))
         .collect();
     let forces = members(model, "/additional_forces")
         .map(|name| force_row(model, name))
@@ -285,7 +336,11 @@ fn parameters(model: &Value) -> Result<Vec<Section>, String> {
 
     let mut bushing_columns = vec!["Active"];
     bushing_columns.extend(STIFFNESS);
-    bushing_columns.extend(["i 1", "i 2", "i 3", "j 1", "j 2", "j 3"]);
+    bushing_columns.extend(if shared {
+        vec!["e 1", "e 2", "e 3"]
+    } else {
+        vec!["i 1", "i 2", "i 3", "j 1", "j 2", "j 3"]
+    });
     let sections = [
         ("hardpoints", "Hardpoints", vec!["X", "Y", "Z"], hardpoints),
         ("bushings", "Bushings", bushing_columns, bushings),
@@ -534,47 +589,6 @@ impl SolveRequest {
         }
         args
     }
-}
-
-/// The percent done in a solver progress row (`step time percent`), `None` for any other line.
-pub fn progress(line: &str) -> Option<f64> {
-    let mut columns = line.split_whitespace();
-    columns.next()?.parse::<u64>().ok()?;
-    columns.next()?.parse::<f64>().ok()?;
-    let percent = columns.next()?.parse().ok()?;
-    columns.next().is_none().then_some(percent)
-}
-
-#[derive(Serialize, Debug, PartialEq)]
-pub struct Summary {
-    steps: usize,
-    end_time: f64,
-    bodies: usize,
-}
-
-pub fn summarize(solution: &Path) -> Result<Summary, String> {
-    #[derive(Deserialize)]
-    struct Solution {
-        format: Option<u64>,
-        time: Vec<f64>,
-        bodies: serde_json::Map<String, Value>,
-    }
-    let solution = clean_path(solution);
-    let text = std::fs::read_to_string(&solution)
-        .map_err(|error| format!("{}: {error}", solution.display()))?;
-    let Solution {
-        format,
-        time,
-        bodies,
-    } = serde_json::from_str(&text).map_err(|error| format!("not a solution file: {error}"))?;
-    if format != Some(2) {
-        return Err("solution format is not supported: solve the model again".to_owned());
-    }
-    Ok(Summary {
-        steps: time.len(),
-        end_time: time.last().copied().unwrap_or_default(),
-        bodies: bodies.len(),
-    })
 }
 
 #[cfg(test)]
@@ -842,6 +856,35 @@ mod tests {
     }
 
     #[test]
+    fn equal_bushing_sides_share_one_set_of_cells() {
+        let mut model = json!({
+            "Hardpoints": {},
+            "primary_bushings": {"B": {
+                "i": {"orientation": {"euler_angles": [1, 2, 3]}},
+                "j": {"orientation": {"euler_angles": [1, 2, 3]}}
+            }}
+        });
+        let sections = parameters(&model).unwrap();
+        let bushings = sections.iter().find(|s| s.id == "bushings").unwrap();
+        assert_eq!(&bushings.columns[7..], ["e 1", "e 2", "e 3"]);
+        let cells = &bushings.rows[0].cells;
+        assert_eq!(cells.len(), 3);
+        assert_eq!(
+            cells[0].also,
+            ["/primary_bushings/B/j/orientation/euler_angles/0"]
+        );
+
+        model["primary_bushings"]["B"]["j"]["orientation"]["euler_angles"][2] = json!(9);
+        let sections = parameters(&model).unwrap();
+        let bushings = sections.iter().find(|s| s.id == "bushings").unwrap();
+        assert_eq!(
+            &bushings.columns[7..],
+            ["i 1", "i 2", "i 3", "j 1", "j 2", "j 3"]
+        );
+        assert_eq!(bushings.rows[0].cells.len(), 6);
+    }
+
+    #[test]
     fn export_keeps_a_variable_without_value() {
         let mut incomplete = design();
         incomplete.remove("HP_L_Y");
@@ -911,34 +954,5 @@ mod tests {
             "--force".into(),
         ];
         assert_eq!(args, expected);
-    }
-
-    #[test]
-    fn progress_reads_only_table_rows() {
-        assert_eq!(
-            progress("20           1.00e-01        40.00       "),
-            Some(40.0)
-        );
-        assert_eq!(progress("Current Step  Current Time  Progress (%)"), None);
-        assert_eq!(progress("------------ ------------- ------------"), None);
-        assert_eq!(progress(""), None);
-    }
-
-    #[test]
-    fn summary_counts_steps_and_bodies() {
-        let file = NamedTempFile::new().unwrap();
-        std::fs::write(
-            file.path(),
-            r#"{"format": 2, "time": [0.0, 0.5, 1.0], "bodies": {"Link": {}}}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            summarize(file.path()).unwrap(),
-            Summary {
-                steps: 3,
-                end_time: 1.0,
-                bodies: 1
-            }
-        );
     }
 }

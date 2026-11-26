@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { ask, message, save } from "@tauri-apps/plugin-dialog";
 import { pick, setupBrowse } from "./browse";
+import { Help, setupHelp } from "./help";
 import {
   DesignValue,
   Section,
@@ -13,14 +14,7 @@ import {
   setVariable,
   variableNames,
 } from "./parameters";
-import { BadgeState, createBadge, element, setBadge } from "./sections";
 import { Outcome, errorLine } from "./worker";
-
-interface Summary {
-  steps: number;
-  end_time: number;
-  bodies: number;
-}
 
 /** Pasted paths often carry whitespace or the quotes added by "Copy as path". */
 const clean = (path: string) => path.trim().replace(/^"|"$/g, "").trim();
@@ -28,31 +22,65 @@ const clean = (path: string) => path.trim().replace(/^"|"$/g, "").trim();
 /** `model.json` is solved to `model-solution.json` unless the user chooses another file. */
 const defaultOutput = (model: string) => model.replace(/\.json$/i, "") + "-solution.json";
 
-/** One line of the run's progress: a badge, the step and a detail such as the percent done. */
-function createStep(label: string) {
-  const badge = createBadge("running");
-  const detail = element("small");
-  const node = element("li");
-  node.append(badge, element("span", label), detail);
-  return {
-    node,
-    detail,
-    finish: (state: BadgeState) => {
-      setBadge(badge, state);
-      if (state === "ok") detail.textContent = "";
-    },
-  };
-}
+/** The parameter tables of the model, by the backend section `id`. Same shape as Optimize's SECTIONS. */
+const SECTIONS: { id: string; subtitle?: string; help?: Help }[] = [
+  {
+    id: "hardpoints",
+    subtitle: "The named points of the model",
+    help: [
+      ["X, Y, Z", "Coordinates of the point."],
+      ["Design variable", "A quoted name for example \"DESIGN_VAR\" in a cell makes it a design variable. Value comes from design file"],
+    ],
+  },
+  {
+    id: "bushings",
+    subtitle: "Stiffness and orientation of the bushings",
+    help: [
+      ["Active", "Switches the bushing on or off."],
+      ["k1 … k6", "Stiffness in the six directions, or a stiffness file name for the whole bushing."],
+      ["e 1 … 3", "Euler angles $\\varphi, \\theta, \\psi$ in degrees, z-x-z convention: $R = R_z(\\varphi)\\,R_x(\\theta)\\,R_z(\\psi)$ <a href=\"https://de.wikipedia.org/wiki/Eulersche_Winkel\">More Details</a>"],
+    ],
+  },
+  {
+    id: "forces",
+    subtitle: "Springs between two points",
+    help: [
+      ["Active", "Switches the force element on or off."],
+      ["Stiffness", "Linear spring stiffness, or the name of a stiffness JSON file."],
+      ["Free length", "Length of the spring without load. Empty uses the distance between its two points at the start."],
+    ],
+  },
+  {
+    id: "drives",
+    subtitle: "Forces, torques and motions over time",
+    help: [
+      ["x … rz", "Expression for one component over time. Use ~ for an unused component."],
+      [
+        "Expressions", "MATLAB expressions in $\\text{TIME}$ (or $\\text{time}$) \
+        , For Example $sin\\left(\\frac{2\\pi\\,\\text{TIME}}{30}\\right)$"
+      ]
+    ],
+  },
+  {
+    id: "simulation",
+    subtitle: "Time range and step size of the simulation",
+    help: [
+      ["t_start", "First time point. Drive expressions see it as TIME."],
+      ["t_end", "Last time point."],
+      ["h", "Step size. The solver computes $(t_\\text{end}-t_\\text{start})/h+1$ time points."],
+    ],
+  },
+];
 
 export function setupSolve(openInInspect: (path: string) => void) {
   const form = document.querySelector<HTMLFormElement>("#solve-form")!;
   const designFields = document.querySelector<HTMLElement>("#solve-design")!;
   const designNote = document.querySelector<HTMLElement>("#solve-design-note")!;
+  const saveButton = document.querySelector<HTMLElement>("#solve-save")!;
   const adjust = document.querySelector<HTMLInputElement>("#solve-adjust")!;
   const sections = document.querySelector<HTMLElement>("#solve-sections")!;
   const status = document.querySelector<HTMLElement>("#solve-status")!;
-  const steps = document.querySelector<HTMLElement>("#solve-steps")!;
-  const summary = document.querySelector<HTMLElement>("#solve-summary")!;
+  const log = document.querySelector<HTMLElement>("#solve-log")!;
   const submit = form.querySelector<HTMLButtonElement>("button[type=submit]")!;
   const stop = document.querySelector<HTMLButtonElement>("#solve-stop")!;
   const open = document.querySelector<HTMLButtonElement>("#solve-open")!;
@@ -83,7 +111,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
     );
     if (!proceed) return;
     setBusy(true);
-    steps.replaceChildren();
+    log.textContent = "";
     show("Installing the MATLAB Runtime…");
     try {
       const outcome = await invoke<Outcome>("install_runtime");
@@ -112,7 +140,7 @@ export function setupSolve(openInInspect: (path: string) => void) {
         installRuntime.hidden = false;
         return offerInstall();
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   /** Values of a loaded design file; names without a cell (such as inside drive expressions) still reach the solver. */
@@ -126,13 +154,19 @@ export function setupSolve(openInInspect: (path: string) => void) {
 
   const renderSections = (parameters: Section[]) => {
     const kept = keptVariables(sections);
-    sections.replaceChildren(...parameters.map((section) => createSection(section, kept, false)));
+    sections.replaceChildren(
+      ...parameters.map((section) => createSection(section, kept, false, () => {
+        const entry = SECTIONS.find((s) => s.id === section.id);
+        if (entry?.help) showHelp(section.title, entry.subtitle, entry.help);
+      })),
+    );
     showDesign();
     designNote.textContent = "";
   };
 
   const showDesign = () => {
     designFields.hidden = !adjust.checked || !sections.hasChildNodes();
+    saveButton.hidden = designFields.hidden;
   };
   adjust.addEventListener("change", showDesign);
 
@@ -218,6 +252,8 @@ export function setupSolve(openInInspect: (path: string) => void) {
     void invoke("cancel_solve");
   });
 
+  const showHelp = setupHelp(document.querySelector<HTMLDialogElement>("#solve-help")!);
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const model = clean(field("model").value);
@@ -238,54 +274,33 @@ export function setupSolve(openInInspect: (path: string) => void) {
     stopped = false;
     setBusy(true);
     stop.hidden = false;
-    summary.hidden = true;
     open.hidden = true;
     installRuntime.hidden = true;
-    show("");
-    const solve = createStep("Solve motion");
-    const write = createStep("Write solution");
-    steps.replaceChildren(solve.node);
-    const onProgress = new Channel<number>();
-    onProgress.onmessage = (percent) => {
-      solve.detail.textContent = `${percent.toFixed(0)} %`;
-      if (percent >= 100 && !write.node.isConnected) {
-        solve.finish("ok");
-        steps.append(write.node);
-      }
+    log.textContent = "";
+    show("Solving…");
+    const onLine = new Channel<string>();
+    onLine.onmessage = (line) => {
+      // The status line shows the error.
+      if (line.startsWith("error: ")) return;
+      log.textContent += line + "\n";
+      log.scrollTop = log.scrollHeight;
     };
     try {
-      const outcome = await invoke<Outcome>("run_solve", { request, onProgress });
+      const outcome = await invoke<Outcome>("run_solve", { request, onLine });
       if (outcome.exit_code === 0) {
-        solve.finish("ok");
-        if (!write.node.isConnected) steps.append(write.node);
-        write.finish("ok");
-        await showSummary(output);
+        show("Solved");
+        open.onclick = () => openInInspect(output);
+        open.hidden = false;
       } else {
-        (write.node.isConnected ? write : solve).finish("error");
         fail(stopped ? "Stopped" : (errorLine(outcome.stderr) ?? `clab exited with ${outcome.exit_code}`));
       }
     } catch (error) {
-      (write.node.isConnected ? write : solve).finish("error");
       fail(String(error));
     } finally {
       stop.hidden = true;
       setBusy(false);
     }
   });
-
-  const showSummary = async (output: string) => {
-    const { steps, end_time, bodies } = await invoke<Summary>("solution_summary", { path: output });
-    show("Solved");
-    summary.replaceChildren(
-      ...Object.entries({ Solution: output, Steps: steps, "End time": end_time, Bodies: bodies }).flatMap(([name, value]) => [
-        element("dt", name),
-        element("dd", String(value)),
-      ]),
-    );
-    summary.hidden = false;
-    open.onclick = () => openInInspect(output);
-    open.hidden = false;
-  };
 
   /** Loads `path` with its parameters shown, for another pane that wants the model's details. */
   return async (path: string) => {
