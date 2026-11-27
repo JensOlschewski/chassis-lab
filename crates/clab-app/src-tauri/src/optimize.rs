@@ -46,6 +46,8 @@ pub struct Objective {
 #[serde(deny_unknown_fields)]
 pub struct Problem {
     models: IndexMap<String, PathBuf>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    volumes: IndexMap<String, PathBuf>,
     #[serde(default, skip_serializing_if = "Optimizer::is_empty")]
     optimizer: Optimizer,
     design: IndexMap<String, [f64; 2]>,
@@ -65,7 +67,11 @@ pub fn load(path: &Path) -> Result<Problem, String> {
     let mut problem: Problem =
         toml::from_str(&text).map_err(|error| format!("not a problem file: {error}"))?;
     let base = path.parent().unwrap_or(Path::new("."));
-    for model in problem.models.values_mut() {
+    for model in problem
+        .models
+        .values_mut()
+        .chain(problem.volumes.values_mut())
+    {
         *model = base.join(&*model);
     }
     Ok(problem)
@@ -73,21 +79,23 @@ pub fn load(path: &Path) -> Result<Problem, String> {
 
 /// The problem as TOML, with model paths relative to `base` when they are inside it.
 fn to_toml(problem: &Problem, base: &Path) -> Result<String, String> {
-    let models = problem
-        .models
-        .iter()
-        .map(|(name, path)| {
-            let path = clean_path(path);
-            // shortcut: a model outside `base` stays absolute; use `../` paths if files are shared.
-            let path = path
-                .strip_prefix(base)
-                .map(Path::to_path_buf)
-                .unwrap_or(path);
-            (name.clone(), path)
-        })
-        .collect();
+    let relative_to_base = |files: &IndexMap<String, PathBuf>| -> IndexMap<String, PathBuf> {
+        files
+            .iter()
+            .map(|(name, path)| {
+                let path = clean_path(path);
+                // shortcut: a file outside `base` stays absolute; use `../` paths if files are shared.
+                let path = path
+                    .strip_prefix(base)
+                    .map(Path::to_path_buf)
+                    .unwrap_or(path);
+                (name.clone(), path)
+            })
+            .collect()
+    };
     let relative = Problem {
-        models,
+        models: relative_to_base(&problem.models),
+        volumes: relative_to_base(&problem.volumes),
         ..problem.clone()
     };
     toml::to_string(&relative).map_err(|error| error.to_string())
@@ -178,6 +186,9 @@ impl OptimizeRequest {
                     models: (problem.models.iter())
                         .map(|(name, model)| (name.clone(), directory.join(clean_path(model))))
                         .collect(),
+                    volumes: (problem.volumes.iter())
+                        .map(|(name, file)| (name.clone(), directory.join(clean_path(file))))
+                        .collect(),
                     ..problem.clone()
                 };
                 let text = toml::to_string(&absolute).map_err(|error| error.to_string())?;
@@ -248,9 +259,10 @@ mod tests {
     fn example_loads_with_absolute_models_and_saves_relative() {
         let problem = load(&example()).unwrap();
         let model = &problem.models["pwt"];
-        assert!(model.is_absolute() && model.ends_with("mlta-optimize-model-file-1e2.json"));
+        assert!(model.is_absolute() && model.ends_with("mlta-model-file-1e2-with-param.json"));
         assert_eq!(problem.design["HP_L_Z"], [426.38, 446.38]);
         assert_eq!(problem.optimizer.max_iterations, Some(100));
+        assert!(problem.volumes["rl_volume"].ends_with("rl-bc-volume.hmascii"));
         let signals: Vec<_> = problem.signals.keys().map(String::as_str).collect();
         assert_eq!(signals[..2], ["v_wc", "r_wcwp"], "file order is kept");
 

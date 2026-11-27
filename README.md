@@ -217,7 +217,7 @@ Solve a multibody kinematic or compliant model defined in JSON.
 
 ```bash
 clab solve examples/matlab-examples/mlta-model-file-1e2.json \
-    --design examples/matlab-examples/mlta-design-file-1e2.json \
+    --design examples/matlab-examples/mlta-design-file.json \
     --json reports/solution.json
 ```
 

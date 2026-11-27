@@ -114,7 +114,7 @@ at the surface, so the optimizer gets a direction back into the volume. A 3×n
 point signal checks the whole travel (worst step); index it for one instant,
 `...position(mid_idx)`. Several points: `inside(vol, a, b, c)`. The minimum has
 kinks where the worst point changes; `sqp` usually copes. Only usable in
-constraints for now. See `examples/matlab-examples/mlta-volume-problem.toml`.
+constraints for now. See `examples/matlab-examples/mlta-optimize-problem.toml`.
 
 ## Expressions
 
@@ -198,7 +198,7 @@ in use.
 
 ```toml
 [models]
-pwt = "mlta-optimize-model-file-1e2.json"
+pwt = "mlta-model-file-1e2-with-param.json"
 
 [optimizer]
 max_iterations = 100
