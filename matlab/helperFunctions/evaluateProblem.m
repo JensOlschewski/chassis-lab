@@ -10,6 +10,9 @@ function values = evaluateProblem(problem, designDic)
 % values.objectives  nx1 objective values
 % values.lhs, rhs    mx1 constraint sides
 s = struct();
+if isfield(problem, 'volumeData')
+    s = problem.volumeData;
+end
 for name = string(fieldnames(problem.models))'
     path = problem.models.(name);
     text = fileread(path);
