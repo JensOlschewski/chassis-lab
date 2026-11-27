@@ -110,3 +110,12 @@ the main cost risk.
 - **Mesh tet10:** confirm the models use corner nodes only in the volume files.
 - **App:** only after the CLI works.
 
+
+## Progress
+
+- [x] 2. Problem file: `[volumes]`, `inside()` checks, tests (Rust)
+- [x] 1. Solver: `readHmascii.m`, `inside.m`, `insideTest.m` (cube), wired in `mks_optimize_main.m` / `evaluateProblem.m`
+- [ ] 0. Timing on real RL/RU files; verify `.hmascii` line layout (only a synthetic cube so far)
+- [ ] 3. End-to-end example in `examples/matlab-examples/`
+- [ ] 4. `docs/optimize-problem.md`
+- [ ] 5. Release (mks-assets rebuild)
