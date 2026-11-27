@@ -10,7 +10,7 @@ use anyhow::{Result, bail};
 
 pub const FUNCTIONS: &[&str] = &[
     "abs", "sqrt", "atan", "atan2", "rad2deg", "deg2rad", "round", "numel", "max", "min", "mean",
-    "gradient", "cross", "dot", "vecnorm", "interp1",
+    "gradient", "cross", "dot", "vecnorm", "interp1", "inside",
 ];
 const CONSTANTS: &[&str] = &["pi"];
 /// Names a model or signal must not take.
@@ -350,6 +350,35 @@ impl Expr {
         }
     }
 
+    /// Volumes are only valid as the first argument of `inside(volume, points...)`,
+    /// which needs at least one point.
+    pub fn check_volumes(&self, volumes: &BTreeSet<&str>) -> Result<()> {
+        let (mut used, mut allowed) = (0, 0);
+        let mut result = Ok(());
+        self.visit(&mut |expr| match expr {
+            Expr::Name(name) if volumes.contains(name.as_str()) => used += 1,
+            Expr::Call(name, args) if name == "inside" => match args.first() {
+                _ if args.len() < 2 => {
+                    result = Err(anyhow::anyhow!(
+                        "`inside` needs a volume and at least one point"
+                    ));
+                }
+                Some(Expr::Name(v)) if volumes.contains(v.as_str()) => allowed += 1,
+                _ => {
+                    result = Err(anyhow::anyhow!(
+                        "the first argument of `inside` must be a name from [volumes]"
+                    ));
+                }
+            },
+            _ => {}
+        });
+        result?;
+        if used != allowed {
+            bail!("a volume can only be used as the first argument of `inside`");
+        }
+        Ok(())
+    }
+
     /// Checks that every referenced name is a known model or signal.
     pub fn check_names(&self, known: &impl Fn(&str) -> bool) -> Result<()> {
         for name in self.references() {
@@ -380,7 +409,8 @@ impl Expr {
                     component(name).unwrap() + 1,
                     join(args)
                 ),
-                target => format!("{}({})", target.rewrite(), join(args)),
+                // `(:,i)` picks sample i: a plain `(i)` would be a linear index into a 3×n matrix
+                target => format!("{}(:,{})", target.rewrite(), join(args)),
             },
             Expr::Range(a, b) => format!("{}:{}", a.rewrite(), b.rewrite()),
             Expr::Neg(inner) => format!("(-{})", inner.rewrite()),
@@ -414,8 +444,8 @@ mod tests {
             "rad2deg(atan((xyz(s.v,1)./xyz(s.v,3))))"
         );
         assert_eq!(rewrite("cross(a.b.c, r) + v"), "(cross(s.a.b.c,s.r)+s.v)");
-        assert_eq!(rewrite("x2(round(end/2))"), "s.x2(round((end/2)))");
-        assert_eq!(rewrite("e(2:end)"), "s.e(2:end)");
+        assert_eq!(rewrite("x2(round(end/2))"), "s.x2(:,round((end/2)))");
+        assert_eq!(rewrite("e(2:end)"), "s.e(:,2:end)");
         assert_eq!(rewrite("-a^2 + 1e-3*pi"), "((-(s.a^2))+(1e-3*pi))");
         assert_eq!(rewrite("2.*a"), "(2.*s.a)");
     }
@@ -444,6 +474,35 @@ mod tests {
         assert!(error("a +").contains("ends too early"));
         assert!(error("(a").contains("expected `)`"));
         assert!(error("1.2.3").contains("not a number"));
+    }
+
+    #[test]
+    fn volumes_only_in_inside() {
+        let vols = BTreeSet::from(["vol"]);
+        let check = |t: &str| {
+            parse(t)
+                .unwrap()
+                .check_volumes(&vols)
+                .map_err(|e| e.to_string())
+        };
+        assert!(check("inside(vol, a, b)").is_ok());
+        assert!(check("min(inside(vol, a.b.x(end)), 3)").is_ok());
+        assert!(
+            check("inside(vol)")
+                .unwrap_err()
+                .contains("at least one point")
+        );
+        assert!(
+            check("inside(a, b)")
+                .unwrap_err()
+                .contains("must be a name")
+        );
+        assert!(
+            check("inside(vol, vol)")
+                .unwrap_err()
+                .contains("only be used")
+        );
+        assert!(check("vol + 1").unwrap_err().contains("only be used"));
     }
 
     #[test]

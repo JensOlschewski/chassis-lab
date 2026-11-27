@@ -169,7 +169,7 @@ fn real_solver_solves_example_model() {
     let out = dir.path().join("out.json");
     let examples = root.join("examples/matlab-examples");
     let model = examples.join("mlta-model-file-1e2.json");
-    let design = examples.join("mlta-design-file-1e2.json");
+    let design = examples.join("mlta-design-file.json");
     let args = [
         &model,
         Path::new("--design"),

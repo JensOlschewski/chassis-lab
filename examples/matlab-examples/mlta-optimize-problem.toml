@@ -1,13 +1,13 @@
 [models]
-pwt = "mlta-optimize-model-file-1e2.json"
-
-[optimizer]
-max_iterations = 100
+pwt = "mlta-model-file-1e2-with-param.json"
 
 [design]
-HP_L_Z = [426.38, 446.38]
 HP_L_X = [3935.2, 3955.2]
+HP_L_Z = [426.38, 446.38]
 HP_L_Y = [-549.68, -529.68]
+HP_RL_X = [4256.4, 4296.4]
+HP_RL_Y = [-618.85, -578.85]
+HP_RL_Z = [276.38, 316.38]
 
 [signals]
 v_wc = "pwt.characteristics.wheel_velocities.l_wc"
@@ -24,8 +24,18 @@ value = "-epsilon(mid_idx)"
 [objectives.epsilon_ast_design]
 value = "-epsilon_ast(mid_idx)"
 
+[optimizer]
+max_iterations = 100
+
+[volumes]
+rl_volume = "rl-bc-volume.hmascii"
+
 [constraints]
 min_epsilon = "epsilon(mid_idx) >= 10"
 max_epsilon = "epsilon(mid_idx) <= 15"
 min_epsilon_ast = "epsilon_ast(mid_idx) >= 20"
 max_epsilon_ast = "epsilon_ast(mid_idx) <= 30"
+
+# inside: depth in mm to the volume surface, the worst point over all steps
+# positive = inside, negative = outside
+inside_rl = "inside(rl_volume, pwt.bodies.B1_Link.points.RL.position(mid_idx)) >= 0"

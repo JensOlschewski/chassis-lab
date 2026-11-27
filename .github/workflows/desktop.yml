@@ -93,7 +93,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download mks-assets-r2024b-2 --pattern mks-linux-x86_64.zip --dir dist
+          gh release download mks-assets-r2024b-4 --pattern mks-linux-x86_64.zip --dir dist
           unzip -q dist/mks-linux-x86_64.zip -d dist
 
       - name: Build Linux embedded runtime
@@ -109,7 +109,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download mks-assets-r2024b-2 --pattern mks-windows-x86_64.zip --dir dist
+          gh release download mks-assets-r2024b-4 --pattern mks-windows-x86_64.zip --dir dist
           Expand-Archive dist\mks-windows-x86_64.zip -DestinationPath dist
 
       - name: Build Windows embedded runtime
@@ -125,7 +125,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download mks-assets-r2024b-2 --pattern mks-macos-x86_64.zip --dir dist
+          gh release download mks-assets-r2024b-4 --pattern mks-macos-x86_64.zip --dir dist
           unzip -q dist/mks-macos-x86_64.zip -d dist
 
       - name: Build Intel macOS embedded runtime

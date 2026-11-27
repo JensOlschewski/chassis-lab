@@ -24,6 +24,13 @@ if isempty(design)
 end
 
 problem = jsondecode(fileread(problemJson));
+% each volume is read once per run, not per evaluation
+problem.volumeData = struct();
+if isfield(problem, 'volumes')
+    for name = string(fieldnames(problem.volumes))'
+        problem.volumeData.(name) = readHmascii(problem.volumes.(name), name);
+    end
+end
 start = startDesign(problem, design);
 
 % The start design is the reference: models that use design variables cannot

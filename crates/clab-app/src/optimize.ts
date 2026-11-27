@@ -11,6 +11,8 @@ import { Outcome, errorLine } from "./worker";
 /** `problem.toml` as the backend reads and writes it; model paths are absolute. */
 interface Problem {
   models: Record<string, string>;
+  /** Kept as loaded: there is no volumes table yet. */
+  volumes?: Record<string, string>;
   optimizer: { max_iterations?: number; max_evaluations?: number };
   design: Record<string, [number, number]>;
   signals: Record<string, string>;
@@ -331,6 +333,7 @@ export function setupOptimize(openInSolve: (path: string) => void) {
     const optimizer = rows("optimizer")[0] ?? {};
     return {
       models: entries("models", (row) => clean(row.path)),
+      volumes: loaded?.volumes,
       optimizer: {
         max_iterations: number(optimizer.max_iterations, "Max iterations"),
         max_evaluations: number(optimizer.max_evaluations, "Max evaluations"),

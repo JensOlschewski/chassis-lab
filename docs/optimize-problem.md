@@ -46,6 +46,15 @@ max_epsilon = "epsilon(1) <= 15"
 from the problem file's directory. Every model is solved for each candidate
 design, and the alias becomes a name usable in expressions.
 
+### `[volumes]` (optional)
+
+`name = "path/to/volume.hmascii"`: a packaging volume, a HyperMesh ASCII tet
+mesh (`*node`, `*tetra4`; tet10 uses its corner nodes). Relative paths are
+resolved from the problem file. Same units and frame as the model. `clab`
+checks that the file exists and ends in `.hmascii`; the solver reads it once
+per run and fails with the key and file name if it has no nodes or no tets.
+The name is used only as the first argument of `inside`.
+
 ### `[optimizer]` (optional)
 
 | Key | Meaning |
@@ -90,6 +99,23 @@ constraint, and both sides must evaluate to one finite number. The solver
 (`fmincon` `nonlcon`) gets `c = lhs - rhs` for `<=` and `c = rhs - lhs` for
 `>=`, unscaled, and requires `c <= 0`. The limit is met when `c <= 0`.
 
+### Volume constraints
+
+```toml
+[volumes]
+rl_volume = "rl-bc-volume.hmascii"
+
+[constraints]
+inside_rl = "inside(rl_volume, pwt.bodies.B1_Link.points.RL.position) >= 0"
+```
+
+`>= 0` means inside, `>= 2` means at least 2 mm inside. The depth is continuous
+at the surface, so the optimizer gets a direction back into the volume. A 3×n
+point signal checks the whole travel (worst step); index it for one instant,
+`...position(mid_idx)`. Several points: `inside(vol, a, b, c)`. The minimum has
+kinks where the worst point changes; `sqp` usually copes. Only usable in
+constraints for now. See `examples/matlab-examples/mlta-optimize-problem.toml`.
+
 ## Expressions
 
 Expressions are a restricted MATLAB subset. They are checked by `clab` and
@@ -97,10 +123,10 @@ evaluated by the solver.
 
 **Names.** Model aliases, signal names, and constants. Names for models and
 signals use letters, digits and `_`, start with a letter, max 63 characters,
-and must be unique across models and signals. Design variables are not usable
+and must be unique across models, signals and volumes. Design variables are not usable
 as names in expressions.
 
-**Reserved** (cannot be model or signal names): `x y z end s xyz`, all function
+**Reserved** (cannot be model, signal or volume names): `x y z end s xyz`, all function
 names, `pi`.
 
 **Constant:** `pi`.
@@ -118,6 +144,7 @@ names, `pi`.
 | `gradient` | |
 | `cross dot vecnorm` | for 3-vectors |
 | `interp1` | |
+| `inside(volume, points...)` | Depth in mm of the points in a `[volumes]` volume: distance to the surface, **positive inside, negative outside**, the smallest over all points and time steps. The first argument is a volume name, followed by at least one 3×n point signal. |
 
 **Fields:** `a.b.c` reads a field of a model or struct signal. The components
 `.x`, `.y`, `.z` select a row of a 3×n vector signal (for example
@@ -171,7 +198,7 @@ in use.
 
 ```toml
 [models]
-pwt = "mlta-optimize-model-file-1e2.json"
+pwt = "mlta-model-file-1e2-with-param.json"
 
 [optimizer]
 max_iterations = 100
