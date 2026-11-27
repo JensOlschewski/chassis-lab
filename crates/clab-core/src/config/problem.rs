@@ -21,6 +21,8 @@ struct Raw {
     optimizer: RawOptimizer,
     design: BTreeMap<String, [f64; 2]>,
     #[serde(default)]
+    volumes: BTreeMap<String, PathBuf>,
+    #[serde(default)]
     signals: BTreeMap<String, String>,
     #[serde(default)]
     objectives: BTreeMap<String, RawObjective>,
@@ -87,6 +89,8 @@ pub struct Design {
 pub struct Problem {
     /// Model name and JSON path, the path made absolute from the problem file.
     pub models: BTreeMap<String, PathBuf>,
+    /// Volume name and `.hmascii` path, made absolute from the problem file.
+    pub volumes: BTreeMap<String, PathBuf>,
     pub max_iterations: Option<u32>,
     pub max_evaluations: Option<u32>,
     pub design: Vec<Design>,
@@ -161,6 +165,15 @@ impl Problem {
         let base = path.parent().unwrap_or(Path::new("."));
         let problem = Self::parse(&text, base)
             .with_context(|| format!("invalid problem file {}", path.display()))?;
+        for (name, file) in &problem.volumes {
+            fs::File::open(file).with_context(|| {
+                format!(
+                    "invalid problem file {}: cannot read volume `{name}` ([volumes] {name}): {}",
+                    path.display(),
+                    file.display()
+                )
+            })?;
+        }
         let mut names = BTreeMap::new();
         for (name, file) in &problem.models {
             let text = fs::read_to_string(file)
@@ -191,7 +204,12 @@ impl Problem {
             bail!("[models] needs at least one model");
         }
         let mut taken: BTreeSet<&str> = BTreeSet::new();
-        for name in raw.models.keys().chain(raw.signals.keys()) {
+        for name in raw
+            .models
+            .keys()
+            .chain(raw.signals.keys())
+            .chain(raw.volumes.keys())
+        {
             if !is_identifier(name) {
                 bail!(
                     "`{name}` is not a valid name: use letters, digits and `_`, starting with a letter"
@@ -201,9 +219,21 @@ impl Problem {
                 bail!("`{name}` is reserved");
             }
             if !taken.insert(name) {
-                bail!("the name `{name}` is used for both a model and a signal");
+                bail!(
+                    "the name `{name}` is used more than once in [models], [signals] and [volumes]"
+                );
             }
         }
+
+        for (name, file) in &raw.volumes {
+            if file.extension().and_then(|e| e.to_str()) != Some("hmascii") {
+                bail!(
+                    "[volumes] {name}: `{}` must be a `.hmascii` file",
+                    file.display()
+                );
+            }
+        }
+        let volume_names: BTreeSet<&str> = raw.volumes.keys().map(String::as_str).collect();
 
         if raw.design.is_empty() {
             bail!("[design] needs at least one variable");
@@ -223,10 +253,16 @@ impl Problem {
         let models: BTreeSet<&str> = raw.models.keys().map(String::as_str).collect();
         let known = |name: &str| taken.contains(name);
         let signals = sorted_signals(&raw.signals, &models, &known)?;
+        for (name, text) in &raw.signals {
+            expr::parse(text)?
+                .check_volumes(&volume_names)
+                .with_context(|| format!("[signals] {name}: `{text}`"))?;
+        }
 
         let formula = |what: &str, text: &str| -> Result<(Expr, Formula)> {
             let expr = expr::parse(text).with_context(|| format!("{what}: `{text}`"))?;
             expr.check_names(&known)
+                .and_then(|()| expr.check_volumes(&volume_names))
                 .with_context(|| format!("{what}: `{text}`"))?;
             let matlab = expr.rewrite();
             Ok((
@@ -272,22 +308,24 @@ impl Problem {
             });
         }
 
-        let models = raw
-            .models
-            .into_iter()
-            .map(|(name, file)| {
-                (
-                    name,
-                    if file.is_absolute() {
+        let absolute = |files: BTreeMap<String, PathBuf>| -> BTreeMap<String, PathBuf> {
+            files
+                .into_iter()
+                .map(|(name, file)| {
+                    let file = if file.is_absolute() {
                         file
                     } else {
                         base.join(file)
-                    },
-                )
-            })
-            .collect();
+                    };
+                    (name, file)
+                })
+                .collect()
+        };
+        let models = absolute(raw.models);
+        let volumes = absolute(raw.volumes);
         Ok(Self {
             models,
+            volumes,
             max_iterations: raw.optimizer.max_iterations,
             max_evaluations: raw.optimizer.max_evaluations,
             design,
@@ -466,6 +504,7 @@ impl Problem {
             .collect();
         let mut json = serde_json::json!({
             "models": self.models,
+            "volumes": self.volumes,
             "design": self.design.iter().map(|d| serde_json::json!({
                 "name": d.name, "lower": d.lower, "upper": d.upper,
             })).collect::<Vec<_>>(),
@@ -505,6 +544,52 @@ mod tests {
         assert_eq!(objectives[1]["weight"], 2.0);
         assert!(objectives[1]["scale"].is_null());
         assert_eq!(json["signals"].as_array().unwrap().len(), 3);
+        assert_eq!(json["volumes"], serde_json::json!({}));
+    }
+
+    const VOLUMES: &str = "[volumes]\nvol = \"v.hmascii\"\n";
+
+    #[test]
+    fn parses_volumes_and_inside() {
+        let text = replace("[design]", &format!("{VOLUMES}\n[design]"))
+            .replace("c1 = ", "in1 = \"inside(vol, v, v) >= 2\"\nc1 = ");
+        let p = parse(&text).unwrap();
+        assert_eq!(p.volumes["vol"], Path::new("/dir/v.hmascii"));
+        let c = p.constraints.iter().find(|c| c.name == "in1").unwrap();
+        assert_eq!(c.lhs.matlab, "inside(s.vol,s.v,s.v)");
+        assert_eq!(p.solver_json()["volumes"]["vol"], "/dir/v.hmascii");
+    }
+
+    #[test]
+    fn rejects_bad_volumes() {
+        let with = |vol: &str, c: &str| {
+            replace("[design]", &format!("[volumes]\n{vol}\n[design]"))
+                .replace("c1 = ", &format!("c2 = \"{c}\"\nc1 = "))
+        };
+        let ok = "vol = \"v.hmascii\"";
+        assert!(fail(&with("vol = \"v.stl\"", "inside(vol, v) >= 0")).contains("`.hmascii`"));
+        assert!(
+            fail(&with("pwt = \"v.hmascii\"", "inside(pwt, v) >= 0")).contains("more than once")
+        );
+        assert!(fail(&with("max = \"v.hmascii\"", "1 >= 0")).contains("reserved"));
+        assert!(fail(&with(ok, "inside(nope, v) >= 0")).contains("unknown name `nope`"));
+        assert!(fail(&with(ok, "inside(v, v) >= 0")).contains("must be a name"));
+        assert!(fail(&with(ok, "inside(vol) >= 0")).contains("at least one point"));
+        assert!(fail(&with(ok, "vol >= 0")).contains("only be used"));
+    }
+
+    #[test]
+    fn load_names_missing_volume_file() {
+        let dir = std::env::temp_dir().join(format!("clab-vol-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pwt.json"), "{}").unwrap();
+        let text = replace("[design]", &format!("{VOLUMES}\n[design]"));
+        std::fs::write(dir.join("p.toml"), text).unwrap();
+        let err = format!("{:#}", Problem::load(&dir.join("p.toml")).unwrap_err());
+        assert!(
+            err.contains("volume `vol`") && err.contains("v.hmascii"),
+            "{err}"
+        );
     }
 
     const VALID: &str = r#"
@@ -588,7 +673,7 @@ c1 = "max(abs(gradient(epsilon))) <= 0.01"
         );
         assert!(fail(&replace("[426.38, 446.38]", "[5, 5]")).contains("lower < upper"));
         assert!(fail(&replace("pwt = \"pwt.json\"", "x = \"a.json\"")).contains("reserved"));
-        assert!(fail(&replace("mid = ", "pwt = ")).contains("both a model and a signal"));
+        assert!(fail(&replace("mid = ", "pwt = ")).contains("more than once"));
         assert!(fail(&replace("v = ", "max = ")).contains("reserved"));
         assert!(fail(&replace("v = ", "1v = ")).contains("not a valid name"));
     }
