@@ -115,7 +115,7 @@ the main cost risk.
 
 - [x] 2. Problem file: `[volumes]`, `inside()` checks, tests (Rust)
 - [x] 1. Solver: `readHmascii.m`, `inside.m`, `insideTest.m` (cube), wired in `mks_optimize_main.m` / `evaluateProblem.m`
-- [ ] 0. Timing on real RL/RU files; verify `.hmascii` line layout (only a synthetic cube so far)
-- [ ] 3. End-to-end example in `examples/matlab-examples/`
-- [ ] 4. `docs/optimize-problem.md`
+- [x] 0. Real RL/RU files: parser matches `rl-bc-volume.mat` exactly; read 0.5 s, 100 points 0.08 s
+- [x] 3. End-to-end example `mlta-volume-problem.toml`: start 25.6 mm, ends at the 28 mm limit
+- [x] 4. `docs/optimize-problem.md`
 - [ ] 5. Release (mks-assets rebuild)

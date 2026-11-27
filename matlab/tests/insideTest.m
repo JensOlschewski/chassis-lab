@@ -1,11 +1,11 @@
 % Run from matlab/: matlab -batch "addpath(genpath('.')); insideTest"
-% a 10 mm cube from 6 tets, written as HyperMesh ASCII (hypothesised layout)
+% a 10 mm cube from 6 tets, written as HyperMesh ASCII (layout of the HyperMesh export)
 f = [tempname '.hmascii'];
 c = [0 0 0;10 0 0;10 10 0;0 10 0;0 0 10;10 0 10;10 10 10;0 10 10];
 t = [1 2 3 7;1 3 4 7;1 4 8 7;1 8 5 7;1 5 6 7;1 6 2 7];
 fid = fopen(f, 'w');
 for k = 1:8, fprintf(fid, '*node(%d,%g,%g,%g,0,0)\n', k, c(k,:)); end
-for k = 1:6, fprintf(fid, '*tetra4(%d,1,1,%d,%d,%d,%d)\n', k, t(k,:)); end
+for k = 1:6, fprintf(fid, '*tetra4(%d,1,%d,%d,%d,%d,0)\n', k, t(k,:)); end
 fclose(fid);
 vol = readHmascii(f, 'cube');
 near = @(a, b) abs(a - b) < 1e-9;

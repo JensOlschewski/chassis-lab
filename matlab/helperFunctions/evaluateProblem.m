@@ -22,7 +22,7 @@ for name = string(fieldnames(problem.models))'
             own(variable) = designDic(variable);
         end
     end
-    s.(name) = run_mks_solver(path, own);
+    s.(name) = restorePointNames(run_mks_solver(path, own), text);
 end
 
 for k = 1:numel(problem.signals)
@@ -40,6 +40,24 @@ for k = 1:numel(problem.constraints)
     name = problem.constraints(k).name;
     values.lhs(k) = scalar(evaluate(problem.constraints(k).lhs, s), name);
     values.rhs(k) = scalar(evaluate(problem.constraints(k).rhs, s), name);
+end
+end
+
+function solution = restorePointNames(solution, modelText)
+% The solver names a point <lowercase name><body id> (rl1). Problem files use
+% the model's names (RL), so rename them back.
+bodies = jsondecode(modelText).Bodies;
+for body = string(fieldnames(bodies))'
+    if ~isfield(solution.bodies, body), continue; end
+    points = solution.bodies.(body).points;
+    for point = string(bodies.(body).Points_on_Body)'
+        old = lower(point) + bodies.(body).bodyID;
+        if isfield(points, old)
+            [points.(point)] = points.(old);
+            points = rmfield(points, old);
+        end
+    end
+    solution.bodies.(body).points = points;
 end
 end
 

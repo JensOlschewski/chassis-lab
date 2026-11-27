@@ -409,7 +409,8 @@ impl Expr {
                     component(name).unwrap() + 1,
                     join(args)
                 ),
-                target => format!("{}({})", target.rewrite(), join(args)),
+                // `(:,i)` picks sample i: a plain `(i)` would be a linear index into a 3×n matrix
+                target => format!("{}(:,{})", target.rewrite(), join(args)),
             },
             Expr::Range(a, b) => format!("{}:{}", a.rewrite(), b.rewrite()),
             Expr::Neg(inner) => format!("(-{})", inner.rewrite()),
@@ -443,8 +444,8 @@ mod tests {
             "rad2deg(atan((xyz(s.v,1)./xyz(s.v,3))))"
         );
         assert_eq!(rewrite("cross(a.b.c, r) + v"), "(cross(s.a.b.c,s.r)+s.v)");
-        assert_eq!(rewrite("x2(round(end/2))"), "s.x2(round((end/2)))");
-        assert_eq!(rewrite("e(2:end)"), "s.e(2:end)");
+        assert_eq!(rewrite("x2(round(end/2))"), "s.x2(:,round((end/2)))");
+        assert_eq!(rewrite("e(2:end)"), "s.e(:,2:end)");
         assert_eq!(rewrite("-a^2 + 1e-3*pi"), "((-(s.a^2))+(1e-3*pi))");
         assert_eq!(rewrite("2.*a"), "(2.*s.a)");
     }
